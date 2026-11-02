@@ -5,7 +5,6 @@ package integration
 import (
 	"bytes"
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -18,23 +17,23 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd/pkg/api"
+	"github.com/imksoo/routerd/pkg/bgpdaemon"
 	"github.com/imksoo/routerd/pkg/controlapi"
 	"github.com/imksoo/routerd/pkg/mobilityconfig"
 	"github.com/imksoo/routerd/pkg/samenrollment"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
-	"github.com/imksoo/routerd2/internal/legacyconfig"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/samclientconfig"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
+	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 	"golang.org/x/sys/unix"
 )
-
-//go:embed testdata/sam-ipip-bgp-frr.yaml
-var legacySAMIPIPBGPFRR []byte
 
 func TestDaemonSAMIPIPBGPWithFRR(t *testing.T) { daemonSAMIPIPBGPWithFRR(t, false, false) }
 
@@ -237,37 +236,38 @@ func daemonSAMIPIPBGPWithFRR(t *testing.T, expire, encrypted bool) {
 		claim.WireGuard = api.SAMEnrollmentClaimWireGuardSpec{PublicKey: leafWGPublic, Endpoint: "192.0.2.1:51820", AllowedIPs: []string{"10.20.0.31/32"}, PersistentKeepalive: 5}
 	}
 	claim.JoinHMAC = samenrollment.JoinHMAC([]byte("sam-fixture-join"), claim)
-	legacy := strings.NewReplacer(
-		"__JOIN_TIMESTAMP__", claim.JoinTimestamp,
-		"__JOIN_HMAC__", claim.JoinHMAC,
-		"__LEAF_INNER__", leafInner.String(),
-		"__RR_ENDPOINT__", "http://192.0.2.2:16543",
-		"__CONTROL_TOKEN__", controlToken,
-	).Replace(string(legacySAMIPIPBGPFRR))
+	importPolicy := bgpdaemon.AppliedImportPolicy{AllowedPrefixes: []string{"203.0.113.50/32"}, AllowedPrefixLengthMin: 32, AllowedPrefixLengthMax: 32, NextHopRewrite: "peer-address"}
+	exportPolicy := bgpdaemon.AppliedExportPolicy{AllowedPrefixes: []string{"198.18.0.0/24", "203.0.113.0/24"}}
+	bgp := serviceconfig.BGP{Runtime: bgpconfig.AppliedConfig{
+		Global: bgpdaemon.AppliedGlobal{ASN: 64512, RouterID: "192.0.2.1", ListenPort: 179, Families: []string{"ipv4-unicast"}},
+		Peers:  map[string]bgpdaemon.AppliedPeer{},
+		Paths:  []bgpdaemon.AppliedPath{{Source: bgpdaemon.AppliedPathSourceStatic, Prefix: "198.18.0.0/24"}},
+	}}
+	localEndpoint, localFromDHCP4, underlay, wireGuardInterface := "", "service.wan-lease", "wan0", ""
 	if encrypted {
-		legacy = strings.ReplaceAll(legacy, "encryption: none", "encryption: wireguard")
-		legacy = strings.ReplaceAll(legacy, "underlayInterface: wan", "underlayInterface: wg-sam")
-		legacy = strings.ReplaceAll(legacy, "localEndpointFrom: {resource: DHCPv4Client/wan-lease, field: currentAddress}", "localEndpoint: 10.20.0.31")
-		legacy = strings.Replace(legacy, "      wireGuard: __LEAF_WG_CLAIM__", fmt.Sprintf("      wireGuard: {publicKey: %q, endpoint: %q, allowedIPs: [10.20.0.31/32], persistentKeepalive: 5}", leafWGPublic, "192.0.2.1:51820"), 1)
-		legacy = strings.Replace(legacy, "  - apiVersion: mobility.routerd.net/v1alpha1\n    kind: SAMTransportProfile", fmt.Sprintf(`  - apiVersion: net.routerd.net/v1alpha1
-    kind: WireGuardInterface
-    metadata: {name: wg-sam}
-    spec: {ifname: wg-sam, selfNodeRef: leaf-a, privateKeyFile: %q, listenPort: 51820, mtu: 1420, peersFrom: [{resource: SAMRRSet/rrs}]}
-  - apiVersion: net.routerd.net/v1alpha1
-    kind: IPv4StaticAddress
-    metadata: {name: wg-sam-address}
-    spec: {interface: WireGuardInterface/wg-sam, address: 10.20.0.31/32}
-  - apiVersion: mobility.routerd.net/v1alpha1
-    kind: SAMTransportProfile`, filepath.Join(work, "leaf-wg.key")), 1)
-	} else {
-		legacy = strings.Replace(legacy, "interfaces: [Interface/lan, WireGuardInterface/wg-sam]", "interfaces: [Interface/lan]", 1)
-		legacy = strings.Replace(legacy, "      wireGuard: __LEAF_WG_CLAIM__\n", "", 1)
+		localEndpoint, localFromDHCP4, underlay, wireGuardInterface = "10.20.0.31", "", "wg-sam", "wg-sam"
 	}
-	document, err := legacyconfig.Compile([]byte(legacy))
-	if err != nil {
-		t.Fatal("compile SAM transport fixture", err)
+	ipv4Forwarding, noDefaultRoute := true, false
+	networkConfig := network.Desired{
+		Interfaces: []network.Interface{{Name: "wan0"}, {Name: "lan0", Addresses: []string{"198.18.0.1/24"}}},
+		Forwarding: network.Forwarding{IPv4: &ipv4Forwarding},
+		Firewall:   &network.Firewall{ForwardChain: &network.FirewallChain{Policy: "accept"}},
 	}
-	plan, err := config.Compile(document.Document)
+	if encrypted {
+		networkConfig.Links = []network.Link{{Name: "wg-sam", Kind: "wireguard"}}
+		networkConfig.Interfaces = append(networkConfig.Interfaces, network.Interface{Name: "wg-sam", Addresses: []string{"10.20.0.31/32"}})
+		networkConfig.WireGuard = []network.WireGuard{{Interface: "wg-sam", PrivateKeyFile: filepath.Join(work, "leaf-wg.key"), ListenPort: 51820}}
+	}
+	doc := config.FromNative(config.Native{
+		Network: networkConfig,
+		Services: []serviceconfig.Service{
+			{Name: "wan-lease", DHCP4: &serviceconfig.DHCP4{Interface: "wan0", DefaultRoute: &noDefaultRoute}},
+			{Name: "edge", BGP: &bgp},
+			{Name: "enrollment", SAMClient: &samclientconfig.Node{ClaimName: "leaf", Claim: claim, Endpoints: []string{"http://192.0.2.2:16543"}, TokenFile: controlToken, RefreshBeforeSeconds: 2, RetryMinSeconds: 1, RetryMaxSeconds: 2}},
+		},
+		SAMTransports: []resourceprogram.SAMTransport{{Name: "leaf", Client: "service.enrollment", ClaimRef: "SAMEnrollmentClaim/leaf", PolicyRef: "SAMEnrollmentPolicy/leaves", RRSetRef: "SAMRRSet/rrs", Self: "leaf-a", InnerPrefix: inner, Underlay: underlay, LocalEndpoint: localEndpoint, LocalFromDHCP4: localFromDHCP4, WireGuardInterface: wireGuardInterface, BGP: "service.edge", PeerASN: 64513, TimersProfile: "fast", ImportPolicy: importPolicy, ExportPolicy: exportPolicy}},
+	})
+	plan, err := config.Compile(doc)
 	if err != nil {
 		t.Fatal("compile native SAM transport fixture", err)
 	}
@@ -287,7 +287,7 @@ func daemonSAMIPIPBGPWithFRR(t *testing.T, expire, encrypted bool) {
 	if err := os.Mkdir(leafRoot, 0700); err != nil {
 		t.Fatal(err)
 	}
-	fixture := startFixtureDaemonAt(t, document.Document, leafRoot)
+	fixture := startFixtureDaemonAt(t, doc, leafRoot)
 
 	var admitted samclientconfig.Snapshot
 	var lastSAM runtimeplan.InstanceStatus

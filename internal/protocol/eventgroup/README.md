@@ -51,7 +51,7 @@ privileges (the runner uses `sudo -n`). It signs the three freshly built product
 executables with a disposable key, stages them through the release store, and
 boots the actual signed selector and supervisor as PID 1 in private mount/PID
 namespaces inside the isolated network fixture. The normal control and
-`routerd-modules` processes adopt an EventGroup converted by the product CLI.
+`routerd-modules` processes adopt a directly declared native EventGroup.
 The unchanged old daemon exchanges signed events in both directions. Pending
 delivery resumes after the supervisor restarts the event worker and the peer
 returns; removing the configuration stops the worker. Original remote expiry

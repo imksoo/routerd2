@@ -5,6 +5,31 @@ supervised processes. The example [wan-dslite.yaml](../examples/wan-dslite.yaml)
 combines them. LAN DHCP, DNS and prefix advertisements are separate services;
 the example does not implicitly enable them.
 
+## Mapping the homert DHCPv6 and DS-Lite intent
+
+The current homert02/03 working configurations declare `DHCPv6PrefixDelegation/wan-pd`
+and `DHCPv6Information/wan-info` on the same WAN interface, with information
+acquisition depending on PD. In the native configuration, one `service.dhcp6`
+owns UDP 546, its DUID and IAID, requests IA_PD, then performs the separate
+Information-request transaction on that same client. `aftr_from` and `dns_from`
+refer to that client. A second DHCPv6 service on the same interface would create
+a second socket/identity owner and is rejected; it is not needed to represent
+the two protocol exchanges. See [wan-dslite-pd.yaml](../examples/wan-dslite-pd.yaml).
+
+| homert intent | routerd2 native declaration | Example |
+| --- | --- | --- |
+| DHCPv6 PD plus AFTR/DNS/SNTP/domain information on one WAN | One `service.dhcp6` with `request_prefix`; consumers use `aftr_from` / `dns_from` | [wan-dslite-pd.yaml](../examples/wan-dslite-pd.yaml) |
+| Delegated LAN address plus router advertisements | `service.dhcp6.delegations[]` plus `service.ra.from` referencing the PD service and delegation | [delegated-ipv6.yaml](../examples/delegated-ipv6.yaml) |
+| DS-Lite and client IPv4 forwarding | `service.ds_lite`, `firewall.forward`, and a separate `nat` resource | [wan-dslite-pd.yaml](../examples/wan-dslite-pd.yaml) |
+| DHCPv4/DHCPv6 LAN service and static DNS zone | `service.dhcp_server`, `service.dhcp6_server`, and `service.dns` in the resource graph | [lan-dhcp-dns.yaml](../examples/lan-dhcp-dns.yaml) |
+| Conditional DNS and encrypted public forwarding | One `service.dns` with longest-suffix sources and explicit bootstrap DNS | [dns-conditional-doh.yaml](../examples/dns-conditional-doh.yaml) |
+| Health-based multi-WAN selection | `service.health` observations feed the native egress policy and route projection | [health-pbr.yaml](../examples/health-pbr.yaml) |
+| BGP/BFD peering | `service.bgp` and one `service.bfd` per monitored peer | [bfd-bgp.yaml](../examples/bfd-bgp.yaml) |
+| VRRP virtual gateway | `service.vrrp` owns election and the virtual address | [vrrp-ipv4.yaml](../examples/vrrp-ipv4.yaml) |
+
+These are native examples for the listed paths, not a conversion of the complete
+109-resource homert configuration or acceptance of its full single/HA profile.
+
 ## RA client
 
 The RA client opens an ICMPv6 socket and sends router solicitations. It checks
@@ -216,51 +241,33 @@ an independent packet/DNS peer and the actual two-ELF process tree. These tests
 do not establish full original-resource compatibility or verify a particular
 ISP/homert deployment.
 
-## Migrating original WAN resource graphs
+## DHCPv6 delegated prefixes and information
 
-`routerd config migrate` refuses to guess a replacement for host-managed RA
-defaults or the original process-local AFTR resolver. Supply a strict policy
-document when intentionally replacing those behaviors:
+Configure the DHCPv6 client, delegated LAN prefixes, RA service, and any LAN
+information server directly as schema 2 resources. A server's PD and its DNS,
+AFTR, SNTP, or search information are independent observations; the client must
+not assume that one response contains all of them.
 
-```sh
-routerd config migrate --policy wan-policy.yaml original-router.yaml > candidate.yaml
-routerd config validate candidate.yaml
-```
-
-The policy names exact original resources such as `IPv6RAAddress/wan-address`.
-RA feature booleans, metric/table, AFTR source selection and bootstrap DNS must
-be explicit. Unused or unknown entries, incompatible dependencies and unsupported
-fields fail the entire migration. The native YAML goes to stdout only after
-validation; quoted review notes go to stderr. Keep those notes with the proposed
-configuration because an explicit policy records a deliberate change of
-semantics, not automatic compatibility.
-
-A same-interface `DHCPv6Information` resource can share the original PD client's
-socket and lease context. After a PD Reply, the client also performs an
-Information-request even when the PD Reply already contains an information
-option. Some servers return DNS with IA_PD and provide AFTR, SNTP and search
-options only through the separate information exchange. A partial PD Reply
-updates the supplied values while preserving omitted live information. It
-does not extend that information's original deadline or replace an information
-transaction already in progress. Information Replies
-may themselves be partial; no optional option is required for acceptance.
+The native `service.dhcp6` owns one UDP 546 socket and client identity on its
+interface. With `request_prefix`, it performs the separate Information-request
+after the PD exchange; a second native service on that interface would create a
+competing socket and DUID owner. Some servers return DNS with IA_PD and provide
+AFTR, SNTP and search options only through the Information exchange. Partial
+replies update only the options they contain. They do not extend another
+information deadline or replace an exchange already in progress. No optional
+information option is required for acceptance.
 
 `make check-dhcp6-ra-pd` exercises this split using independent ISC DHCP:
 the packet capture must contain a DNS-only PD Reply and a separate matching
 Information-request/Reply carrying DNS, AFTR, SNTP and search. The same test
 uses BusyBox for LAN information acquisition and verifies actual DNS and
-forwarded traffic, renewal, restart and expiry. This is an isolated peer
-condition; the same split has not been reproduced on the physical HGW.
-The `dhcp6-information-original-expiry-native92` build passed this test on
-2026-10-31 at 01:57 JST (67.22 seconds). The unmodified client had failed the
-same ISC split because no supplementary Information-request was sent.
+forwarded traffic, renewal, restart and expiry. This verifies the actual
+DHCPv6 client and kernel behavior against independent ISC DHCP in an isolated
+Linux network. It does not establish behavior of a particular physical HGW or
+ISP.
 
-The compiler preserves the original B4 peer and the
-independent IPv4 default route when it can represent the complete graph. It
-rejects unsupported HA and delegated-source selection rather than dropping them.
-See the [migration contract](../internal/legacyconfig/README.md) and its
-[source](../internal/legacyconfig/testdata/wan-dynamic.yaml) and
-[policy](../internal/legacyconfig/testdata/wan-dynamic-policy.yaml) fixtures.
+The native configuration keeps B4 and the independent IPv4 default route as
+separate resources so either path can be observed and managed on its own.
 
 ## IPv4-in-IPv4 tunnel
 
@@ -307,31 +314,13 @@ network worker fences the link down and withdraws owned addresses/routes at
 expiry even when control cannot make progress. A fresh source address or
 lease updates the existing managed tunnel through the same network writer.
 
-The configuration importer accepts static `SAMNodeSet` endpoints and IPIP
-`SAMTransportProfile` with `addressingMode: pair-stable` and a DHCPv4
-`currentAddress` source. It reuses routerd's pair slot calculation, collision
-handling, /31 orientation and reflector identity policy; it emits native
-IPIP, endpoint routes and BGP peers once during configuration conversion.
-Enrollment, remote learned endpoints, peer-group publication, signed ownership
-and mobility placement remain separate unfinished functions. A current
-k8s/PVE configuration containing those functions is not fully supported by
-this static transport conversion.
-
-`TestDaemonDHCP4IPIPBGPWithFRR`, included in `make check-bgp-frr`, uses an
-independent dnsmasq server with an explicit MAC reservation and a 120-second
-lease. The fixture derives its expiry wait from the actual DHCP lease clock.
-It also exercises a changed server reservation; client values are observed
-rather than assuming all DHCP assignments are fixed. The physical k8s/PVE
-routers are not modified by this check.
-
-The `ipip-dhcp-native78` candidate passed this complete fixture: DHCP
-acquisition, FRR BGP/FIB and client TCP/UDP, advertisement withdrawal/recovery,
-TTL/MTU changes, process restart, original-lease expiry with control and
-supervisor suspended, fresh lease recovery, server assignment change, and
-configuration removal. Relevant Race Detector, vet and CGO-free Linux
-amd64/arm64 builds passed. This isolated candidate predates integration with
-later DNS and effective-fact contract changes; rerun the affected communication
-path after integrating those changes.
+`make check-bgp-frr` exercises static native IPIP and BGP with an independent
+FRR peer and LAN TCP/UDP clients. The separate `sam-transport` suite exercises
+runtime endpoint publication from an independent routerd resource server into
+the native routerd2 tunnel and BGP path. These checks do not convert routerd
+configuration. The former DHCP-to-IPIP conversion fixture was removed; its
+recorded pass does not qualify the native path. Run the applicable suite after
+changes to DHCP lease ownership, tunnel lifecycle, or BGP route publication.
 
 ### DHCPv4クライアント識別子
 

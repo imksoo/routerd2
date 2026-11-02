@@ -31,10 +31,13 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd/pkg/logstore"
+	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
-	"github.com/imksoo/routerd2/internal/legacyconfig"
+	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/syslogconfig"
+	"github.com/imksoo/routerd2/internal/protocol/trafficflowconfig"
 	"github.com/imksoo/routerd2/internal/protocol/webconsoleconfig"
-	"github.com/imksoo/routerd2/internal/resourceprogram"
+	"github.com/imksoo/routerd2/internal/retention"
 	"github.com/imksoo/routerd2/internal/runtimeconfig"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
@@ -49,10 +52,8 @@ func TestDaemonTrafficFlowNDPI(t *testing.T)    { testDaemonTrafficFlowHistory(t
 
 func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 	engine, source := "builtin", "builtin-payload"
-	flags := "source: conntrack, includeTLSSNI: true}"
 	if native {
 		engine, source = "ndpi", "libndpi"
-		flags = "source: conntrack, includeTLSSNI: true, includeApplicationLayer: true}"
 	}
 	if !isolateFixture(t, t.Name()) {
 		return
@@ -84,8 +85,8 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 			t.Fatal(err)
 		}
 	}
-	// Start with accounting disabled in this isolated namespace. The imported
-	// product setting must enable it before the first connection is created.
+	// Start with accounting disabled in this isolated namespace. The configured
+	// product must enable it before the first connection is created.
 	initialTimestamp := "0"
 	if native {
 		initialTimestamp = "1"
@@ -212,18 +213,38 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 			}
 		}
 	}()
-	imported, err := legacyconfig.Compile([]byte(strings.Replace(trafficFlowFixture, "source: conntrack}", flags, 1)))
-	if err != nil {
-		t.Fatal(err)
+	accounting, forwarding := true, true
+	flow := trafficflowconfig.Config{ApplicationLayer: native, Retention: &retention.Config{
+		MaxAgeSeconds: 20, IntervalSeconds: 86400,
+		Syslog: []syslogconfig.Config{{Address: "198.51.100.2:5514", Tag: "traffic-flow-archive"}},
+	}}
+	firewall := &network.Firewall{
+		ForwardChain: &network.FirewallChain{Policy: "accept"},
+		NAT:          []network.NATRule{{Type: "snat", Match: network.PacketMatch{Family: 4, Source: "192.0.2.0/24"}, Address: "198.51.100.1"}},
 	}
+	if native {
+		flow.PacketGroup = 42
+		firewall.FlowObservationGroup = flow.PacketGroup
+	}
+	doc := config.FromNative(config.Native{
+		Network: network.Desired{
+			Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"198.51.100.1/24"}}, {Name: "lan0", Addresses: []string{"192.0.2.1/24"}}},
+			Forwarding: network.Forwarding{IPv4: &forwarding, ConntrackAccounting: &accounting},
+			Firewall:   firewall,
+		},
+		Services: []serviceconfig.Service{
+			{Name: "connections", TrafficFlow: &flow},
+			{Name: "history-console", WebConsole: &webconsoleconfig.Config{Listen: netip.MustParseAddrPort("192.0.2.1:8080"), BasePath: "/ops/", Title: "Communication history"}},
+		},
+	})
 	work := t.TempDir()
 	var historyPath, historyService string
-	for _, res := range imported.Document.Resources {
+	for _, res := range doc.Resources {
 		if res.Service != nil && res.Service.TrafficFlow != nil {
 			cfg := res.Service.TrafficFlow
 			historyService = res.Service.ModuleName()
 			if cfg.IntervalSeconds != 0 || cfg.Retention == nil || cfg.Retention.IntervalSeconds != 86400 {
-				t.Fatal("legacy defaults changed", cfg)
+				t.Fatal("native defaults changed", cfg)
 			}
 			// Shorter configured sampling and expiry intervals keep this isolated gate
 			// bounded; retention still uses actual first-observation timestamps.
@@ -238,9 +259,6 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 	if err := os.MkdirAll(historyPath, 0700); err != nil {
 		t.Fatal(err)
 	}
-	imported.Document.Resources = append(imported.Document.Resources, resourceprogram.Resource{
-		ID: "service/history-console", Service: &serviceconfig.Service{Name: "history-console", WebConsole: &webconsoleconfig.Config{Listen: netip.MustParseAddrPort("192.0.2.1:8080"), BasePath: "/ops/", Title: "Communication history"}},
-	})
 	_, clientKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -249,7 +267,7 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := startFixtureDaemonConfigured(t, imported.Document, work, nil, runtimeconfig.SSH{
+	f := startFixtureDaemonConfigured(t, doc, work, nil, runtimeconfig.SSH{
 		Listen: "192.0.2.1:2222", User: "admin", AuthorizedKeys: []string{string(ssh.MarshalAuthorizedKey(signer.PublicKey()))},
 	})
 	hostBytes, err := os.ReadFile(filepath.Join(work, "state", "ssh_host_ed25519_key"))
@@ -804,9 +822,9 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 	t.Log("closed connection was marked ended, survived restart and reached the UDP archive before age-based deletion; HTTP reflected restart, closure and retention")
 	// Packet observation owns its required accounting after the explicit
 	// setting is withdrawn, then restores the original value when removed.
-	observationOnly := imported.Document
+	observationOnly := doc
 	observationOnly.Resources = nil
-	for _, res := range imported.Document.Resources {
+	for _, res := range doc.Resources {
 		if res.Forwarding != nil {
 			forwarding := *res.Forwarding
 			forwarding.ConntrackAccounting = nil
@@ -822,7 +840,7 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 	}
 	disabled := observationOnly
 	disabled.Resources = nil
-	for _, res := range imported.Document.Resources {
+	for _, res := range doc.Resources {
 		if res.Firewall != nil {
 			next := *res.Firewall
 			next.FlowObservationGroup = 0
@@ -876,54 +894,3 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 	f.stop()
 	t.Logf("product enabled accounting and timestamps; removal restored accounting=0 timestamp=%s while new TCP forwarding remained usable", initialTimestamp)
 }
-
-const trafficFlowFixture = `apiVersion: routerd.net/v1alpha1
-kind: Router
-metadata: {name: traffic-flows}
-spec:
-  resources:
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: Interface
-      metadata: {name: wan}
-      spec: {ifname: wan0, managed: true, adminUp: true}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: Interface
-      metadata: {name: lan}
-      spec: {ifname: lan0, managed: true, adminUp: true}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: IPv4StaticAddress
-      metadata: {name: router-wan}
-      spec: {interface: wan, address: 198.51.100.1/24}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: IPv4StaticAddress
-      metadata: {name: router-lan}
-      spec: {interface: lan, address: 192.0.2.1/24}
-    - apiVersion: system.routerd.net/v1alpha1
-      kind: Sysctl
-      metadata: {name: forwarding}
-      spec: {key: net.ipv4.ip_forward, value: "1", runtime: true}
-    - apiVersion: system.routerd.net/v1alpha1
-      kind: Sysctl
-      metadata: {name: connection-counters}
-      spec: {key: net.netfilter.nf_conntrack_acct, value: "1", runtime: true}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: NAT44Rule
-      metadata: {name: outgoing}
-      spec:
-        type: snat
-        egressInterface: wan
-        sourceRanges: [192.0.2.0/24]
-        snatAddressFrom: {resource: IPv4StaticAddress/router-wan, field: address}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: TrafficFlowLog
-      metadata: {name: connections}
-      spec: {enabled: true, source: conntrack}
-    - apiVersion: system.routerd.net/v1alpha1
-      kind: LogSink
-      metadata: {name: archive}
-      spec: {type: syslog, syslog: {network: udp, address: "198.51.100.2:5514", tag: traffic-flow-archive}}
-    - apiVersion: system.routerd.net/v1alpha1
-      kind: LogRetention
-      metadata: {name: flows}
-      spec: {retention: 20s, schedule: daily, signals: [trafficFlows], sinks: [LogSink/archive]}
-`

@@ -1,0 +1,55 @@
+# Replace the example LAN, domain, provider and WAN interface values for the site.
+# DNS is one service: longest matching suffix selects a conditional source;
+# unmatched names use the encrypted public resolver.
+schema_version: 2
+resources:
+  - id: interface/wan0
+    interface: {name: wan0}
+  - id: interface/lan0
+    interface: {name: lan0}
+  - id: address/lan
+    depends_on: [interface/lan0]
+    address: {interface: lan0, cidr: 192.0.2.1/24}
+  - id: service/wan-pd
+    depends_on: [interface/wan0]
+    service:
+      name: wan-pd
+      dhcp6:
+        interface: wan0
+        iaid: 1
+        request_prefix: true
+        prefix_length: 60
+        delegations:
+          - {name: lan, interface: lan0}
+  - id: service/resolver
+    depends_on: [interface/lan0, address/lan]
+    service:
+      name: resolver
+      dns:
+        listen_interface: lan0
+        spec:
+          listen:
+            - name: lan
+              addresses: [192.0.2.1, 127.0.0.1]
+              port: 53
+          sources:
+            - name: local
+              kind: zone
+              match: [home.arpa]
+              zoneRef: [home]
+            - name: office
+              kind: forward
+              match: [office.example]
+              upstreams: [udp://192.0.2.53:53]
+            - name: encrypted-public
+              kind: forward
+              match: ["."]
+              upstreams: [https://cloudflare-dns.com/dns-query]
+              bootstrapResolverFrom:
+                - {resource: DHCPv6PrefixDelegation/wan-pd, field: dnsServers}
+        zones:
+          - name: home
+            spec:
+              zone: home.arpa
+              records:
+                - {hostname: router, ipv4: 192.0.2.1}

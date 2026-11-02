@@ -3,7 +3,6 @@
 package integration
 
 import (
-	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -11,6 +10,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,8 +26,10 @@ import (
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/logging"
+	"github.com/imksoo/routerd2/internal/protocol/eventgroupconfig"
 	"github.com/imksoo/routerd2/internal/release"
 	"github.com/imksoo/routerd2/internal/runtimeconfig"
+	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
 )
 
@@ -148,50 +150,11 @@ func TestDaemonSignedEventGroup(t *testing.T) {
 	}
 	nativePort, oldPort := port(t), port(t)
 	nativeAddress, oldAddress := fmt.Sprintf("127.0.0.1:%d", nativePort), fmt.Sprintf("127.0.0.1:%d", oldPort)
-	source := fmt.Sprintf(`apiVersion: routerd.net/v1alpha1
-kind: Router
-metadata: {name: events}
-spec:
-  resources:
-    - apiVersion: mobility.routerd.net/v1alpha1
-      kind: SAMNodeSet
-      metadata: {name: nodes}
-      spec:
-        nodes:
-          - {nodeRef: native, eventEndpoint: 'http://%s'}
-          - {nodeRef: old, eventEndpoint: 'http://%s'}
-    - apiVersion: federation.routerd.net/v1alpha1
-      kind: EventGroup
-      metadata: {name: fixture}
-      spec:
-        nodeName: native
-        peersFrom: [{resource: SAMNodeSet/nodes}]
-        auth: {mode: hmac, secretFile: %s}
-        listen: {address: 127.0.0.1, port: %d}
-        retention: {maxEvents: 1000, maxAge: 24h}
-        replayWindow: 5m
-`, nativeAddress, oldAddress, secretPath, nativePort)
-	sourcePath := filepath.Join(dir, "source.yaml")
-	if err = os.WriteFile(sourcePath, []byte(source), 0600); err != nil {
-		t.Fatal(err)
-	}
-	converted, err := exec.Command(filepath.Join(binaryDir, "routerd"), "config", "migrate", sourcePath).Output()
-	if err != nil {
-		t.Fatalf("product migration: %v", err)
-	}
-	var migrated config.Document
-	if err = config.Decode(bytes.NewReader(converted), &migrated); err != nil {
-		t.Fatal(err)
-	}
-	serviceName := ""
-	for _, r := range migrated.Resources {
-		if r.Service != nil && r.Service.EventGroup != nil {
-			serviceName = r.Service.Name
-		}
-	}
-	if serviceName == "" {
-		t.Fatal("product migration did not produce event_group")
-	}
+	eventGroup := eventgroupconfig.Config{Group: "fixture", NodeName: "native", Listen: netip.MustParseAddrPort(fmt.Sprintf("127.0.0.1:%d", nativePort)), SecretFile: secretPath,
+		ReplayWindow: 5 * time.Minute, MaxEvents: 1000, MaxAge: 24 * time.Hour,
+		Peers: []eventgroupconfig.Peer{{NodeName: "old", Endpoint: "http://" + oldAddress}}}
+	nativeConfig := config.FromNative(config.Native{Services: []serviceconfig.Service{{Name: "fixture", EventGroup: &eventGroup}}})
+	serviceName := "fixture"
 	configPath, runDir, stateDir := filepath.Join(dir, "config.json"), filepath.Join(dir, "run"), filepath.Join(dir, "state")
 	if err = config.AtomicJSON(configPath, config.Document{SchemaVersion: config.SchemaVersion}); err != nil {
 		t.Fatal(err)
@@ -238,7 +201,7 @@ spec:
 	if err = local.Do(ctx, "GET", "/v1/config", nil, &current); err != nil {
 		t.Fatal(err)
 	}
-	request := control.CommitRequest{ExpectedRevision: current.Revision, RequestID: "event-group-product", Config: migrated}
+	request := control.CommitRequest{ExpectedRevision: current.Revision, RequestID: "event-group-product", Config: nativeConfig}
 	if err = local.Do(ctx, "POST", "/v1/config/commit", request, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +222,7 @@ spec:
 	if first.Role != "event_group" || first.ReleaseID != info.ReleaseID || first.PID <= 1 {
 		t.Fatal("unexpected worker", first)
 	}
-	t.Logf("signed PID 1 adopted migrated EventGroup: worker=%s pid=%d generation=%d", first.Name, first.PID, first.Generation)
+	t.Logf("signed PID 1 started native EventGroup: worker=%s pid=%d generation=%d", first.Name, first.PID, first.Generation)
 
 	oldState, oldConfig := filepath.Join(dir, "old.db"), filepath.Join(dir, "old.json")
 	peerCfg := eventd.Config{NodeName: "old", Group: "fixture", Listen: eventd.Listen{Address: "127.0.0.1", Port: oldPort}, SecretFile: secretPath, StatePath: oldState, Peers: []eventd.PeerConfig{{NodeName: "native", Endpoint: "http://" + nativeAddress}}, PushInterval: 100 * time.Millisecond}

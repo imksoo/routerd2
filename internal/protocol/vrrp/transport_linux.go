@@ -344,7 +344,7 @@ func (t *nativeTransport) VerifyActive(ctx context.Context, snapshot Snapshot) e
 		return err
 	}
 	if link.Type() != "macvlan" || link.Attrs().ParentIndex != t.index || link.Attrs().RawFlags&unix.IFF_UP == 0 || !bytes.Equal(link.Attrs().HardwareAddr, VirtualMAC(t.config.Family, t.config.VirtualRouterID)) {
-		return errors.New("VRRP VIP link must be an up macvlan on the election interface with the configured virtual MAC")
+		return fmt.Errorf("VRRP VIP link %s has kind=%s parent=%d up=%t MAC=%s; want macvlan parent=%d up with MAC=%s", t.config.VIPInterface, link.Type(), link.Attrs().ParentIndex, link.Attrs().RawFlags&unix.IFF_UP != 0, link.Attrs().HardwareAddr, t.index, VirtualMAC(t.config.Family, t.config.VirtualRouterID))
 	}
 	if t.config.VRF != "" {
 		vrf, err := t.links.LinkByName(t.config.VRF)

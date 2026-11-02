@@ -187,6 +187,16 @@ Current explicit user instructions and existing task authorization take preceden
 - If changed code fails the intended function, fix the cause and pause affected publication or deployment. Continue independent work.
 - Finish the requested outcome. Do not extend the task with speculative robustness work or new issues after it is complete.
 
+### Cleanup is part of task completion
+
+- A task is not complete until its unnecessary worktrees, logs, and generated artifacts have been removed and the remaining state checked. Do this within the authorized task; do not wait for another cleanup request.
+- Keep durable source code, regression tests, reusable verification scripts, necessary fixtures, procedures, and concise result summaries. Procedures must be sufficient to repeat the check without relying on historical raw output.
+- Once the relevant checks pass and the resulting code is committed and merged into the main branch, delete detailed local logs, packet captures, raw result bundles, temporary binaries, duplicate release archives or ISO images, and task-specific build output and dependency caches that are no longer needed. For work committed directly to main under existing authorization, apply the same completion rule without requiring a separate PR.
+- Remove finished linked worktrees with `git worktree remove`. Check actual integration before retaining an apparently unmerged worktree: squash merges, rebases, cherry-picks, or a later implementation may already contain or supersede its changes. Compare patches, current code, and PR or issue outcomes; commit ancestry alone is not sufficient. Remove abandoned experiments and completed investigations once their useful conclusions and reusable procedures are preserved.
+- Protect concurrent work, genuinely unmerged changes, uncommitted source, and files still used by running processes or tests. Retain only the minimum data needed for a specific unresolved problem, with a short reason and a clear condition for removing it. Do not keep entire worktrees or raw-data archives merely because a task once used them.
+- Bound log and capture duration and size while working, reuse appropriate existing dependencies, and avoid copying full build trees or accumulating per-attempt release artifacts. Do not replace deletion with another large backup or evidence bundle.
+- Before reporting completion, check `git worktree list`, remaining task-specific files, and disk usage. Briefly state what was removed and why anything remains. Keep this proportional to the task; no new cleanup framework, recurring job, or separate approval process is required.
+
 ## 9. Simplification is part of feature implementation
 
 Before completing a change, inspect its production call path and diff.

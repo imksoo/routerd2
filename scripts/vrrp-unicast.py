@@ -19,7 +19,6 @@ TESTS = (
     ("TestDaemonVRRPv2", "v2"),
     ("TestDaemonVRRPv2PASS", "v2-pass"),
     ("TestDaemonVRRPAdditionalIdentity", "additional-identity"),
-    ("TestDaemonVRRPMigratedAdditionalIdentity", "additional-import"),
 )
 
 
@@ -28,7 +27,6 @@ def main():
     parser.add_argument("--go", default="go")
     parser.add_argument("--test", choices=[name for name, _ in TESTS])
     parser.add_argument("--binary-dir", type=Path, default=Path("dist/bin"))
-    parser.add_argument("--dhcp6-server", type=Path, default=Path("/usr/sbin/dhcpd"))
     parser.add_argument("--output", type=Path, default=Path("dist/vrrp-unicast"))
     args = parser.parse_args()
     os.chdir(Path(__file__).resolve().parent.parent)
@@ -46,15 +44,13 @@ def main():
         for name in ("routerd", "routerd-modules", "routerd-logging"):
             subprocess.run(root + ["install", "-m", "755", str(args.binary_dir.resolve() / name), stage + "/bin/" + name], check=True)
         subprocess.run(root + ["install", "-m", "755", str(harness), stage + "/integration.test"], check=True)
-        if not args.test or args.test == "TestDaemonVRRPMigratedAdditionalIdentity":
-            subprocess.run(root + ["install", "-m", "755", str(args.dhcp6_server.resolve()), stage + "/dhcpd"], check=True)
         for name, log_name in TESTS:
             if args.test and name != args.test:
                 continue
             log_path = output / (log_name + ".log")
             packets = stage + "/" + log_name
             with log_path.open("w") as log:
-                result = subprocess.run(root + ["env", "ROUTERD2_INTEGRATION_REQUIRED=1", "ROUTERD2_DHCP6_SERVER=" + stage + "/dhcpd", "ROUTERD2_TEST_BIN_DIR=" + stage + "/bin", "ROUTERD2_TEST_EVIDENCE_DIR=" + packets, stage + "/integration.test", "-test.run=^" + name + "$", "-test.v", "-test.timeout=90s"], stdout=log, stderr=subprocess.STDOUT, timeout=100)
+                result = subprocess.run(root + ["env", "ROUTERD2_INTEGRATION_REQUIRED=1", "ROUTERD2_TEST_BIN_DIR=" + stage + "/bin", "ROUTERD2_TEST_EVIDENCE_DIR=" + packets, stage + "/integration.test", "-test.run=^" + name + "$", "-test.v", "-test.timeout=90s"], stdout=log, stderr=subprocess.STDOUT, timeout=100)
             content = log_path.read_text()
             captured = False
             for interface in ("lan0", "wan0"):

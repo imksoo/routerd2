@@ -26,7 +26,6 @@ import socket
 import subprocess
 import time
 
-import yaml
 
 
 def run(command, timeout=10, input=None):
@@ -504,19 +503,10 @@ def peer(stage):
         resources += [{'id': 'probe', 'depends_on': ['wan0-address'], 'service': {'name': 'probe', 'health': {
             'interface': 'wan0', 'source_address': '192.0.2.1', 'target': '192.0.2.2', 'protocol': 'tcp', 'port': 18082,
             'interval_ms': 500, 'timeout_ms': 500, 'healthy_threshold': 2, 'unhealthy_threshold': 2}}}]
-        legacy = {'apiVersion': 'routerd.net/v1alpha1', 'kind': 'Router', 'metadata': {'name': 'otlp-acceptance'}, 'spec': {'resources': [
-            {'apiVersion': 'observability.routerd.net/v1alpha1', 'kind': 'Telemetry', 'metadata': {'name': 'collector'}, 'spec': {
-                'otlp': {'endpoint': 'http://192.0.2.2:4317', 'insecure': True}, 'serviceNamespace': 'acceptance', 'signals': ['logs', 'metrics', 'traces']}},
-            {'apiVersion': 'system.routerd.net/v1alpha1', 'kind': 'LogSink', 'metadata': {'name': 'otlp'}, 'spec': {
-                'type': 'otlp', 'minLevel': 'info', 'otlp': {'telemetryRef': 'Telemetry/collector'}}}]}}
-        (stage/'legacy.json').write_text(json.dumps(legacy))
-        migration = subprocess.run([str(stage/'routerd'), 'config', 'migrate', str(stage/'legacy.json')], capture_output=True, text=True, timeout=10)
-        assert migration.returncode == 0, migration.stderr
-        print('Migration review', migration.stderr, flush=True)
-        imported = yaml.safe_load(migration.stdout)
-        assert len(imported['resources']) == 1, 'legacy OTLP LogSink created an additional sender'
-        sink = imported['resources'][0]
-        sender = 'service.'+sink['service']['name']
+        sender = 'service.otlp'
+        sink = {'id': 'otlp', 'service': {'name': 'otlp', 'otlp_logs': {
+            'endpoint': 'http://192.0.2.2:4317', 'insecure': True, 'service_namespace': 'acceptance',
+            'signals': ['logs', 'metrics', 'traces'], 'min_level': 'info'}}}
         (stage/'config.json').write_text(json.dumps({'schema_version': 2, 'resources': resources+[sink]}))
         boot = {'platform': 'host', 'config': str(stage/'config.json'), 'runtime_dir': str(stage/'run'), 'state_dir': str(stage/'state'), 'workers': {role: str(stage/('routerd-logging' if role == 'logging' else 'routerd-modules')) for role in ('logging', 'network', 'control', 'management', 'health', 'dhcp6', 'firewall_log', 'otlp_logs')}}
         (stage/'boot.json').write_text(json.dumps(boot))

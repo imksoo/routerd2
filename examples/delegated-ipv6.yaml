@@ -32,7 +32,15 @@ resources:
             interface: eth1
             subnet_id: 1
             host_id: 1
-            advertise: true
-            router_lifetime_seconds: 1800
-            use_learned_rdnss: true
-            use_learned_dnssl: true
+  - id: service/lan-ra
+    depends_on: [service/uplink-pd]
+    service:
+      name: lan-ra
+      ra:
+        interface: eth1
+        router_lifetime_seconds: 1800
+        from:
+          service: uplink-pd
+          delegation: lan
+          use_learned_rdnss: true
+          use_learned_dnssl: true

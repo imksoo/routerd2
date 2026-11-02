@@ -23,9 +23,18 @@ type archiveTransport func(*http.Request) (*http.Response, error)
 
 func (f archiveTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+func privateEventDir(t *testing.T) string {
+	t.Helper()
+	path := t.TempDir()
+	if err := os.Chmod(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func archiveClient(t *testing.T, fail bool) (*localapi.Client, *events.Store) {
 	t.Helper()
-	s, err := events.Open(events.Options{Directory: filepath.Join(t.TempDir(), "events")})
+	s, err := events.Open(events.Options{Directory: filepath.Join(privateEventDir(t), "events")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +73,7 @@ func archiveClient(t *testing.T, fail bool) (*localapi.Client, *events.Store) {
 
 func TestEventExportPublishesPrivateVerifiedFileAndPreservesExistingTargets(t *testing.T) {
 	client, _ := archiveClient(t, false)
-	root := t.TempDir()
+	root := privateEventDir(t)
 	path := filepath.Join(root, "history.jsonl")
 	summary, err := exportEventHistory(context.Background(), client, path)
 	if err != nil || summary.Records != 2 {
@@ -108,7 +117,7 @@ func TestEventExportPublishesPrivateVerifiedFileAndPreservesExistingTargets(t *t
 
 func TestFailedEventExportPublishesNothingAndDoesNotAcknowledgeHistory(t *testing.T) {
 	client, s := archiveClient(t, true)
-	root := t.TempDir()
+	root := privateEventDir(t)
 	path := filepath.Join(root, "failed.jsonl")
 	if _, err := exportEventHistory(context.Background(), client, path); err == nil {
 		t.Fatal("failed page reported export success")
@@ -129,7 +138,7 @@ func TestFailedEventExportPublishesNothingAndDoesNotAcknowledgeHistory(t *testin
 
 func TestConcurrentOutputCreationIsNotOverwrittenAtArchivePublication(t *testing.T) {
 	client, _ := archiveClient(t, false)
-	root := t.TempDir()
+	root := privateEventDir(t)
 	path := filepath.Join(root, "contested.jsonl")
 	original := client.HTTP.Transport
 	created := false

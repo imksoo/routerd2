@@ -14,18 +14,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/logging"
+	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
+	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
-// Exercise the imported flag through dnsmasq stderr and the product log API.
+// Exercise DHCP server logging through dnsmasq stderr and the product log API.
 // An ACK alone does not prove log-dhcp: requested-option details require it.
-func TestDaemonMigratedDHCPLogs(t *testing.T) {
-	if !isolateFixture(t, "TestDaemonMigratedDHCPLogs") {
+func TestDaemonDHCPLogs(t *testing.T) {
+	if !isolateFixture(t, "TestDaemonDHCPLogs") {
 		return
 	}
 	peer := fixturePeerNamespace(t, "lan0", "client0")
-	doc := migratedDHCPDNSFixtureDocument(t, port(t))
+	server := serviceconfig.DHCPServer{Interface: "lan0", ServerAddress: "192.0.2.1", LogDHCP: true,
+		Primary: dhcpserverconfig.Scope{Prefix: "192.0.2.0/24", Start: "192.0.2.100", End: "192.0.2.103", LeaseSeconds: 120, Router: "192.0.2.1"}}
+	doc := config.FromNative(config.Native{
+		Network:  network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"192.0.2.1/24"}}}},
+		Services: []serviceconfig.Service{{Name: "leases", DHCPServer: &server}},
+	})
 	work := t.TempDir()
 	startFixtureDaemonAt(t, doc, work)
 	logs := localapi.NewClient(filepath.Join(work, "run", logging.SocketName))

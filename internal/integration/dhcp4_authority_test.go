@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"sync/atomic"
 	"syscall"
@@ -71,7 +72,8 @@ func TestDaemonDHCPv4DelayedACK(t *testing.T) {
 		t.Fatal(err)
 	}
 	clientID := []byte{0xff, 0, 1, 2, 3, 0, 2, 0, 0, 0xab, 0x11, 0, 0x80, 0xfe, 6, 7, 8, 9, 10}
-	startFixtureDNSMasq(t, peerNS, "server0", []string{"--port=0", "--dhcp-range=192.0.2.10,192.0.2.20,255.255.255.0,60s", "--dhcp-host=id:ff:00:01:02:03:00:02:00:00:ab:11:00:80:fe:06:07:08:09:0a,192.0.2.19"})
+	const poolStart, poolEnd = "192.0.2.10", "192.0.2.20"
+	startFixtureDNSMasq(t, peerNS, "server0", []string{"--port=0", "--dhcp-range=" + poolStart + "," + poolEnd + ",255.255.255.0,60s"})
 	capture := healthPBRCapture(t, "wan0")
 	f := startFixtureDaemon(t, config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0"}}}, Services: []serviceconfig.Service{{Name: "wan", DHCP4: &serviceconfig.DHCP4{Interface: "wan0", ClientID: clientID}}}}))
 	snapshot := func() dhcp4.Snapshot {
@@ -89,8 +91,11 @@ func TestDaemonDHCPv4DelayedACK(t *testing.T) {
 	}
 	check := func(s dhcp4.Snapshot) {
 		t.Helper()
-		if s.CurrentAddress != "192.0.2.19" || !bytes.Equal(s.ClientIdentity, clientID) {
-			t.Fatal("independent server did not recognize binary client-ID reservation", s.CurrentAddress)
+		address, err := netip.ParseAddr(s.CurrentAddress)
+		first, firstErr := netip.ParseAddr(poolStart)
+		last, lastErr := netip.ParseAddr(poolEnd)
+		if err != nil || firstErr != nil || lastErr != nil || !address.Is4() || address.Compare(first) < 0 || address.Compare(last) > 0 || !bytes.Equal(s.ClientIdentity, clientID) {
+			t.Fatal("independent server did not assign the binary client its dynamic pool lease", s.CurrentAddress)
 		}
 		capture.mu.Lock()
 		packets := append([]healthPBRPacket(nil), capture.packets...)
@@ -99,6 +104,7 @@ func TestDaemonDHCPv4DelayedACK(t *testing.T) {
 		counts := map[uint32]int{}
 		var transaction uint32
 		var sent, received time.Time
+		var acknowledged netip.Addr
 		for _, packet := range packets {
 			b := packet.data
 			if len(b) < 282 || binary.BigEndian.Uint16(b[12:14]) != unix.ETH_P_IP || b[23] != unix.IPPROTO_UDP {
@@ -124,10 +130,11 @@ func TestDaemonDHCPv4DelayedACK(t *testing.T) {
 			case wire.MessageACK:
 				sent, received = requests[m.XID], packet.at
 				transaction = m.XID
+				acknowledged = m.YIAddr
 			}
 		}
-		if sent.IsZero() || received.Sub(sent) < 5*time.Second || counts[transaction] < 2 {
-			t.Fatal("capture did not observe the delayed independent ACK and REQUEST retry", sent, received)
+		if sent.IsZero() || received.Sub(sent) < 5*time.Second || counts[transaction] < 2 || acknowledged.String() != s.CurrentAddress {
+			t.Fatal("capture did not observe the delayed independent ACK, REQUEST retry, and assigned address", sent, received, acknowledged, s.CurrentAddress)
 		}
 		if offset := s.AcquiredAt.Sub(sent); offset < -250*time.Millisecond || offset > 250*time.Millisecond {
 			t.Fatalf("lease anchored %s after original REQUEST; captured ACK delay %s", offset, received.Sub(sent))
@@ -154,7 +161,7 @@ func TestDaemonDHCPv4DelayedACK(t *testing.T) {
 		return s.Active && s.State == wire.StateBound && s.LeaseClock.AcquiredNanos > rebooted.LeaseClock.AcquiredNanos
 	})
 	check(snapshot())
-	t.Log("independent dnsmasq: binary client-ID reservation, initial acquisition, INIT-REBOOT and unicast renewal retain identity and original REQUEST time despite 5.2-second kernel delay and retransmission")
+	t.Log("independent dnsmasq: dynamic pool assignment, initial acquisition, INIT-REBOOT and unicast renewal retain binary client identity and original REQUEST time despite 5.2-second kernel delay and retransmission")
 }
 
 // The positive clock mutation is available only through the dedicated guest
@@ -235,6 +242,7 @@ func runDHCPv4Authority(t *testing.T, clockClient *clocktest.Client) {
 	defer tcp.Close()
 	var acknowledge atomic.Bool
 	acknowledge.Store(true)
+	leaseAddress := netip.AddrFrom4([4]byte{192, 0, 2, byte(10 + time.Now().Nanosecond()%11)})
 	var leaseSeconds atomic.Uint32
 	leaseSeconds.Store(3)
 	if clockClient != nil {
@@ -268,7 +276,7 @@ func runDHCPv4Authority(t *testing.T, clockClient *clocktest.Client) {
 			opts := map[byte][]byte{wire.OptionServerID: {192, 0, 2, 1}, wire.OptionSubnetMask: {255, 255, 255, 0}, wire.OptionRouter: {192, 0, 2, 1}, wire.OptionLeaseTime: u32(life), wire.OptionT1: u32(t1), wire.OptionT2: u32(t2)}
 			packet := wire.EncodeRequest(kind, m.XID, m.CHAddr, opts)
 			packet[0] = 2
-			copy(packet[16:20], []byte{192, 0, 2, 10})
+			copy(packet[16:20], leaseAddress.AsSlice())
 			_, _ = dhcp.WriteToUDP(packet, &net.UDPAddr{IP: net.IPv4bcast, Port: 68})
 		}
 	}()
@@ -347,13 +355,14 @@ func runDHCPv4Authority(t *testing.T, clockClient *clocktest.Client) {
 	}
 	kernel := func(want bool) bool {
 		t.Helper()
+		assigned := net.IP(leaseAddress.AsSlice())
 		addresses, err := netlink.AddrList(wan, unix.AF_INET)
 		if err != nil {
 			t.Fatal(err)
 		}
 		leased, kept := false, false
 		for _, a := range addresses {
-			leased = leased || a.IP.String() == "192.0.2.10"
+			leased = leased || a.IP.Equal(assigned)
 			kept = kept || a.IP.String() == "192.0.2.99"
 		}
 		if !kept {
@@ -380,6 +389,7 @@ func runDHCPv4Authority(t *testing.T, clockClient *clocktest.Client) {
 			}
 			return status.Phase == "ready" && kernel(true)
 		})
+		assigned := snapshot().CurrentAddress
 		for _, protocol := range []string{"tcp4", "udp4"} {
 			port := "18091"
 			if protocol == "udp4" {
@@ -395,9 +405,9 @@ func runDHCPv4Authority(t *testing.T, clockClient *clocktest.Client) {
 			}
 			body := make([]byte, 5)
 			_, readErr := io.ReadFull(c, body)
-			local := c.LocalAddr().String()
+			local, _, splitErr := net.SplitHostPort(c.LocalAddr().String())
 			_ = c.Close()
-			if err != nil || readErr != nil || string(body) != "lease" || len(local) < len("192.0.2.10:") || local[:len("192.0.2.10:")] != "192.0.2.10:" {
+			if err != nil || readErr != nil || splitErr != nil || string(body) != "lease" || local != assigned {
 				t.Fatal("actual leased TCP/UDP failed", protocol, local, string(body), err, readErr)
 			}
 		}
@@ -553,7 +563,7 @@ func runDHCPv4Authority(t *testing.T, clockClient *clocktest.Client) {
 	until(t, 15*time.Second, func() bool { clock, _ := boottime.Read(); return dhcp4.CurrentLease(snapshot(), clock) && kernel(true) })
 	traffic()
 	until(t, 5*time.Second, func() bool {
-		return capture.count("0.0.0.0", "255.255.255.255", unix.IPPROTO_UDP, 67) > 0 && capture.count("192.0.2.10", "192.0.2.1", unix.IPPROTO_TCP, 18091) > 0 && capture.count("192.0.2.10", "192.0.2.1", unix.IPPROTO_UDP, 18092) > 0
+		return capture.count("0.0.0.0", "255.255.255.255", unix.IPPROTO_UDP, 67) > 0 && capture.count(leaseAddress.String(), "192.0.2.1", unix.IPPROTO_TCP, 18091) > 0 && capture.count(leaseAddress.String(), "192.0.2.1", unix.IPPROTO_UDP, 18092) > 0
 	})
 	t.Log("real DHCP worker/independent server -> original BOOT grant -> kernel address/default route -> TCP/UDP/PCAP; renewal, SIGSTOP expiry, duplicate retry, worker/control SIGKILL, stale generation and foreign address preservation passed")
 	if clockClient != nil {

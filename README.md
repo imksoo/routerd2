@@ -31,7 +31,7 @@ Alpineのパッケージをビルドとイメージ組み立てに利用しま�
 | confirmed commit | 確認期限で rollback。未確認のまま control が再起動した場合も復元。復元失敗を成功として扱わない |
 | management | 内蔵 SSH、公開鍵認証、永続 host key、Tab / history 付き候補編集、YAML 一括編集、diff、validate、commit confirmed、ログ参照。OS シェルを呼ばない |
 | large observations | 大きな設定の revision 固定読取・確認応答、軽量 health、network summary と詳細ページ。経路・WireGuard の大きな観測を省略するときは件数・省略フラグを明示し、CLI から詳細を取得 |
-| migration | `routerd config migrate [--policy FILE] FILE` で旧 resource YAML を変換。静的 DHCPv4 server/reservation、DHCP-derived DNS、静的 WireGuard も対応範囲を検証して変換。WAN と DHCP DNS の動作変更は resource ごとの明示 policy と review notes で扱う。未対応入力は理由を列挙し、部分的な設定を出力しない |
+| native configuration | schema 2 の ResourceProgram を直接 validate / plan / apply。旧 routerd の設定ファイルや試作 schema 1 は読み込まない。homert02/03 の設定は機能要件を確認する資料として使い、routerd2 の native 設定例へ書き直す |
 | persistent state | appliance PID 1 が明示された既存 ext4 データ領域を mount・検証し、設定・SSH host key・署名付きリリース履歴を保存。起動時にディスクを検出・初期化する処理は含めない |
 | distribution | static amd64/arm64 の3つのnative command、依存ライセンス manifest、scratch OCI、Alpine APK、kernel + initramfs、QEMU と namespace 統合試験 |
 | release | Ed25519 署名・SHA-256・ELF/architecture/release identity の検証、可変個数のstatic native/dataとrole bindingを持つmanifest v2、全artifactの世代保存、next-boot selection、試行回数・health confirmation・rollback journal。kernel/rootfs の A/B 更新は別の未実装範囲 |
@@ -181,9 +181,8 @@ YAML のコメント・元の整形は保持しません。ローカルの TTY �
 
 ```sh
 routerd config export > running-config.yaml
-routerd config migrate old-routerd.yaml > candidate-routerd2.yaml
-routerd config validate candidate-routerd2.yaml
-routerd config plan candidate-routerd2.yaml
+routerd config validate running-config.yaml
+routerd config plan running-config.yaml
 ```
 
 `schema_version: 2` の [ResourceProgram](docs/resource-program.md) を正本として保存・編集します。
@@ -191,7 +190,7 @@ interface と address は独立した resource です。試作 schema 1 の read
 `depends_on` と三値条件によってresourceの起動・保留・停止を投影します。
 対応する有限fact、`for` / `max_age`、HealthCheckを参照する `derived_event` の契約と制約は
 [ResourceProgram](docs/resource-program.md) に記載しています。全status providerの同等性は未完了です。
-移行器は未実装の暗黙依存や権限・入力制御の意味変更を拒否します。
+旧製品設定の自動変換は行いません。設定の意味を確認して schema 2 の native ResourceProgram を作成します。
 
 ## Architecture constraints
 

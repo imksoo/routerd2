@@ -20,9 +20,8 @@ This acceptance used the isolated retention branch's built product binaries.
   history to expire, preserving the prior LogRetention severity semantics.
 - Independent client UDP: 341 replies, zero failures throughout this run.
 
-Limited checks passed with `umask 022; go test -race` for internal/events,
-internal/control, internal/legacyconfig, internal/resourceprogram and
-internal/protocol/syslog.
+The recorded focused race checks covered `internal/events`, `internal/control`,
+`internal/resourceprogram` and `internal/protocol/syslog`.
 
 The two focused event-storage checks also cover pending/unread inputs, a current
 consumer's time-triggered work after restart, a newly registered consumer's immediate
@@ -36,14 +35,13 @@ modify production, the shared VM or other running acceptance environments.
 
 Implemented storage is operational event history only. The deployed LogRetention
 request also names accessLogs, pluginRuns, dnsQueries, trafficFlows, firewallEvents
-and dhcpFingerprints. Import rejects those unsupported datasets atomically instead
-of silently reporting a partial migration as complete. Diagnostic log rotation and
-current protocol state are separate.
+and dhcpFingerprints. The current implementation rejects those unsupported datasets
+atomically instead of silently reporting a partial operation as complete. Diagnostic
+log rotation and current protocol state are separate.
 
 Retention limits are reclamation targets, not physical file quotas. Current source
 references and the latest registration anchor remain. New stores support bounded
-incremental vacuum; old disposable prototype stores without that mode report an
-explicit error when vacuum is requested. No live full-database rewrite is added.
+incremental vacuum. No live full-database rewrite is added.
 UDP submission is not reliable delivery: a silent receiver loss alone is not
 observable, and archive retries can duplicate an already submitted notification.
 This run qualifies Linux namespace behavior, not physical homert appliance acceptance.

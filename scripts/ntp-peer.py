@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the actual router's time client/server against independent chronyd.
+"""Exercise the actual router's time client/server against independent DNS/NTP peers.
 
 Private network/mount namespaces and -x/-Q keep the host clock unchanged.
 An independent LAN HTTP client also compares the time console with the actual
@@ -7,7 +7,6 @@ service observation, including its original expiry and fresh acquisition after r
 This host-mode check does not qualify appliance clock adjustment.
 """
 import argparse
-from datetime import datetime
 import ipaddress
 from html.parser import HTMLParser
 import json
@@ -20,7 +19,6 @@ import tarfile
 import time
 from urllib.parse import quote
 
-import yaml
 
 
 def run(args, timeout=10):
@@ -61,6 +59,7 @@ def peer(stage, profile):
             run(['ip', 'link', 'add', device, 'netns', 'ntp-router', 'type', 'veth', 'peer', 'name', 'eth0', 'netns', ns])
             run(['ip', '-n', ns, 'link', 'set', 'eth0', 'up'])
             run(['ip', '-n', ns, 'address', 'add', address, 'dev', 'eth0'])
+        run(['ip', '-n', 'ntp-source', 'address', 'add', '192.0.2.53/24', 'dev', 'eth0'])
         if learned:
             run(['ip', '-n', 'ntp-source', '-6', 'address', 'add', '2001:db8:123::2/64', 'dev', 'eth0'])
         vendor = stage / 'vendor'
@@ -69,6 +68,35 @@ def peer(stage, profile):
             archive.extractall(vendor, filter='data')
         loader = str(vendor / 'lib/ld-musl-x86_64.so.1')
         command = [loader, '--library-path', str(vendor / 'lib') + ':' + str(vendor / 'usr/lib'), str(vendor / 'usr/sbin/chronyd')]
+        dns_vendor = stage / 'dnsmasq-vendor'
+        dns_vendor.mkdir()
+        with tarfile.open(stage / 'dnsmasq-engine.tar') as archive:
+            archive.extractall(dns_vendor, filter='data')
+        dns_loader = str(dns_vendor / 'lib/ld-musl-x86_64.so.1')
+        dnsmasq = str(dns_vendor / 'usr/sbin/dnsmasq')
+        dns_args = [dns_loader, '--library-path', str(dns_vendor / 'lib') + ':' + str(dns_vendor / 'usr/lib'),
+                    str(dnsmasq), '--no-daemon', '--conf-file=/dev/null', '--no-resolv', '--no-hosts',
+                    '--bind-interfaces', '--listen-address=192.0.2.53', '--port=53',
+                    '--address=/ntp.jst.mfeed.ad.jp/192.0.2.2', '--local=/ntp.jst.mfeed.ad.jp/',
+                    '--address=/ntp.nict.jp/192.0.2.2', '--local=/ntp.nict.jp/']
+        start('ntp-source', dns_args, 'dns')
+        def dns_ready():
+            result = subprocess.run(inside('ntp-source', ['dig', '@192.0.2.53', 'ntp.jst.mfeed.ad.jp', 'A', '+time=1', '+tries=1', '+short']),
+                                    capture_output=True, text=True)
+            return result.returncode == 0 and result.stdout.strip() == '192.0.2.2'
+        try:
+            wait(dns_ready)
+        except RuntimeError:
+            result = subprocess.run(inside('ntp-source', ['dig', '@192.0.2.53', 'ntp.jst.mfeed.ad.jp', 'A', '+time=1', '+tries=1']),
+                                    capture_output=True, text=True)
+            print('Independent DNS peer query failed:', result.stdout, result.stderr, flush=True)
+            for namespace in ('ntp-source', 'ntp-router'):
+                state = subprocess.run(inside(namespace, ['ip', '-brief', 'address']), capture_output=True, text=True)
+                print(namespace, state.stdout, state.stderr, flush=True)
+            sockets = subprocess.run(inside('ntp-source', ['ss', '-lun']), capture_output=True, text=True)
+            print('Independent DNS peer sockets:', sockets.stdout, sockets.stderr, flush=True)
+            print('Independent DNS peer log:', (stage / 'dns.log').read_text(), flush=True)
+            raise
         source_state = stage / 'source'
         source_state.mkdir(mode=0o700)
         source_config = stage / 'source.conf'
@@ -89,7 +117,8 @@ def peer(stage, profile):
         console_resource = {'id': 'console', 'service': {'name': 'console', 'web_console': {
             'listen': '198.51.100.1:8088', 'base_path': '/ops/', 'title': 'routerd2'}}}
         resources.append(console_resource)
-        time_node = {'sources': [{'servers': [{'address': '192.0.2.2'}]}], 'listen': ['198.51.100.1'], 'allow': ['198.51.100.0/24']}
+        time_node = {'sources': [{'servers': [{'address': 'ntp.jst.mfeed.ad.jp'}, {'address': 'ntp.nict.jp'}]}],
+                     'dns': ['192.0.2.53'], 'listen': ['198.51.100.1'], 'allow': ['198.51.100.0/24']}
         resources.append({'id': 'time', 'service': {'name': 'time', 'ntp': time_node}})
         if learned:
             resources += [
@@ -109,7 +138,10 @@ def peer(stage, profile):
             boot['workers']['vrrp'] = str(modules)
             boot['workers']['dns'] = str(modules)
         (stage / 'boot.json').write_text(json.dumps(boot))
-        capture = start('ntp-router', ['tcpdump', '-Z', 'root', '-n', '-i', 'any', '-U', '-w', str(stage / 'ntp.pcap'), 'udp port 123 or udp port 546 or udp port 547 or ip proto 112'], 'capture')
+        outage_rules = stage / 'outage.nft'
+        outage_rules.write_text('table inet ntp_outage {\n chain input { type filter hook input priority 0; policy accept; iifname "eth0" udp dport 123 counter drop; }\n chain output { type filter hook output priority 0; policy accept; oifname "eth0" udp sport 123 counter drop; }\n}\n')
+        run(inside('ntp-source', ['nft', '-f', str(outage_rules)]))
+        capture = start('ntp-router', ['tcpdump', '-Z', 'root', '-n', '-i', 'any', '-U', '-w', str(stage / 'ntp.pcap'), 'udp port 53 or udp port 123 or udp port 546 or udp port 547 or ip proto 112'], 'capture')
         router = start('ntp-router', [str(product), 'boot', '--file', str(stage / 'boot.json')], 'router')
         if learned:
             # The product brings up its WAN end before peer DAD can finish.
@@ -118,6 +150,13 @@ def peer(stage, profile):
             source_peer = start('ntp-source', command + ['-d', '-x', '-u', 'root', '-f', str(source_config)], 'source')
         def query(path, socket='control.sock'):
             return json.loads(run(inside('ntp-router', ['curl', '--fail-with-body', '--max-time', '3', '-sS', '--unix-socket', str(stage / 'run' / socket), 'http://routerd' + path])))
+        def time_worker():
+            return next(module for module in query('/v1/status', 'supervisor.sock')['modules'] if module['name'] == 'service.time')
+        def engine_pid(worker):
+            candidates = set()
+            for task in Path(f'/proc/{worker["pid"]}/task').iterdir():
+                candidates.update((task / 'children').read_text().split())
+            return next(int(pid) for pid in candidates if Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')[0] == b'chronyd')
         def console_time(service='service.time', current=True):
             class TimePage(HTMLParser):
                 def __init__(self):
@@ -197,11 +236,34 @@ def peer(stage, profile):
             return (snapshot.get('synchronized', False)
                     and ipaddress.ip_address(snapshot.get('source', '::')) == ipaddress.ip_address(expected_source)
                     and snapshot.get('observed_nanos', 0) > after)
-        wait(synchronized)
+        def upstream_drops():
+            counters = json.loads(run(inside('ntp-source', ['nft', '-j', 'list', 'table', 'inet', 'ntp_outage'])))
+            return sum(expr['counter']['packets'] for item in counters['nftables'] for expr in item.get('rule', {}).get('expr', []) if 'counter' in expr)
+        def blocked_upstream():
+            if not (stage / 'run/control.sock').exists():
+                return False
+            try:
+                status = query('/v1/services')
+            except subprocess.CalledProcessError as error:
+                if error.returncode == 7:
+                    return False
+                raise
+            instance = next((item for item in status['instances'] if item['name'] == 'service.time'), None)
+            snapshot = instance.get('snapshot', {}) if instance is not None else {}
+            return instance is not None and not snapshot.get('synchronized', False) and upstream_drops() > 0
+        wait(blocked_upstream)
+        dropped = upstream_drops()
+        startup_worker = time_worker()
+        startup_chronyd = engine_pid(startup_worker)
+        restored_started = time.monotonic()
+        run(inside('ntp-source', ['nft', 'delete', 'table', 'inet', 'ntp_outage']))
+        wait(synchronized, 150)
+        assert engine_pid(time_worker()) == startup_chronyd, 'chronyd restarted instead of recovering from the restored upstream'
         snapshot = query('/v1/services/service.time')['snapshot']
         assert ipaddress.ip_address(snapshot['source']) == ipaddress.ip_address(expected_source) and not snapshot['adjusting_clock']
         assert snapshot['stratum'] == 9 and snapshot['expires_nanos'] > snapshot['observed_nanos']
         print('PASS actual supervisor/control/network/time worker: synchronized to independent stratum-8 chronyd, typed tracking and finite boot observation, host clock adjustment disabled', flush=True)
+        print('PASS upstream NTP UDP loss and recovery: observed', dropped, 'dropped packets; fresh sample arrived in', round(time.monotonic() - restored_started, 3), 'seconds on the same chronyd', flush=True)
         console_time()
         stopped_time = next(module for module in query('/v1/status', 'supervisor.sock')['modules'] if module['name'] == 'service.time')
         # Freeze the supervisor too: its original five-second heartbeat budget
@@ -227,14 +289,9 @@ def peer(stage, profile):
         client_config.write_text('server 198.51.100.1 iburst\ncmdport 0\n')
         output = run(inside('ntp-client', command + ['-Q', '-t', '8', '-u', 'root', '-f', str(client_config)]), 12)
         print('PASS independent chronyd -Q client received LAN NTP time without adjusting the host clock', flush=True)
+        worker = time_worker()
+        chronyd_pid = engine_pid(worker)
         if learned:
-            worker = next(module for module in query('/v1/status', 'supervisor.sock')['modules'] if module['name'] == 'service.time')
-            def engine_pid():
-                candidates = set()
-                for task in Path(f'/proc/{worker["pid"]}/task').iterdir():
-                    candidates.update((task / 'children').read_text().split())
-                return next(int(pid) for pid in candidates if Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')[0] == b'chronyd')
-            chronyd_pid = engine_pid()
             peer_config = stage / 'keepalived.conf'
             peer_config.write_text('global_defs {\n router_id TIME_PEER\n}\nvrrp_instance TIME {\n state BACKUP\n interface eth0\n virtual_router_id 42\n priority 200\n advert_int 1\n version 3\n accept\n unicast_src_ip 198.51.100.2\n unicast_peer {\n 198.51.100.1\n }\n virtual_ipaddress {\n 198.51.100.100/24 dev eth0\n }\n}\n')
         if profile == 'learned':
@@ -245,7 +302,7 @@ def peer(stage, profile):
             wait(synchronized)
             console_time()
             assert next(module for module in query('/v1/status', 'supervisor.sock')['modules'] if module['name'] == 'service.time')['pid'] == worker['pid']
-            assert engine_pid() == chronyd_pid
+            assert engine_pid(worker) == chronyd_pid
             run(inside('ntp-client', command + ['-Q', '-t', '8', '-u', 'root', '-f', str(client_config)]), 12)
             print('PASS original DHCPv6 information/lease expiry selected the static fallback while the learned NTP endpoint remained reachable; same time worker and LAN response', flush=True)
             provider.send_signal(signal.SIGCONT)
@@ -253,7 +310,7 @@ def peer(stage, profile):
             wait(synchronized)
             console_time()
             run(inside('ntp-client', command + ['-Q', '-t', '8', '-u', 'root', '-f', str(client_config)]), 12)
-            assert engine_pid() == chronyd_pid
+            assert engine_pid(worker) == chronyd_pid
             print('PASS independent DHCPv6 reacquisition restored the learned source and LAN time response without restarting chronyd', flush=True)
             election_peer = start('ntp-client', [str(stage / 'keepalived'), '--dont-fork', '--dont-respawn', '--log-console', '--no-syslog', '--vrrp', '--use-file=' + str(peer_config), '--pid=' + str(stage / 'keepalived.pid'), '--vrrp_pid=' + str(stage / 'vrrp.pid')], 'vrrp')
             wait(lambda: query('/v1/services/service.gateway')['snapshot']['state'] == 'BACKUP')
@@ -261,14 +318,14 @@ def peer(stage, profile):
             expected_source = '192.0.2.2'
             wait(synchronized)
             console_time()
-            assert engine_pid() == chronyd_pid
+            assert engine_pid(worker) == chronyd_pid
             run(inside('ntp-client', command + ['-Q', '-t', '8', '-u', 'root', '-f', str(client_config)]), 12)
             election_peer.terminate()
             election_peer.wait(timeout=5)
             expected_source = '2001:db8:123::2'
             wait(synchronized)
             console_time()
-            assert engine_pid() == chronyd_pid
+            assert engine_pid(worker) == chronyd_pid
             print('PASS independent keepalived elected master: native VRRP backup stopped conditional DHCPv6, kept LAN time on fallback, then peer stop restored learning in the same chronyd', flush=True)
             sources = query('/v1/services/service.time/ntp-sources?generation=' + str(worker['generation']))['groups'][0]['servers']
             deadline = min(server['valid_until']['nanos'] for server in sources)
@@ -278,9 +335,15 @@ def peer(stage, profile):
             # coordinator. The time worker and clock engine continue running.
             os.kill(router.pid, signal.SIGSTOP)
             frozen.append(router.pid)
-            time.sleep(2)
-            response = run(inside('ntp-router', ['curl', '--max-time', '3', '-sS', '--unix-socket', str(stage / 'run/control.sock'), '-o', '/dev/null', '-w', '%{http_code}', 'http://routerd/v1/services/service.time/ntp-sources?generation=' + str(worker['generation'])]))
-            assert response == '503', 'unknown supervisor observation must not be reported as withdrawn sources'
+            response = None
+            def supervisor_observation_expired():
+                nonlocal response
+                response = run(inside('ntp-router', ['curl', '--max-time', '3', '-sS', '--unix-socket', str(stage / 'run/control.sock'), '-o', '/dev/null', '-w', '%{http_code}', 'http://routerd/v1/services/service.time/ntp-sources?generation=' + str(worker['generation'])])).strip()
+                return response == '503'
+            remaining = (deadline - time.clock_gettime_ns(time.CLOCK_BOOTTIME)) / 1_000_000_000
+            if remaining <= 0:
+                raise RuntimeError('learned NTP source expired before the supervisor observation check')
+            wait(supervisor_observation_expired, remaining)
             assert time.clock_gettime_ns(time.CLOCK_BOOTTIME) < deadline
             assert '2001:db8:123::2' in Path(f'/proc/{chronyd_pid}/root/run/sources/learned.sources').read_text()
             print('PASS stale supervisor observation returned unavailable while the original learned source remained live', flush=True)
@@ -291,144 +354,26 @@ def peer(stage, profile):
                 return 'Selected source 192.0.2.2' in (stage / 'router.log').read_text()[log_position:]
             wait(engine_fallback)
             assert time.clock_gettime_ns(time.CLOCK_BOOTTIME) >= deadline
-            assert engine_pid() == chronyd_pid
+            assert engine_pid(worker) == chronyd_pid
             run(inside('ntp-client', command + ['-Q', '-t', '8', '-u', 'root', '-f', str(client_config)]), 12)
             print('PASS stopped supervisor/control: original source deadline selected fallback in the same chronyd and independent LAN client still received time', flush=True)
+            resumed_at = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
             for pid in reversed(frozen):
                 os.kill(pid, signal.SIGCONT)
             frozen.clear()
-
-        if profile == 'import':
-            # Apply the actual legacy client/server fragment structure through
-            # the product importer and normal commit path, with public peers.
-            for address in ('192.0.2.4/24', '2001:db8:123::3/64'):
-                run(['ip', '-n', 'ntp-source', 'address', 'add', address, 'dev', 'eth0'])
-            run(['ip', '-n', 'ntp-client', '-6', 'address', 'add', '2001:db8:456::2/64', 'dev', 'eth0'])
-            for ns, network, gateway in [('ntp-source', '198.51.100.0/24', '192.0.2.1'), ('ntp-client', '192.0.2.0/24', '198.51.100.1'), ('ntp-source', '2001:db8:456::/64', '2001:db8:123::1'), ('ntp-client', '2001:db8:123::/64', '2001:db8:456::1')]:
-                run(['ip', '-n', ns, 'route', 'replace', network, 'via', gateway])
-            source_peer.terminate()
-            source_peer.wait(timeout=5)
-            source_config.write_text(source_config.read_text().replace('bindaddress 192.0.2.2', 'bindaddress 0.0.0.0').replace('bindaddress 2001:db8:123::2', 'bindaddress ::'))
-            source_peer = start('ntp-source', command + ['-d', '-x', '-u', 'root', '-f', str(source_config)], 'source')
-            phase_started = time.time()
-            migrated = run([str(product), 'config', 'migrate', '--policy', str(stage / 'time-import-policy.yaml'), str(stage / 'time-import.yaml')])
-            imported = yaml.safe_load(migrated)
-            imported['resources'].append(console_resource)
-            (stage / 'time-native.yaml').write_text(yaml.safe_dump(imported, sort_keys=False))
-            revision = query('/v1/config')['revision']
-            apply_log_position = len((stage / 'router.log').read_text())
-            run(inside('ntp-router', [str(product), 'config', 'apply', '--file', str(stage / 'time-native.yaml'), '--runtime-dir', str(stage / 'run'), '--expected-revision', str(revision), '--request-id', 'import-time-fragments']), 30)
-            configured = query('/v1/config')['config']['resources']
-            clock = next(r['service'] for r in configured if r.get('service', {}).get('ntp'))
-            gateway = next(r['service'] for r in configured if r.get('service', {}).get('vrrp'))
-            time_name = 'service.' + clock['name']
-            gateway_name = 'service.' + gateway['name']
-            def imported_worker_ready():
-                nonlocal worker
-                worker = next(module for module in query('/v1/status', 'supervisor.sock')['modules'] if module['name'] == time_name)
-                return worker['ready'] and worker.get('pid', 0) > 0
-            wait(imported_worker_ready)
-            chronyd_pid = engine_pid()
-            def learned_present():
-                path = Path(f'/proc/{chronyd_pid}/root/run/sources/learned.sources')
-                return path.exists() and '2001:db8:123::2' in path.read_text()
-            wait(learned_present)
-            fixed = Path(f'/proc/{chronyd_pid}/root/chrony.conf').read_text()
-            assert all('server ' + address + ' ' in fixed for address in ('192.0.2.2', '2001:db8:123::3', 'clock.ntp.test'))
-            assert run(inside('ntp-client', ['dig', '@198.51.100.1', 'clock.ntp.test', 'A', '+short'])).strip() == '192.0.2.4'
-            for address in ('192.0.2.2', '2001:db8:123::2'):
-                start('ntp-source', ['python3', '-m', 'http.server', '18080', '--bind', address, '--directory', str(stage)], 'http')
-                family = 'AF_INET6' if ':' in address else 'AF_INET'
-                code = f'import socket\ns=socket.socket(socket.{family},socket.SOCK_DGRAM);s.bind(({address!r},18081))\nwhile True:\n b,a=s.recvfrom(100);s.sendto(b,a)'
-                start('ntp-source', ['python3', '-u', '-c', code], 'udp')
-            def imported_clients():
-                run(inside('ntp-client', command + ['-Q', '-t', '8', '-u', 'root', '-f', str(client_config)]), 12)
-                for address in ('192.0.2.2', '2001:db8:123::2'):
-                    url = '[' + address + ']' if ':' in address else address
-                    run(inside('ntp-client', ['curl', '--noproxy', '*', '--fail', '--max-time', '3', '-sS', '-o', '/dev/null', 'http://' + url + ':18080/']))
-                    family = 'AF_INET6' if ':' in address else 'AF_INET'
-                    run(inside('ntp-client', ['python3', '-c', f'import socket;s=socket.socket(socket.{family},socket.SOCK_DGRAM);s.settimeout(3);s.connect(({address!r},18081));s.send(b"time-forwarding");assert s.recv(100)==b"time-forwarding"']))
-                assert engine_pid() == chronyd_pid
-            wait(lambda: query('/v1/services/' + time_name)['snapshot'].get('synchronized', False))
-            imported_clients()
-            console_time(time_name)
-            pd_name = next(r['service']['name'] for r in configured if r.get('service', {}).get('dhcp6'))
-            original_expiry = query('/v1/services/service.' + pd_name)['snapshot']['prefixes'][0]['valid_until']['nanos']
-            provider.send_signal(signal.SIGSTOP)
-            wait(lambda: not learned_present())
-            assert time.clock_gettime_ns(time.CLOCK_BOOTTIME) >= original_expiry, 'conditional source disappeared before the observed DHCPv6 lease expired'
-
-            imported_clients()
-            console_time(time_name)
-            provider.send_signal(signal.SIGCONT)
-            wait(learned_present)
-            imported_clients()
-            console_time(time_name)
-            peer_config.write_text(peer_config.read_text().replace('version 3', 'version 2'))
-            election_peer = start('ntp-client', [str(stage / 'keepalived'), '--dont-fork', '--dont-respawn', '--log-console', '--no-syslog', '--vrrp', '--use-file=' + str(peer_config), '--pid=' + str(stage / 'keepalived.pid'), '--vrrp_pid=' + str(stage / 'vrrp.pid')], 'vrrp')
-            wait(lambda: query('/v1/services/' + gateway_name)['snapshot']['state'] == 'BACKUP')
-            wait(lambda: not learned_present())
-            imported_clients()
-            console_time(time_name)
-            election_peer.terminate()
-            election_peer.wait(timeout=5)
-            wait(learned_present)
-            imported_clients()
-            console_time(time_name)
-            starts = (stage / 'router.log').read_text()[apply_log_position:].count('chronyd version ')
-            assert starts == 1, f'normal apply started chronyd {starts} times'
-            print('Observed first imported time worker', {'generation': worker['generation'], 'pid': worker['pid'], 'chronyd_pid': chronyd_pid, 'engine_starts': starts}, flush=True)
-            print('PASS product legacy import kept three always-static sources and two conditional fallbacks, learned source expiry/reacquisition/VRRP withdrawal/recovery, same chronyd and independent LAN NTP/IPv4/IPv6 TCP/UDP', flush=True)
-
-            # All fixed, learned and fallback endpoints are in this isolated
-            # peer. Drop both IP families without deleting its static routes
-            # or IPv6 addresses, as an administrative link-down would do.
-            before_outage = query('/v1/services/' + time_name)['snapshot']
-            outage_started = time.monotonic()
-            outage_rules = stage / 'outage.nft'
-            outage_rules.write_text('table inet ntp_outage {\n chain input { type filter hook input priority 0; policy accept; iifname "eth0" counter drop; }\n chain output { type filter hook output priority 0; policy accept; oifname "eth0" counter drop; }\n}\n')
-            run(inside('ntp-source', ['nft', '-f', str(outage_rules)]))
-            try:
-                time.sleep(30)
-                counters = json.loads(run(inside('ntp-source', ['nft', '-j', 'list', 'table', 'inet', 'ntp_outage'])))
-                dropped = sum(expr['counter']['packets'] for item in counters['nftables'] for expr in item.get('rule', {}).get('expr', []) if 'counter' in expr)
-                assert dropped > 0, 'upstream outage did not drop any packets'
-                during_outage = query('/v1/services/' + time_name)['snapshot']
-                assert during_outage['observed_nanos'] > before_outage['observed_nanos']
-                assert engine_pid() == chronyd_pid
-                print('Observed 30-second upstream outage', dropped, 'dropped packets', json.dumps({
-                    key: during_outage[key] for key in ('synchronized', 'reference_time', 'skew_ppm', 'root_delay_seconds', 'root_dispersion_seconds')}), flush=True)
-            finally:
-                run(inside('ntp-source', ['nft', 'delete', 'table', 'inet', 'ntp_outage']))
-            restored_at = time.time()
-            restored_started = time.monotonic()
-            def fresh_upstream_sample():
-                snapshot = query('/v1/services/' + time_name)['snapshot']
-                return snapshot['synchronized'] and datetime.fromisoformat(snapshot['reference_time'].replace('Z', '+00:00')).timestamp() > restored_at
-            # Bound this recovery observation without changing the engine
-            # polling schedule or forcing a burst.
-            wait(fresh_upstream_sample, 150)
-            imported_clients()
-            console_time(time_name)
-            recovered = query('/v1/services/' + time_name)['snapshot']
-            print('PASS all upstream NTP endpoints lost and restored: fresh upstream sample, same chronyd and independent LAN chronyd adoption', json.dumps({
-                'outage_seconds': round(restored_started - outage_started, 3),
-                'recovery_and_client_seconds': round(time.monotonic() - restored_started, 3),
-                'chronyd_pid': chronyd_pid, 'before_reference_time': before_outage['reference_time'],
-                'recovered_reference_time': recovered['reference_time']}), flush=True)
+            wait(lambda: synchronized(resumed_at))
+            worker = time_worker()
+            chronyd_pid = engine_pid(worker)
+            console_time()
+            run(inside('ntp-client', command + ['-Q', '-t', '8', '-u', 'root', '-f', str(client_config)]), 12)
+            print('PASS supervisor/control recovery: fresh DHCPv6 NTP sample and independent LAN client response', flush=True)
 
         capture.send_signal(signal.SIGINT)
         capture.wait(timeout=3)
         packets = run(['tcpdump', '-nn', '-r', str(stage / 'ntp.pcap')])
         assert '192.0.2.2.123' in packets and '198.51.100.1.123' in packets
-        if profile == 'import':
-            recent = run(['tcpdump', '-nn', '-tt', '-r', str(stage / 'ntp.pcap')])
-            recent = '\n'.join(line for line in recent.splitlines() if line and line[0].isdigit() and float(line.split()[0]) >= phase_started)
-            assert all(address + '.123' in recent for address in ('192.0.2.2', '192.0.2.4', '2001:db8:123::2', '2001:db8:123::3')), recent
-            replies = run(['tcpdump', '-nn', '-tt', '-r', str(stage / 'ntp.pcap'),
-                           'udp src port 123 and (src host 192.0.2.2 or src host 192.0.2.4 or src host 2001:db8:123::2 or src host 2001:db8:123::3)'])
-            assert any(float(line.split()[0]) > restored_at for line in replies.splitlines() if line and line[0].isdigit()), 'no upstream NTP reply after network recovery'
-        print('PASS packet capture contains both upstream synchronization and LAN NTP requests/replies', flush=True)
+        assert '192.0.2.53.53' in packets and 'ntp.jst.mfeed.ad.jp' in packets
+        print('PASS packet capture contains homert hostname DNS lookup, upstream NTP and LAN NTP requests/replies', flush=True)
     finally:
         for pid in reversed(frozen):
             os.kill(pid, signal.SIGCONT)
@@ -450,11 +395,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inside', type=Path)
     parser.add_argument('--dhcp6-server', type=Path)
-    parser.add_argument('--profile', choices=('static', 'learned', 'import'), default='static')
+    parser.add_argument('--profile', choices=('static', 'learned'), default='static')
     parser.add_argument('--output', type=Path, default=Path('dist/ntp-peer'))
     args = parser.parse_args()
     if args.profile != 'static' and args.dhcp6_server is None:
-        parser.error('learned/import profiles require --dhcp6-server')
+        parser.error('learned profile requires --dhcp6-server')
     if args.inside:
         peer(args.inside, args.profile)
         return
@@ -462,17 +407,18 @@ def main():
     root = [] if os.geteuid() == 0 else ['sudo', '-n']
     stage = Path(run(root + ['mktemp', '-d', '/tmp/routerd-ntp.XXXXXX']).strip())
     try:
-        for name, source in [('peer.py', Path(__file__)), ('chrony-engine.tar', project / 'dist/chrony-engine.tar'), ('time-import.yaml', project / 'internal/integration/testdata/ntp-import.yaml'), ('time-import-policy.yaml', project / 'internal/integration/testdata/ntp-import-policy.yaml')] + [(name, project / 'dist/bin' / name) for name in ('routerd', 'routerd-modules', 'routerd-logging')]:
+        for name, source in [('peer.py', Path(__file__)), ('chrony-engine.tar', project / 'dist/chrony-engine.tar'),
+                             ('dnsmasq-engine.tar', project / 'dist/dnsmasq-engine.tar')] + [(name, project / 'dist/bin' / name) for name in ('routerd', 'routerd-modules', 'routerd-logging')]:
             run(root + ['install', '-m', '755' if name.startswith('routerd') else '644', str(source), str(stage / name)])
         extra = []
         if args.dhcp6_server:
             run(root + ['install', '-m', '500', str(args.dhcp6_server), str(stage / 'dhcpd')])
             run(root + ['install', '-m', '500', shutil.which('keepalived'), str(stage / 'keepalived')])
             extra = ['--dhcp6-server', str(stage / 'dhcpd')]
-        result = subprocess.run(root + ['unshare', '--mount', '--net', '--fork', 'python3', str(stage / 'peer.py'), '--inside', str(stage), '--profile', args.profile] + extra, capture_output=True, text=True, timeout=390 if args.profile == 'import' else 210 if extra else 90)
+        result = subprocess.run(root + ['unshare', '--mount', '--net', '--fork', 'python3', str(stage / 'peer.py'), '--inside', str(stage), '--profile', args.profile] + extra, capture_output=True, text=True, timeout=300)
         args.output.mkdir(parents=True, exist_ok=True)
         (args.output / 'peer.log').write_text(result.stdout + result.stderr)
-        for name in ('router.log', 'source.log', 'dhcp6.log', 'vrrp.log', 'capture.log', 'ntp.pcap'):
+        for name in ('router.log', 'source.log', 'dhcp6.log', 'vrrp.log', 'dns.log', 'capture.log', 'ntp.pcap'):
             artifact = subprocess.run(root + ['cat', str(stage / name)], capture_output=True)
             if artifact.returncode == 0:
                 (args.output / name).write_bytes(artifact.stdout)

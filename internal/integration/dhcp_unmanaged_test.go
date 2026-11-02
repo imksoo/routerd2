@@ -16,39 +16,16 @@ import (
 
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
-	"github.com/imksoo/routerd2/internal/legacyconfig"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/logging"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
+	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/vishvananda/netlink"
 )
 
-// The external link owner, static address and DHCP server have separate intent.
-const unmanagedDHCPFixture = `apiVersion: routerd.net/v1alpha1
-kind: Router
-metadata: {name: existing-lan}
-spec:
-  resources:
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: Interface
-      metadata: {name: lan}
-      spec: {ifname: lan0, managed: false, adminUp: true}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: IPv4StaticAddress
-      metadata: {name: server}
-      spec: {interface: lan, address: 192.0.2.1/24}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: DHCPv4Server
-      metadata: {name: leases}
-      spec:
-        interface: lan
-        addressPool: {start: 192.0.2.100, end: 192.0.2.102, leaseTime: 120s}
-        gateway: 192.0.2.1
-        dnsServers: [192.0.2.1]
-`
-
-func TestDaemonMigratedDHCPUnmanagedLAN(t *testing.T) {
-	if !isolateFixture(t, "TestDaemonMigratedDHCPUnmanagedLAN") {
+func TestDaemonDHCPUnmanagedLAN(t *testing.T) {
+	if !isolateFixture(t, "TestDaemonDHCPUnmanagedLAN") {
 		return
 	}
 	peer := fixturePeerNamespace(t, "lan0", "client0")
@@ -90,11 +67,13 @@ func TestDaemonMigratedDHCPUnmanagedLAN(t *testing.T) {
 		}
 	}
 	checkLink(false, false)
-	imported, err := legacyconfig.Compile([]byte(unmanagedDHCPFixture))
-	if err != nil {
-		t.Fatal(err)
-	}
-	plan, err := config.Compile(imported.Document)
+	server := serviceconfig.DHCPServer{Interface: "lan0", ServerAddress: "192.0.2.1",
+		Primary: dhcpserverconfig.Scope{Prefix: "192.0.2.0/24", Start: "192.0.2.100", End: "192.0.2.102", LeaseSeconds: 120, Router: "192.0.2.1", DNSServers: []string{"192.0.2.1"}}}
+	doc := config.FromNative(config.Native{
+		Network:  network.Desired{Interfaces: []network.Interface{{Name: "lan0", AdminState: network.AdminUnmanaged, Addresses: []string{"192.0.2.1/24"}}}},
+		Services: []serviceconfig.Service{{Name: "leases", DHCPServer: &server}},
+	})
+	plan, err := config.Compile(doc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +108,7 @@ func TestDaemonMigratedDHCPUnmanagedLAN(t *testing.T) {
 		t.Fatal(err)
 	}
 	work := t.TempDir()
-	f := startFixtureDaemonAt(t, imported.Document, work)
+	f := startFixtureDaemonAt(t, doc, work)
 	readyAt := time.Now()
 	checkLink(true, true)
 	report, hook := filepath.Join(work, "lease.txt"), filepath.Join(work, "lease.sh")

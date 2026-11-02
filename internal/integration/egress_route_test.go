@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
@@ -83,7 +84,11 @@ func TestDaemonEgressRouteHealthyMultipath(t *testing.T) {
 	vrrpVIPResponders(t, a, "4", applications, "A")
 	vrrpVIPResponders(t, b, "4", applications, "B")
 	capA, capB := healthPBRCapture(t, "wan0"), healthPBRCapture(t, "wan1")
-	program, healthA, healthB := importedHealthPBRProgram(t)
+	program, err := config.Parse([]byte(healthPBRProgram))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const healthA, healthB = "service.health-a", "service.health-b"
 	var resources []resourceprogram.Resource
 	for _, r := range program.Resources {
 		if r.Forwarding != nil {

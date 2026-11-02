@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/imksoo/routerd2/internal/legacyconfig"
+	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/network"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 )
@@ -35,36 +36,14 @@ func TestDaemonFirewallSourceCIDRs(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	result, err := legacyconfig.Compile([]byte(`apiVersion: routerd.net/v1alpha1
-kind: Router
-metadata: {name: source-filter}
-spec:
-  resources:
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: Interface
-      metadata: {name: wan}
-      spec: {ifname: wan0, managed: true, adminUp: true}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: IPv4StaticAddress
-      metadata: {name: router}
-      spec: {interface: wan, address: 198.51.100.20/24}
-    - apiVersion: firewall.routerd.net/v1alpha1
-      kind: FirewallZone
-      metadata: {name: clients}
-      spec: {role: untrust, interfaces: [Interface/wan]}
-    - apiVersion: firewall.routerd.net/v1alpha1
-      kind: FirewallRule
-      metadata: {name: allow-tcp}
-      spec: {fromZone: clients, toZone: self, sourceCIDRs: [198.51.100.2/32], protocol: tcp, port: 18080, action: accept}
-    - apiVersion: firewall.routerd.net/v1alpha1
-      kind: FirewallRule
-      metadata: {name: allow-udp}
-      spec: {fromZone: clients, toZone: self, sourceCIDRs: [198.51.100.2/32], protocol: udp, port: 18081, action: accept}
-`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = startFixtureDaemon(t, result.Document)
+	doc := config.FromNative(config.Native{Network: network.Desired{
+		Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"198.51.100.20/24"}}},
+		Firewall: &network.Firewall{Input: &network.FirewallChain{Policy: "drop", Rules: []network.FirewallRule{
+			{Match: network.PacketMatch{Source: "198.51.100.2/32", Protocol: "tcp", DestinationPorts: []network.PortRange{{Start: 18080}}}, Action: "accept"},
+			{Match: network.PacketMatch{Source: "198.51.100.2/32", Protocol: "udp", DestinationPorts: []network.PortRange{{Start: 18081}}}, Action: "accept"},
+		}}},
+	}})
+	_ = startFixtureDaemon(t, doc)
 	router, err := netns.Get()
 	if err != nil {
 		t.Fatal(err)

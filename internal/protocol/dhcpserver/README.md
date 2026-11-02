@@ -19,70 +19,10 @@ renewal timestamps are invented. dnsmasq currently clamps leases below 120
 seconds to 120 seconds. Option values retain dnsmasq syntax; the old native
 wire encoder and its option restrictions have been removed.
 
-Before first startup, active IPv4 bindings from a stopped old dnsmasq server
-can be initialized explicitly:
-
-```
-routerd dhcp import-leases --config /path/to/router.yaml --service leases --state-dir /path/to/new-state /path/to/old-dnsmasq.leases
-```
-
-Use the compiled native service name and the new router's actual state path.
-Stop the old DHCP server before copying its final lease file and starting the
-new server. The command reads the configuration without applying it. It shares
-the worker's exclusive state lock, requires an unused service directory, and
-atomically installs the dnsmasq file without overwriting an existing file.
-Expired bindings and DHCPv6 entries are omitted; live client identifiers and
-absolute deadlines are retained. Conflicting bindings, foreign subnets and
-reservation conflicts are rejected before creating state. The command does
-not extend a lease, manufacture request history, or create HA ownership.
-
-DHCP service follows the elected role; authenticated peer reconciliation
-merges received leases and hold history. The initial two-member IPv4 lease
-path is exercised by `make check-ha-dhcp-initial`: an independent dnsmasq
-grants a real binding, then stops before both fresh members import the same
-final file. Synchronization and takeover retain the original expiry.
-
-While the former owner is unavailable, the original client uses its acquired
-DNS over UDP/TCP before sending DHCP again and renews its known lease. A new
-client requests that occupied address but receives a distinct address, route
-and DNS automatically. It uses that DNS over UDP/TCP and its acquired gateway
-for routed IPv4 TCP/UDP traffic through NAT. After the former owner returns,
-the original client retains its address.
-
-This check covers received leases. It does not establish protection for an
-allocation that the former owner never synchronized. It does not import
-sticky history or PD, or qualify physical migration, Internet forwarding,
-NAT connection continuity or a power cut.
-
-When sticky holds are configured, also import the stopped old routerd server's
-sticky database before starting the new service:
-
-```
-routerd dhcp import-sticky --config /path/to/router.yaml --service leases --state-dir /path/to/new-state /path/to/old-dhcp-sticky.db
-```
-
-Run `import-leases` first when live IPv4 leases exist, then `import-sticky`,
-and start the service only after both operations succeed. The sticky operation
-also supports an installation with no live leases. Keep the old SQLite database
-and its `-wal`/`-shm` siblings together when copying the stopped source; the
-read-only SQLite connection includes committed WAL records. The operation uses
-routerd's existing schema and retains allocation, request, release and hold
-timestamps exactly. It selects only IPv4 history in this service's declared
-subnets from the old shared database. It does not replay events at migration
-time or extend the original holding period. Operator reservations retain
-their normal precedence.
-
-The two commands initialize separate files; they do not constitute one atomic
-two-file migration. Sticky import holds the same worker lock, preserves an
-already imported lease file, rejects existing history or initialized service
-state, and atomically publishes the new SQLite file without sidecar dependencies.
-
-`TestDaemonImportedDHCPLeases` obtains a real lease from an independent dnsmasq,
-stops that server, imports its final file and starts the normal routerd build.
-It checks DNS before the client sends DHCP again, the original client's retained
-address, refusal to give that address to another client, acquired DNS over UDP
-and TCP, and both clients' IPv4 reachability to the router. Run it with
-`python3 scripts/daemon-tests.py dhcp-server --test TestDaemonImportedDHCPLeases`.
+The first release starts from a new routerd2 state directory and has no
+routerd-to-routerd2 lease or sticky-database migration command. During normal
+routerd2 operation, dnsmasq's lease file is the allocation authority and the
+DHCP worker retains its own state across worker and product restarts.
 
 Periodic lease observations do not own the engine's serving lifetime. A failed
 state publication is logged; the existing bounded periodic publication continues
@@ -146,8 +86,8 @@ The one-second VRRP profile passed; a 200ms handoff re-election remains open.
 clients, DHCPv4 natural renewal, DHCPv6 information/SLAAC, conditional DNS/DoH,
 IPv4/IPv6 HTTPS, PD SIGKILL/graceful recovery and whole-daemon recovery. This was
 a 75-second traffic interval, not long-run or physical-device qualification.
-`lan-reuse` additionally passed actual BusyBox/native and imported DHCP-to-DNS
-paths, explicit option-6 delivery, stopped-source expiry and recovery.
+`lan-reuse` additionally passed actual BusyBox/native DHCP-to-DNS paths,
+explicit option-6 delivery, lease expiry and recovery.
 
 Remaining: broader pool/profile/reservation interoperability, target-image
 execution, load/clock/power/NIC qualification and the complete release plan.
@@ -163,7 +103,7 @@ replacement and control replacement with retained DUID and restored client
 communication. This establishes that profile, not normal signed-update
 confirmation, the full homert configuration, or physical-device qualification.
 
-`make check-ha-dhcp-scopes` checks imported ordinary and secondary IPv4 pools
+`make check-ha-dhcp-scopes` checks ordinary and secondary IPv4 pools
 with two signed PID 1 product instances and independent BusyBox clients in
 private namespaces. A /32 VRRP address identifies the server; each physical
 LAN keeps its own secondary /16 address. One profile is selected by an OUI
@@ -187,7 +127,7 @@ assignment and renewal, not forwarding through the special profile's external
 gateway or DNS resolver, a complete homert deployment, or physical hardware.
 
 DHCP fingerprint history is enabled explicitly with
-`dhcp_server.fingerprint_retention`. The legacy importer connects
+`dhcp_server.fingerprint_retention`. `LogRetention.signals` connects
 `LogRetention.signals: [dhcpFingerprints]` to each DHCPv4 service. The existing
 bundled dnsmasq notification helper carries the client hostname, vendor class
 and requested option list from dnsmasq's own environment. `script-on-renewal`

@@ -35,14 +35,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-//go:embed testdata/conditional-lan.yaml
-var conditionalLAN []byte
+//go:embed testdata/conditional-lan-native.yaml
+var conditionalLANNative []byte
 
-//go:embed testdata/conditional-lan-policy.yaml
-var conditionalLANPolicy []byte
-
-func TestDaemonImportedConditionalLAN(t *testing.T) {
-	if !isolateFixtureTimeout(t, "TestDaemonImportedConditionalLAN", 125*time.Second) {
+func TestDaemonConditionalLAN(t *testing.T) {
+	if !isolateFixtureTimeout(t, "TestDaemonConditionalLAN", 125*time.Second) {
 		return
 	}
 	provider := fixturePeerNamespace(t, "wan0", "server0")
@@ -86,22 +83,11 @@ func TestDaemonImportedConditionalLAN(t *testing.T) {
 	capture := healthPBRCapture(t, "lan0")
 	wanCapture := healthPBRCapture(t, "wan0")
 	work := t.TempDir()
-	source, policy := filepath.Join(work, "legacy.yaml"), filepath.Join(work, "policy.yaml")
-	if err := os.WriteFile(source, conditionalLAN, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(policy, conditionalLANPolicy, 0600); err != nil {
-		t.Fatal(err)
-	}
-	command := exec.Command(filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "config", "migrate", "--policy", policy, source)
-	var diagnostics bytes.Buffer
-	command.Stderr = &diagnostics
-	migrated, err := command.Output()
-	if err != nil {
-		t.Fatal(err, diagnostics.String())
-	}
 	var document config.Document
-	if err := config.Decode(bytes.NewReader(migrated), &document); err != nil {
+	if err := config.Decode(bytes.NewReader(conditionalLANNative), &document); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Compile(document); err != nil {
 		t.Fatal(err)
 	}
 	document.Resources = append(document.Resources,
@@ -416,7 +402,7 @@ exec "$@"
 	if err := f.control.Do(ctx, "GET", "/v1/services/"+advertisement+"/ra", nil, &input); err != nil {
 		t.Fatal(err)
 	}
-	if input.RouterLifetimeSeconds != 7200 || input.RouterPreference != "high" || input.MTU != 1500 || input.ActiveUntil.Nanos == 0 {
+	if input.RouterLifetimeSeconds != 1800 || input.RouterPreference != "high" || input.MTU != 1500 || input.ActiveUntil.Nanos == 0 {
 		t.Fatal("lost advertisement intent or condition authority", input)
 	}
 	capture.mu.Lock()
@@ -436,7 +422,7 @@ exec "$@"
 		t.Fatal(err)
 	}
 	keepConfig := filepath.Join(work, "keepalived.conf")
-	if err := os.WriteFile(keepConfig, []byte("global_defs {\n router_id LAN_PEER\n}\nvrrp_instance LAN {\n state BACKUP\n interface client0\n virtual_router_id 42\n priority 200\n advert_int 1\n version 2\n virtual_ipaddress {\n 192.0.2.254/24\n }\n}\n"), 0600); err != nil {
+	if err := os.WriteFile(keepConfig, []byte("global_defs {\n router_id LAN_PEER\n}\nvrrp_instance LAN {\n state BACKUP\n interface client0\n virtual_router_id 42\n priority 200\n advert_int 1\n version 3\n unicast_src_ip 192.0.2.3\n unicast_peer {\n 192.0.2.2\n }\n virtual_ipaddress {\n 192.0.2.254/24\n }\n}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	stopPeer := start(client, "keepalived", keepalived, "--dont-fork", "--dont-respawn", "--log-console", "--no-syslog", "--vrrp", "--use-file="+keepConfig, "--pid="+filepath.Join(work, "keep.pid"), "--vrrp_pid="+filepath.Join(work, "vrrp.pid"))
@@ -558,7 +544,7 @@ exec "$@"
 	var connection net.Conn
 	if err := fixtureInsideNamespace(client, func() error {
 		var err error
-		connection, err = net.DialTimeout("tcp4", "192.0.2.2:53", time.Second)
+		connection, err = net.DialTimeout("tcp4", "192.0.2.254:53", time.Second)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -605,7 +591,7 @@ exec "$@"
 	until(t, 5*time.Second, func() bool { return len(readRADNS()) == 0 })
 	for _, domain := range []string{"learned.test", "boot.test"} {
 		if err := fixtureInsideNamespace(client, func() error {
-			out, err := exec.Command("dig", "-4", "@192.0.2.2", "destination."+domain, "AAAA", "+time=2", "+tries=1").CombinedOutput()
+			out, err := exec.Command("dig", "-4", "@192.0.2.254", "destination."+domain, "AAAA", "+time=2", "+tries=1").CombinedOutput()
 			if err != nil || !strings.Contains(string(out), "status: SERVFAIL") {
 				return fmt.Errorf("expired learned DNS %s: %v: %s", domain, err, out)
 			}
@@ -710,5 +696,5 @@ exec "$@"
 	}
 	communication()
 	f.stop()
-	t.Log("legacy import: independent ISC/keepalived/Linux client acquired SLAAC/default/DNS, used UDP/TCP DNS and IPv6 TCP/UDP, withdrew and restored serving on role change and original control authority expiry; short control stall kept serving and actual election expiry withdrew; configured7200s wire lifetime distinct from activation; imported dynamic listen addresses, learned forwarding/bootstrap, original PD loss/reacquisition and the same fixed DNS TCP connection")
+	t.Log("native configuration: independent ISC/keepalived/Linux client acquired SLAAC/default/DNS, used UDP/TCP DNS and IPv6 TCP/UDP, withdrew and restored serving on role change and original control authority expiry; short control stall kept serving and actual election expiry withdrew; configured router lifetime distinct from activation; dynamic listen addresses, learned forwarding/bootstrap, original PD loss/reacquisition and the same DNS TCP connection")
 }

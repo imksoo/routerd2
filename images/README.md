@@ -258,7 +258,6 @@ and actual signed-bundle validation.
 | `daemon-vrrp-clock` | `TestDaemonVRRPClockCorrections` | Fixed guest-only UTC corrections preserve the original BOOTTIME VIP deadline |
 | `daemon-dhcp4` | `TestDaemonDHCPv4OriginalLeaseAuthority` | Original DHCPv4 BOOTTIME grant, actual kernel address/default route, TCP/UDP/capture, original expiry and worker/control recovery |
 | `boot-address` | `TestIsolatedBootAddressLifetime` | Kernel address countdown, journal reopen without renewal, autonomous expiry and foreign address preservation |
-| `daemon-legacy-dhcp-dns` | `TestDaemonMigratedDHCPDNSAndOwnershipExpiry` | Original resource YAML migration, explicit finite-source DNS policy, DHCP acquisition, scoped INPUT exception, producer expiry and journal recovery |
 | `daemon-bgp` | `TestDaemonBGPFIBAndOwnershipExpiry` | Real BGP workers, kernel FIB and ownership expiry |
 | `daemon-bgp-derived` | `TestDaemonBGPDerivedCurrentStatus` | Real TCP BGP, complete peer scalars and applied-FIB phase, DerivedEvent/EventRule, boot expiry, replay and worker/control recovery |
 | `daemon-bfd` | `TestDaemonBFDControlsBGPSessionAndExpiry` | BFD startup gating, UDP-only loss, suspended-producer expiry and fresh BGP/FIB recovery |

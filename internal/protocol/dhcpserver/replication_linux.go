@@ -22,7 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/imksoo/routerd2/internal/dhcplease"
 	"github.com/imksoo/routerd2/internal/peertls"
 )
 
@@ -280,5 +279,5 @@ func mergeLeases(a, b string, history []leaseHistory, now time.Time) (string, er
 			removed[[2]string{record.MAC, record.IP}] = true
 		}
 	}
-	return dhcplease.Merge(a, b, removed, now)
+	return mergeDHCPLeaseFiles(a, b, removed, now)
 }

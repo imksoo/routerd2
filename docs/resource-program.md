@@ -63,7 +63,7 @@ resources:
 `id` は program 内で一意の operator identity で、interface 名や service 名とは別に選べる。
 英数字で始まる 1–128 文字で、英数字と `. _ : / -` を使える。
 たとえば `id: wan` と `interface.name: eth0` を独立に持てる。
-内部 importer が生成する ID は `interface/eth0`、`service/wan` などである。
+native builder が生成する ID は `interface/eth0`、`service/wan` などである。
 アドレスや経路には kernel object の identity から生成した安定した suffix を使い、route の gateway 変更だけでは ID を変えない。
 
 一つの resource には、次の payload のうち一つだけを指定する。
@@ -154,7 +154,8 @@ Linuxの逆引き経路検査はall/interfaceの大きい値を使う。必要�
 `forwarding.ipv4_rp_filter: 0` を明示する。native-68ではall/defaultと管理対象interfaceへ適用し、
 個別 `interface.ipv4_rp_filter` があればそのinterfaceの選択値を上書きする。
 書込みと復元は既存のsetting ownerが行う。暗黙のOS修復や外部選択daemonは使わない。
-実行例は公開値の `internal/integration/testdata/egress-policy.yaml` と対応fixtureにある。
+実通信の例は `TestDaemonConnectionMarkedEgressPolicy` が native ResourceProgram から起動し、
+独立した五つのWAN peerに対するTCP/UDP切替と同一接続維持を確認する。
 compiler contract66/network journal16。IPv6 hostTrafficと全homert構成の受入は残る。
 
 ### IPv6のルーター自身の経路
@@ -505,8 +506,8 @@ boot entry による任意 startup store/revision の選択、projection generat
 多 binary runtime manifest の選択は別の残作業であり、この checkpoint では追加していない。
 
 routerd2 の試作 `schema_version: 1` とその保存 record は読み込まない。
-元製品 routerd の resource YAML を取り込む `config migrate` は別の入口で、今回から新 ResourceProgram を出力する。
-その review mapping にある `network.*` / `services/*` は生成する engine intent の位置を示す。
+旧 routerd の resource YAML を取り込む CLI も提供しない。設定は schema 2 の
+ResourceProgram として直接宣言し、`network.*` / `services/*` の native intent を記述する。
 
 ## 試験対象
 

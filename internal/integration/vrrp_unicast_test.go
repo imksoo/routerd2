@@ -5,10 +5,8 @@ package integration
 import (
 	"bytes"
 	"context"
-	"embed"
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -25,7 +23,6 @@ import (
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
-	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
@@ -33,14 +30,10 @@ import (
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
-	"github.com/miekg/dns"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 	"golang.org/x/sys/unix"
 )
-
-//go:embed testdata/vrrp-import-*.yaml
-var legacyVRRP embed.FS
 
 func TestDaemonVRRPUnicastIPv4(t *testing.T) {
 	if isolateFixture(t, "TestDaemonVRRPUnicastIPv4") {
@@ -56,7 +49,7 @@ func TestDaemonVRRPRFC9568IPv4(t *testing.T) {
 
 func TestDaemonVRRPUnicastIPv6(t *testing.T) {
 	if isolateFixture(t, "TestDaemonVRRPUnicastIPv6") {
-		runVRRPPeer(t, vrrpPeerTest{family: "ipv6", migrate: true})
+		runVRRPPeer(t, vrrpPeerTest{family: "ipv6"})
 	}
 }
 
@@ -86,7 +79,7 @@ func TestDaemonVRRPv2(t *testing.T) {
 
 func TestDaemonVRRPv2PASS(t *testing.T) {
 	if isolateFixture(t, "TestDaemonVRRPv2PASS") {
-		runVRRPPeer(t, vrrpPeerTest{family: "ipv4", version: 2, password: "labpass", migrate: true})
+		runVRRPPeer(t, vrrpPeerTest{family: "ipv4", version: 2, password: "labpass"})
 	}
 }
 
@@ -96,14 +89,7 @@ func TestDaemonVRRPAdditionalIdentity(t *testing.T) {
 	}
 }
 
-func TestDaemonVRRPMigratedAdditionalIdentity(t *testing.T) {
-	if isolateFixture(t, "TestDaemonVRRPMigratedAdditionalIdentity") {
-		runVRRPPeer(t, vrrpPeerTest{family: "ipv4", version: 2, wan: true, migrate: true})
-	}
-}
-
 type vrrpPeerTest struct {
-	migrate   bool
 	checksum  vrrp.IPv4Checksum
 	wan       bool
 	family    string
@@ -188,15 +174,6 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 	}
 	program := config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{iface}}, Services: services})
 	haName := "service.ha"
-	if spec.migrate {
-		var imported serviceconfig.Service
-		profile := family
-		if spec.wan {
-			profile = "wan"
-		}
-		program, imported = importedVRRPProgram(t, profile)
-		c, haName = imported.VRRPConfig(), imported.ModuleName()
-	}
 	if tracking {
 		for i := range program.Resources {
 			if program.Resources[i].ID == "service/probe" {
@@ -207,43 +184,15 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 	}
 
 	var wan *vrrpWANTest
-	var pdPeer *exec.Cmd
 	if spec.wan {
 		wan = setupVRRPWAN(t, peerNS)
-		if !spec.migrate {
-			program.Resources = append(program.Resources,
-				resourceprogram.Resource{ID: "wan-identity", When: &resourceprogram.FactCondition{Fact: haName + ".elected"}, Link: &network.Link{Name: "wan-ha", Kind: "macvlan", Parent: "wan0", HardwareAddr: vrrpWANMAC, IPv6AddrGenMode: "none"}},
-				resourceprogram.Resource{ID: "wan-interface", Interface: &network.Interface{Name: "wan-ha"}},
-				resourceprogram.Resource{ID: "wan-address", Address: &resourceprogram.Address{Interface: "wan-ha", CIDR: vrrpWANVIP + "/24"}},
-				resourceprogram.Resource{ID: "wan-linklocal", Address: &resourceprogram.Address{Interface: "wan-ha", CIDR: vrrpWANLL + "/64", Options: &network.AddressOptions{NoDAD: true}}},
-			)
-		}
+		program.Resources = append(program.Resources,
+			resourceprogram.Resource{ID: "wan-identity", When: &resourceprogram.FactCondition{Fact: haName + ".elected"}, Link: &network.Link{Name: "wan-ha", Kind: "macvlan", Parent: "wan0", HardwareAddr: vrrpWANMAC, IPv6AddrGenMode: "none"}},
+			resourceprogram.Resource{ID: "wan-interface", Interface: &network.Interface{Name: "wan-ha"}},
+			resourceprogram.Resource{ID: "wan-address", Address: &resourceprogram.Address{Interface: "wan-ha", CIDR: vrrpWANVIP + "/24"}},
+			resourceprogram.Resource{ID: "wan-linklocal", Address: &resourceprogram.Address{Interface: "wan-ha", CIDR: vrrpWANLL + "/64", Options: &network.AddressOptions{NoDAD: true}}},
+		)
 		program.Resources = append(program.Resources, resourceprogram.Resource{ID: "wan-ra", When: &resourceprogram.FactCondition{Fact: haName + ".active"}, Service: &serviceconfig.Service{Name: "wan-ra", RA: &serviceconfig.RouterAdvertisement{Config: ra.Config{Interface: "wan-ha", SourceAddress: vrrpWANLL, MinIntervalSeconds: 3, MaxIntervalSeconds: 4, RouterLifetimeSeconds: 12}}}})
-		if spec.migrate {
-			pdPeer = startVRRPPDPeer(t, wan.client)
-			startFixtureDNSMasq(t, wan.client, "client0", []string{"--no-hosts", "--no-resolv", "--address=/wan.test/203.0.113.77", "--local-ttl=0"})
-			if err := pdPeer.Process.Signal(syscall.SIGSTOP); err != nil {
-				t.Fatal(err)
-			}
-			healthPBRListener(t, wan.client, "198.51.100.10:18097", "H")
-			healthPBRListener(t, peerNS, peer+":18098", "B")
-			healthPBRListener(t, peerNS, peer+":18099", "E")
-			if err := fixtureInsideNamespace(wan.client, func() error {
-				for _, args := range [][]string{
-					{"-6", "tunnel", "add", "peeraftr", "mode", "ipip6", "local", "2001:db8:42::1", "remote", "2001:db8:80::21", "dev", "client0", "encaplimit", "none"},
-					{"link", "set", "peeraftr", "up"},
-					{"address", "add", "192.0.0.1/32", "peer", "192.0.0.2/32", "dev", "peeraftr"},
-				} {
-					if output, err := exec.Command("ip", args...).CombinedOutput(); err != nil {
-						return fmt.Errorf("independent AFTR: %w: %s", err, output)
-					}
-				}
-				return nil
-			}); err != nil {
-				t.Fatal(err)
-			}
-			vrrpVIPResponders(t, wan.client, "4", []string{"192.0.0.1"}, "A")
-		}
 	}
 	f := startFixtureDaemon(t, program)
 	module := func(name string) supervisor.ModuleStatus {
@@ -288,8 +237,6 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		}
 		return false
 	}
-	var pdDUID string
-	querySequence := 0
 	waitOwner := func(router bool) {
 		t.Helper()
 		until(t, 8*time.Second, func() bool {
@@ -307,142 +254,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			}
 			return s.State == vrrp.StateBackup && !s.Active && !hasVIP() && peerOwns
 		})
-		if spec.migrate && wan != nil {
-			until(t, 8*time.Second, func() bool {
-				var state supervisor.Status
-				if err := f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &state); err != nil {
-					t.Fatal(err)
-				}
-				for _, resource := range program.Resources {
-					if resource.Service == nil || resource.Service.DHCP6 == nil {
-						continue
-					}
-					name := resource.Service.ModuleName()
-					present := false
-					for _, m := range state.Modules {
-						present = present || m.Name == name
-					}
-					if !router {
-						return !present
-					}
-					if !present {
-						return false
-					}
-					var instance runtimeplan.InstanceStatus
-					if err := f.control.Do(context.Background(), "GET", "/v1/services/"+name, nil, &instance); err != nil {
-						t.Fatal(err)
-					}
-					var pd dhcp6config.Snapshot
-					if err := json.Unmarshal(instance.Snapshot, &pd); err != nil || len(pd.Prefixes) != 1 || pd.State != "bound" || len(pd.DNSServers) != 1 || pd.DNSServers[0] != "2001:db8:42::1" {
-						return false
-					}
-					if pdDUID == "" {
-						pdDUID = pd.ClientDUID
-					} else if pd.ClientDUID != pdDUID {
-						t.Fatal("master recovery changed automatic DUID", pdDUID, pd.ClientDUID)
-					}
-					link, err := netlink.LinkByName("wan-ha")
-					if err != nil {
-						return false
-					}
-					addresses, err := netlink.AddrList(link, unix.AF_INET6)
-					if errors.Is(err, netlink.ErrDumpInterrupted) {
-						return false
-					}
-					if err != nil {
-						t.Fatal(err)
-					}
-					for _, a := range addresses {
-						if a.IP.String() == "2001:db8:80::21" && a.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) == 0 {
-							return pd.IAID == 1
-						}
-					}
-					return false
-				}
-				t.Fatal("missing imported PD declaration")
-				return false
-			})
-			until(t, 6*time.Second, func() bool {
-				link, err := netlink.LinkByName("lan-extra")
-				if router {
-					if err != nil || link.Attrs().HardwareAddr.String() != "02:00:5e:00:42:02" {
-						return false
-					}
-					addresses, err := netlink.AddrList(link, unix.AF_INET6)
-					if err != nil {
-						t.Fatal(err)
-					}
-					ready := false
-					for _, address := range addresses {
-						ready = ready || address.IP.String() == "fe80::42:2" && address.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) == 0
-					}
-					if !ready {
-						return false
-					}
-				} else if err == nil {
-					return false
-				}
-				var status supervisor.Status
-				if err := f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &status); err != nil {
-					t.Fatal(err)
-				}
-				for _, resource := range program.Resources {
-					if resource.Service == nil || resource.Service.Health == nil {
-						continue
-					}
-					service := resource.Service
-					want := service.Health.Port == 18099 || service.Health.Port == 18097 && router || service.Health.Port == 18098 && !router
-					present := false
-					for _, m := range status.Modules {
-						present = present || m.Name == service.ModuleName()
-					}
-					if present != want {
-						return false
-					}
-					if want {
-						var state runtimeplan.InstanceStatus
-						if err := f.control.Do(context.Background(), "GET", "/v1/services/"+service.ModuleName(), nil, &state); err != nil {
-							t.Fatal(err)
-						}
-						var probe health.Snapshot
-						if json.Unmarshal(state.Snapshot, &probe) != nil || !probe.Active {
-							return false
-						}
-					}
-				}
-				return true
-			})
-			// Query through the unchanged node address so backup withdrawal is
-			// checked independently from loss of the virtual address. Uncached
-			// names require a real trip to the learned WAN resolver.
-			for _, transport := range []string{"udp", "tcp"} {
-				until(t, 8*time.Second, func() bool {
-					querySequence++
-					var forwarded, local *dns.Msg
-					err := fixtureInsideNamespace(peerNS, func() error {
-						client := dns.Client{Net: transport, Timeout: time.Second}
-						var err error
-						local, _, err = client.Exchange(new(dns.Msg).SetQuestion("router.home.arpa.", dns.TypeA), net.JoinHostPort("192.0.2.2", "1053"))
-						if err != nil {
-							return err
-						}
-						forwarded, _, err = client.Exchange(new(dns.Msg).SetQuestion(fmt.Sprintf("query-%d.wan.test.", querySequence), dns.TypeA), net.JoinHostPort("192.0.2.2", "1053"))
-						return err
-					})
-					if err != nil || local == nil || local.Rcode != dns.RcodeSuccess || len(local.Answer) != 1 {
-						return false
-					}
-					if !router {
-						return forwarded != nil && len(forwarded.Answer) == 0 && forwarded.Rcode == dns.RcodeServerFailure
-					}
-					if forwarded == nil || forwarded.Rcode != dns.RcodeSuccess || len(forwarded.Answer) != 1 {
-						return false
-					}
-					a, ok := forwarded.Answer[0].(*dns.A)
-					return ok && a.A.String() == "203.0.113.77"
-				})
-			}
-		}
+
 	}
 	targets := []string{vip}
 	if wan != nil {
@@ -450,9 +262,6 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 	}
 	vrrpVIPResponders(t, routerNS, suffix, targets, "R")
 	vrrpVIPResponders(t, peerNS, suffix, targets, "K")
-	if spec.migrate && wan != nil {
-		vrrpVIPResponders(t, routerNS, "6", []string{"2001:db8:80::21"}, "R")
-	}
 	traffic := func(ns netns.NsHandle, target, want string) {
 		t.Helper()
 		for _, protocol := range []string{"tcp", "udp"} {
@@ -501,17 +310,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			}
 		}
 	}
-	waitDSLite := func() {
-		t.Helper()
-		until(t, 8*time.Second, func() bool {
-			link, err := netlink.LinkByName("ds0")
-			if err != nil || link.Attrs().Flags&net.FlagUp == 0 {
-				return false
-			}
-			routes, err := netlink.RouteGet(net.ParseIP("192.0.0.1"))
-			return err == nil && len(routes) > 0 && routes[0].LinkIndex == link.Attrs().Index
-		})
-	}
+
 	dir := t.TempDir()
 	peerLog := filepath.Join(dir, "keepalived.log")
 	t.Cleanup(func() {
@@ -620,20 +419,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		})
 		t.Log("550 ms writer pause delayed the initial VIP ACK; same election renewed beyond its original deadline without extending authority")
 	}
-	if pdPeer != nil {
-		until(t, 8*time.Second, func() bool {
-			s := snapshot()
-			return s.State == vrrp.StateActive && !s.Active && s.ActivationState == "ReadinessTimeout"
-		})
-		if hasVIP() {
-			t.Fatal("PD admission timeout published the VIP")
-		}
-		wan.waitNative(t, true)
-		if err := pdPeer.Process.Signal(syscall.SIGCONT); err != nil {
-			t.Fatal(err)
-		}
-		t.Log("elected WAN remained usable for PD acquisition while admission timeout withheld the LAN VIP")
-	}
+
 	waitOwner(true)
 	if first := module(haName); first.Generation != 1 {
 		t.Fatal("normal address DAD replaced the initial VRRP worker", first)
@@ -672,100 +458,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		})
 	}
 	traffic(peerNS, vip, "R")
-	if spec.migrate && wan != nil {
-		traffic(wan.client, "2001:db8:80::21", "R")
-		link, err := netlink.LinkByName("wan-ha")
-		if err != nil {
-			t.Fatal(err)
-		}
-		addresses, err := netlink.AddrList(link, unix.AF_INET6)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, address := range addresses {
-			if address.IP.String() == "2001:db8:80::21" && address.Flags&unix.IFA_F_DEPRECATED == 0 {
-				t.Fatal("DS-Lite-only source remained eligible as a preferred IPv6 source", address)
-			}
-		}
-		waitDSLite()
-		traffic(routerNS, "192.0.0.1", "A")
-		paused := module(haName)
-		original := snapshot()
-		clock, err := boottime.Read()
-		if err != nil {
-			t.Fatal(err)
-		}
-		budget := time.Duration(original.ExpiresNanos-uint64(clock.BoottimeNanoseconds)) + time.Second
-		var lingering []string
-		defer func() {
-			if t.Failed() {
-				t.Log("role expiry pending modules", lingering, "original", original)
-			}
-		}()
-		if err := syscall.Kill(paused.PID, syscall.SIGSTOP); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = syscall.Kill(paused.PID, syscall.SIGCONT) })
-		until(t, budget, func() bool {
-			var status supervisor.Status
-			if err := f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &status); err != nil {
-				t.Fatal(err)
-			}
-			lingering = lingering[:0]
-			for _, m := range status.Modules {
-				for _, resource := range program.Resources {
-					if resource.Service != nil && (resource.Service.Health != nil || resource.Service.DHCP6 != nil) && m.Name == resource.Service.ModuleName() {
-						// PD cleanup acknowledges withdrawal and can wait for
-						// Release. It must already be stopping when its WAN
-						// authority expires; cleanup cannot retain that link.
-						if resource.Service.DHCP6 != nil && m.State == "stopping" && !m.Ready {
-							continue
-						}
-						lingering = append(lingering, m.Name+":"+m.State)
-					}
-				}
-			}
-			link, err := netlink.LinkByName("wan-ha")
-			return len(lingering) == 0 && (err != nil || link.Attrs().Flags&net.FlagUp == 0)
-		})
-		if current := module(haName); current.PID != paused.PID || current.Generation != paused.Generation {
-			t.Fatal("unknown role was caused by replacement rather than original observation expiry", current, paused)
-		}
-		if err := syscall.Kill(paused.PID, syscall.SIGCONT); err != nil {
-			t.Fatal(err)
-		}
-		until(t, 8*time.Second, func() bool { return module(haName).Generation > paused.Generation })
-		waitOwner(true)
-		wan.waitNative(t, true)
-		traffic(wan.client, vrrpWANVIP, "R")
-		traffic(wan.client, "2001:db8:80::21", "R")
-		waitDSLite()
-		traffic(routerNS, "192.0.0.1", "A")
-		t.Log("expired role stopped PD and role-scoped probes before producer replacement; fresh election restored communication with the same automatic DUID")
-	}
-	if spec.migrate && wan == nil {
-		// An actual listener makes timeout prove the inherited zone's deny,
-		// rather than an absent service or a blanket VMAC accept.
-		var listener net.Listener
-		if err := fixtureInsideNamespace(routerNS, func() error {
-			var err error
-			listener, err = net.Listen("tcp"+suffix, net.JoinHostPort(vip, "18095"))
-			return err
-		}); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { listener.Close() })
-		if err := fixtureInsideNamespace(peerNS, func() error {
-			conn, err := net.DialTimeout("tcp"+suffix, net.JoinHostPort(vip, "18095"), 300*time.Millisecond)
-			if err == nil {
-				conn.Close()
-				t.Fatal("migration lost the original zone deny on the VIP VMAC")
-			}
-			return nil
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
+
 	if tracking {
 
 		native, source := module(haName), module("service.probe")
@@ -931,11 +624,6 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			wan.waitNative(t, true)
 			wan.waitForwarder(t, true)
 			traffic(wan.client, vrrpWANVIP, "R")
-			if spec.migrate {
-				traffic(wan.client, "2001:db8:80::21", "R")
-				waitDSLite()
-				traffic(routerNS, "192.0.0.1", "A")
-			}
 		}
 		startPeer(100, c.AuthPassword)
 		time.Sleep(4 * time.Duration(c.AdvertIntervalCentiseconds) * 10 * time.Millisecond) // More than a complete peer master-down interval.
@@ -948,8 +636,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			// The migrated v2 instance has one-second adverts. Wait for its
-			// actual original authority, rather than assuming the 20cs fixture.
+			// Wait for the original authority to expire in the kernel writer.
 			budget := time.Duration(original.ExpiresNanos-uint64(clock.BoottimeNanoseconds)) + time.Second
 			for _, process := range []supervisor.ModuleStatus{control, native} {
 				if err := syscall.Kill(process.PID, syscall.SIGSTOP); err != nil {
@@ -959,9 +646,6 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			}
 			until(t, budget, func() bool {
 				names := []string{"ha", "wan-ha"}
-				if spec.migrate {
-					names = append(names, "lan-extra")
-				}
 				for _, name := range names {
 					link, err := netlink.LinkByName(name)
 					if err != nil || link.Attrs().Flags&net.FlagUp != 0 {
@@ -1074,41 +758,6 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		return
 	}
 	t.Logf("%s VRRPv%d keepalived interoperability: adverts=%v, VIP TCP/UDP, higher-priority takeover, SIGKILL/rebind, priority-zero recovery and lower-priority preemption passed", family, c.Version, counts)
-}
-
-func importedVRRPProgram(t *testing.T, family string) (config.Document, serviceconfig.Service) {
-	t.Helper()
-	work := t.TempDir()
-	for _, suffix := range []string{"", "-policy"} {
-		name := "vrrp-import-" + family + suffix + ".yaml"
-		data, err := legacyVRRP.ReadFile("testdata/" + name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(work, name), data, 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "config", "migrate", "--policy", filepath.Join(work, "vrrp-import-"+family+"-policy.yaml"), filepath.Join(work, "vrrp-import-"+family+".yaml"))
-	var review bytes.Buffer
-	cmd.Stderr = &review
-	data, err := cmd.Output()
-	if err != nil {
-		t.Fatal(err, review.String())
-	}
-	program, err := config.Parse(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, resource := range program.Resources {
-		if resource.Service != nil && resource.Service.VRRP != nil {
-			return program, *resource.Service
-		}
-	}
-	t.Fatal("CLI migration omitted VRRP")
-	return config.Document{}, serviceconfig.Service{}
 }
 
 func vrrpVIPResponders(t *testing.T, ns netns.NsHandle, suffix string, vips []string, response string) {

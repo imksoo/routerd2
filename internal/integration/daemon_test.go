@@ -14,6 +14,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,11 +29,11 @@ import (
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/derivedcontroller"
 	"github.com/imksoo/routerd2/internal/events"
-	"github.com/imksoo/routerd2/internal/legacyconfig"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
+	"github.com/imksoo/routerd2/internal/protocol/webconsoleconfig"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/runtimeconfig"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
@@ -58,7 +59,19 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 	leases := serviceconfig.DHCPServer{Interface: "mgmt0", ServerAddress: "198.18.0.1", Authoritative: true,
 		Primary: dhcpserverconfig.Scope{Prefix: "198.18.0.0/24", Start: "198.18.0.100", End: "198.18.0.110", Router: "198.18.0.1", LeaseSeconds: 120}}
 	dns.Spec.QueryLog = api.DNSResolverQueryLogSpec{Enabled: true}
-	doc := config.FromNative(config.Native{Services: []serviceconfig.Service{{Name: "dns", DNS: &serviceconfig.DNS{RuntimeConfig: dns}}, {Name: "leases", DHCPServer: &leases}}})
+	doc := config.FromNative(config.Native{
+		Network: network.Desired{
+			Interfaces: []network.Interface{{Name: "mgmt0", Addresses: []string{"198.18.0.1/24"}}},
+			Firewall: &network.Firewall{Input: &network.FirewallChain{Policy: "drop", Rules: []network.FirewallRule{{
+				Match: network.PacketMatch{Source: "198.18.0.0/24", Protocol: "tcp", DestinationPorts: []network.PortRange{{Start: 8080}, {Start: 2222}}}, Action: "accept",
+			}}}},
+		},
+		Services: []serviceconfig.Service{
+			{Name: "dns", DNS: &serviceconfig.DNS{RuntimeConfig: dns}},
+			{Name: "leases", DHCPServer: &leases},
+			{Name: "management", WebConsole: &webconsoleconfig.Config{Listen: netip.MustParseAddrPort("198.18.0.1:8080"), BasePath: "/ops/", Title: "routerd2 <lab>", Links: []webconsoleconfig.Link{{Label: "documentation", URL: "https://example.net/routerd2"}}}},
+		},
+	})
 	// Exercise the imported management zone through a separate client namespace.
 	// ManagementAccess is an admission check, not a source-prefix firewall rule.
 	peer := fixturePeerNamespace(t, "mgmt0", "client0")
@@ -75,51 +88,7 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	management, err := legacyconfig.Compile([]byte(`apiVersion: routerd.net/v1alpha1
-kind: Router
-metadata: {name: management}
-spec:
-  resources:
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: Interface
-      metadata: {name: management}
-      spec: {ifname: mgmt0, managed: true, adminUp: true}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: IPv4StaticAddress
-      metadata: {name: management}
-      spec: {interface: management, address: 198.18.0.1/24}
-    - apiVersion: firewall.routerd.net/v1alpha1
-      kind: FirewallZone
-      metadata: {name: management}
-      spec: {role: mgmt, interfaces: [Interface/management]}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: ManagementAccess
-      metadata: {name: management}
-      spec: {interfaces: [Interface/management], allowSourceCIDRs: [198.18.0.0/24]}
-    - apiVersion: system.routerd.net/v1alpha1
-      kind: WebConsole
-      metadata: {name: management}
-      spec:
-        enabled: true
-        listenAddress: 198.18.0.1
-        port: 8080
-        basePath: /ops
-        title: "routerd2 <lab>"
-        links: [{label: documentation, url: https://example.net/routerd2}]
-`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	consoleModule := ""
-	for _, resource := range management.Document.Resources {
-		if resource.Service != nil && resource.Service.WebConsole != nil {
-			consoleModule = resource.Service.ModuleName()
-		}
-	}
-	if consoleModule == "" {
-		t.Fatal("imported console service missing")
-	}
-	doc.Resources = append(doc.Resources, management.Document.Resources...)
+	consoleModule := "service.management"
 	doc.Resources = append(doc.Resources, resourceprogram.Resource{ID: "console-multipath", Route: &network.Route{
 		Destination: "203.0.113.0/24", Table: 333, NextHops: []network.NextHop{{Gateway: "198.18.0.2", Interface: "mgmt0", Weight: 1}, {Gateway: "198.18.0.3", Interface: "mgmt0", Weight: 2}},
 	}})

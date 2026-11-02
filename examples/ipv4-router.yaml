@@ -12,9 +12,10 @@ resources:
       forward:
         - from: br-lan
           to: eth0
-      masquerade:
-        - source: 192.168.10.0/24
-          out_interface: eth0
+  - id: lan-nat
+    nat:
+      - type: masquerade
+        match: {family: 4, source: 192.168.10.0/24, out_interface: eth0}
   - id: forwarding
     forwarding:
       ipv4: true

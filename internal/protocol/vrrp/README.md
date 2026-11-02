@@ -97,14 +97,9 @@ PASS is a cleartext legacy mechanism from RFC 2338, removed by RFC 3768. It is
 provided for existing peers, not cryptographic authentication or replay
 protection. IPv6/v3 PASS, AH and Keepalived's HMAC extension are not implemented;
 unsupported declarations are rejected rather than downgraded. Secret-provider
-resolution remains separate work. The original-resource importer supports
-basic IPv4 v2/PASS and IPv6 v3 elections with explicit local/VMAC identities,
-retained non-preempt defaults and zone ACLs. It also converts additional VMACs
-and master/backup guards on HealthCheck/static addresses/PD. Imported admission
-can wait for PD Bound through the same finite fact compiler; timeout retains
-withholding and late readiness publishes. Other readiness fields, tracking and
-the complete homert graph remain open; see the
-[import contract](../../legacyconfig/README.md#vrrp-election-and-vip-identity).
+resolution remains separate work. The native ResourceProgram owns election
+intent and VIP resources directly; old routerd configuration conversion is not
+part of the fresh-install product path.
 
 ## Single-writer effects and liveness contract
 

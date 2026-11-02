@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
-// Package dhcplease preserves dnsmasq lease files across migration and handoff.
-package dhcplease
+// Package dhcpserver owns lease-file replication between its workers.
+package dhcpserver
 
 import (
 	"errors"
@@ -14,7 +14,7 @@ import (
 
 // Merge preserves each unexpired binding and its absolute deadline. A newer
 // removal excludes a binding; conflicting client or address ownership fails.
-func Merge(a, b string, removed map[[2]string]bool, now time.Time) (string, error) {
+func mergeDHCPLeaseFiles(a, b string, removed map[[2]string]bool, now time.Time) (string, error) {
 	records := map[string][]string{}
 	clients := map[string]string{}
 	for _, data := range []string{a, b} {

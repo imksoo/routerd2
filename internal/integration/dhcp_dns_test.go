@@ -21,7 +21,6 @@ import (
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
-	"github.com/imksoo/routerd2/internal/legacyconfig"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/aftr"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
@@ -45,8 +44,8 @@ func TestDaemonDHCPDNSAndOwnershipExpiry(t *testing.T) {
 	testDaemonDHCPDNSOwnership(t, false, "")
 }
 
-func TestDaemonMigratedDHCPDNSAndOwnershipExpiry(t *testing.T) {
-	if !isolateFixture(t, "TestDaemonMigratedDHCPDNSAndOwnershipExpiry") {
+func TestDaemonScopedDHCPDNSAndOwnershipExpiry(t *testing.T) {
+	if !isolateFixture(t, "TestDaemonScopedDHCPDNSAndOwnershipExpiry") {
 		return
 	}
 	testDaemonDHCPDNSOwnership(t, true, "")
@@ -66,7 +65,7 @@ func TestDaemonDHCPDNSWithDelayedStatePublication(t *testing.T) {
 	testDaemonDHCPDNSOwnership(t, false, "control")
 }
 
-func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool, pausedProcess string) {
+func testDaemonDHCPDNSOwnership(t *testing.T, scoped bool, pausedProcess string) {
 	t.Helper()
 	clientNS := fixturePeerNamespace(t, "lan0", "client0")
 	dnsPort := port(t)
@@ -74,7 +73,14 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool, pausedProcess strin
 		dnsPort = 53
 	}
 	server := serviceconfig.DHCPServer{Interface: "lan0", ServerAddress: "192.0.2.1", Authoritative: true,
-		Primary: dhcpserverconfig.Scope{Prefix: "192.0.2.0/24", Start: "192.0.2.100", End: "192.0.2.102", Router: "192.0.2.1", LeaseSeconds: 60, Options: []dhcpserverconfig.Option{{Name: "dns-server", Value: "192.0.2.1"}}},
+		Primary: dhcpserverconfig.Scope{Prefix: "192.0.2.0/24", Start: "192.0.2.100", End: "192.0.2.102", Router: "192.0.2.1", LeaseSeconds: 60, DNSServers: []string{"192.0.2.1"}},
+	}
+	if scoped {
+		server.LogDHCP = true
+		server.Scopes = []dhcpserverconfig.Scope{
+			{Name: "special", Prefix: "198.51.100.128/25", Start: "198.51.100.160", End: "198.51.100.161", Router: "198.51.100.129", DNSServers: []string{"198.51.100.129"}, LeaseSeconds: 60, Match: dhcpserverconfig.Match{MACAddresses: []string{"02:bb:00:00:00:01"}}},
+			{Name: "special-other", Prefix: "198.51.100.128/25", Start: "198.51.100.160", End: "198.51.100.161", Router: "198.51.100.129", DNSServers: []string{"198.51.100.129"}, LeaseSeconds: 60, Match: dhcpserverconfig.Match{MACAddresses: []string{"02:bb:00:00:00:02"}}},
+		}
 	}
 	dns := dnsconfig.RuntimeConfig{Resource: "dns",
 		Spec:  api.DNSResolverSpec{Listen: []api.DNSResolverListenSpec{{Name: "local", Addresses: []string{"127.0.0.1"}, Port: dnsPort}}, Sources: []api.DNSResolverSourceSpec{{Name: "zones", Kind: "zone", Match: []string{"lab.example", "2.0.192.in-addr.arpa"}, ZoneRef: []string{"DNSZone/lan"}}}},
@@ -87,15 +93,15 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool, pausedProcess strin
 		Network:  network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"192.0.2.1/24"}}}},
 		Services: []serviceconfig.Service{{Name: "leases", DHCPServer: &server}, {Name: "dns", DNS: &serviceconfig.DNS{RuntimeConfig: dns}}},
 	}
+	if scoped {
+		native.Network.Interfaces[0].Addresses = append(native.Network.Interfaces[0].Addresses, "198.51.100.129/25")
+	}
 	if pausedProcess == "network" {
 		native.Network.Interfaces[0].Addresses = append(native.Network.Interfaces[0].Addresses, "2001:db8:42::1/64")
 		defaultRoute := false
 		native.Services = append(native.Services, serviceconfig.Service{Name: "dslite", DSLite: &serviceconfig.DSLite{Interface: "lan0", Tunnel: "dslite0", LocalAddress: "2001:db8:42::1", Candidates: []string{"2001:db8:42::2"}, DefaultRoute: &defaultRoute}})
 	}
 	doc := config.FromNative(native)
-	if migrated {
-		doc = migratedDHCPDNSFixtureDocument(t, dnsPort)
-	}
 	serverName, dnsName := "", ""
 	plan, err := config.Compile(doc)
 	if err != nil {
@@ -211,7 +217,7 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool, pausedProcess strin
 	if (lease.CurrentAddress != "192.0.2.100" && lease.CurrentAddress != "192.0.2.101" && lease.CurrentAddress != "192.0.2.102") || lease.ServerID != "192.0.2.1" || lease.LeaseTimeSeconds <= 0 || lease.DNS != "192.0.2.1" {
 		t.Fatalf("unexpected DHCP lease: %+v", lease)
 	}
-	if migrated {
+	if scoped {
 		// A second MAC behind the same LAN exercises the deployed special-device
 		// profile without manually assigning an address to either client.
 		for _, args := range [][]string{
@@ -520,80 +526,6 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool, pausedProcess strin
 		t.Fatal("DHCP hostname update or Release interrupted static DNS or replaced its TCP listener")
 	}
 	t.Log("same-MAC BusyBox hostname change replaced A/PTR and removed the old name; independent dig agreed; real Release removed A/PTR while static DNS and the original TCP connection survived")
-	if migrated {
-		t.Log("legacy resource YAML and explicit finite-source policy: real DHCP ACK, DNS publication, stopped-producer expiry and journal recovery passed")
-	}
-}
-
-func migratedDHCPDNSFixtureDocument(t *testing.T, dnsPort int) config.Document {
-	t.Helper()
-	input := fmt.Sprintf(`apiVersion: routerd.net/v1alpha1
-kind: Router
-metadata: {name: legacy-dhcp-dns-fixture}
-spec:
-  resources:
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: Interface
-      metadata: {name: lan}
-      spec: {ifname: lan0, managed: true, adminUp: true}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: IPv4StaticAddress
-      metadata: {name: gateway}
-      spec: {interface: lan, address: 192.0.2.1/24}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: IPv4StaticAddress
-      metadata: {name: special-subnet}
-      spec: {interface: lan, address: 198.51.100.129/25}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: DHCPv4Server
-      metadata: {name: leases}
-      spec:
-        interface: lan
-        logDHCP: true
-        addressPool: {start: 192.0.2.100, end: 192.0.2.102, leaseTime: 60s}
-        gateway: 192.0.2.1
-        dnsServers: [192.0.2.1]
-        scopes:
-          - name: special
-            match: {macAddresses: ["02:bb:00:00:00:01"]}
-            addressPool: {start: 198.51.100.160, end: 198.51.100.161, leaseTime: 60s}
-          - name: special-other
-            match: {macAddresses: ["02:bb:00:00:00:02"]}
-            addressPool: {start: 198.51.100.160, end: 198.51.100.161, leaseTime: 60s}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: DNSResolver
-      metadata: {name: dns}
-      spec:
-        listen: [{name: local, addresses: [127.0.0.1], port: %d, sources: [local-zone]}]
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: DNSZone
-      metadata: {name: lan-zone}
-      spec:
-        zone: lab.example
-        records: [{hostname: router, ipv4: 192.0.2.1}]
-        dhcpDerived: {sources: [DHCPv4Server/leases], leaseFile: /var/lib/routerd/dnsmasq/dnsmasq.leases, ddns: true, ttl: 60}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: DNSForwarder
-      metadata: {name: local-zone}
-      spec: {resolver: DNSResolver/dns, match: [lab.example, 2.0.192.in-addr.arpa], zoneRefs: [DNSZone/lan-zone]}
-    - apiVersion: firewall.routerd.net/v1alpha1
-      kind: FirewallZone
-      metadata: {name: isolated-lan}
-      spec: {role: untrust, interfaces: [lan]}
-    - apiVersion: firewall.routerd.net/v1alpha1
-      kind: FirewallRule
-      metadata: {name: explicit-dhcp-deny}
-      spec: {fromZone: isolated-lan, toZone: self, protocol: udp, port: 67, action: drop}
-`, dnsPort)
-	consent := true
-	result, err := legacyconfig.CompileWithOptions([]byte(input), legacyconfig.Options{
-		SchemaVersion: legacyconfig.OptionsSchemaVersion,
-		DHCPDNS:       map[string]legacyconfig.DHCPDNSPolicy{"DNSResolver/dns": {SourceScopedFiniteLeases: &consent}},
-	})
-	if err != nil {
-		t.Fatal("compile legacy DHCP/DNS fixture", err)
-	}
-	return result.Document
 }
 
 func fixtureInsideNamespace(ns netns.NsHandle, fn func() error) (result error) {

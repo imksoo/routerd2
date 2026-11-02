@@ -3,9 +3,7 @@
 package integration
 
 import (
-	"bytes"
 	"context"
-	_ "embed"
 	"encoding/json"
 	"io"
 	"net"
@@ -16,24 +14,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
+	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
 	"github.com/miekg/dns"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
 
-//go:embed testdata/host-route.yaml
-var legacyHostRoute []byte
-
-//go:embed testdata/host-route-options.yaml
-var legacyHostRouteOptions []byte
-
-func TestDaemonImportedIPv6HostRoute(t *testing.T) {
-	if !isolateFixtureTimeout(t, "TestDaemonImportedIPv6HostRoute", 60*time.Second) {
+func TestDaemonIPv6HostRoute(t *testing.T) {
+	if !isolateFixtureTimeout(t, t.Name(), 60*time.Second) {
 		return
 	}
 	runHostRouteFixture(t, "static")
@@ -44,13 +40,6 @@ func TestDaemonRAHostRoute(t *testing.T) {
 		return
 	}
 	runHostRouteFixture(t, "learned")
-}
-
-func TestDaemonImplicitIPv6HostRoute(t *testing.T) {
-	if !isolateFixtureTimeout(t, "TestDaemonImplicitIPv6HostRoute", 60*time.Second) {
-		return
-	}
-	runHostRouteFixture(t, "implicit")
 }
 
 func runHostRouteFixture(t *testing.T, mode string) {
@@ -124,57 +113,24 @@ func runHostRouteFixture(t *testing.T, mode string) {
 		t.Fatal(err)
 	}
 	start("dnsmasq", dnsmasqPath, "--no-daemon", "--conf-file=/dev/null", "--no-hosts", "--no-resolv", "--bind-interfaces", "--listen-address=2001:db8:ffff::9", "--host-record=destination.provider.test,2001:db8:ffff::9", "--log-facility=-")
-	input, options := filepath.Join(work, "legacy.yaml"), filepath.Join(work, "options.yaml")
-	legacySource, policy := legacyHostRoute, legacyHostRouteOptions
-	if mode == "implicit" {
-		// This operator declares only the host path, without an RA resource/policy.
-		// Its DNS upstream is static; the other modes retain learned RA DNS.
-		legacySource = bytes.Replace(legacySource, []byte(`  - apiVersion: net.routerd.net/v1alpha1
-    kind: IPv6RAAddress
-    metadata:
-      name: wan-ra
-    spec:
-      interface: wan
-      managed: true
-`), nil, 1)
-		legacySource = bytes.Replace(legacySource, []byte(`      addressFrom:
-      - resource: IPv6RAAddress/wan-ra
-        field: dnsServers`), []byte(`      address: 2001:db8:ffff::9`), 1)
-		policy = []byte("schema_version: 1\n")
-	}
-	if err := os.WriteFile(input, legacySource, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(options, policy, 0600); err != nil {
-		t.Fatal(err)
-	}
-	command := exec.CommandContext(t.Context(), filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "config", "migrate", "--policy", options, input)
-	var diagnostics bytes.Buffer
-	command.Stderr = &diagnostics
-	body, err := command.Output()
-	if err != nil {
-		t.Fatal(err, diagnostics.String())
-	}
-	program, err := config.Parse(body)
-	if err != nil {
-		t.Fatal(err)
-	}
+	defaultRoute := mode == "learned"
+	trueValue := true
+	program := config.FromNative(config.Native{
+		Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0", AdminState: network.AdminUp, Addresses: []string{"192.0.2.2/24"}}}},
+		Services: []serviceconfig.Service{
+			{Name: "wan-ra", RAClient: &serviceconfig.RAClient{Interface: "wan0", SLAAC: &trueValue, DefaultRoute: &defaultRoute, OnLink: &trueValue, DNS: &trueValue, AllowedRouters: []string{"fe80::2"}, Table: 254, Metric: 200}},
+			{Name: "internet6", Health: &health.Config{Interface: "wan0", Target: "2001:db8:ffff::9", Protocol: "tcp", Port: 18093, IntervalMillis: 250, TimeoutMillis: 250}},
+			{Name: "resolver", DNS: &serviceconfig.DNS{RuntimeConfig: dnsconfig.RuntimeConfig{Resource: "resolver", Spec: api.DNSResolverSpec{
+				Listen:  []api.DNSResolverListenSpec{{Name: "local", Addresses: []string{"127.0.0.1"}, Port: 1053, Sources: []string{"learned"}}},
+				Sources: []api.DNSResolverSourceSpec{{Name: "learned", Kind: "forward", Match: []string{"provider.test"}, QueryTimeout: "1s", UpstreamFrom: []api.StatusValueSourceSpec{{Resource: "IPv6RAAddress/wan-ra", Field: "dnsServers"}}}},
+			}}}},
+		},
+	})
+	gateway, routerFrom := "fe80::2", ""
 	if mode == "learned" {
-		var source string
-		for i := range program.Resources {
-			if service := program.Resources[i].Service; service != nil && service.RAClient != nil {
-				enabled := true
-				service.RAClient.DefaultRoute = &enabled
-				source = service.ModuleName()
-			}
-		}
-		for i := range program.Resources {
-			if host := program.Resources[i].HostRoute; host != nil {
-				host.Gateway = ""
-				host.RouterFrom = source
-			}
-		}
+		gateway, routerFrom = "", "service.wan-ra"
 	}
+	program.Resources = append(program.Resources, resourceprogram.Resource{ID: "host-route/ipv6", HostRoute: &resourceprogram.HostRoute{Interface: "wan0", Gateway: gateway, RouterFrom: routerFrom, Table: 120, Priority: 10120}})
 	f := startFixtureDaemon(t, program)
 	ctx := context.Background()
 	t.Cleanup(func() {

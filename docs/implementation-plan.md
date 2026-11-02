@@ -456,7 +456,7 @@ native writer / provider adapter に接続する。
 
 再利用・比較元: [pkg/api](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api), [pkg/config](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/config), [pkg/controller/chain](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain), [packaging/install.sh](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/packaging/install.sh)。
 
-実装先の案: `docs/parity.json`, `internal/legacyconfig`, `internal/compatibility (新設予定)`。
+実装先の案: `docs/parity.json`, `internal/config`。
 
 #### CORE-02 — ResourceProgram と単一の設定 transaction
 
@@ -596,7 +596,7 @@ network intentのprotocol投影もJSON往復を除き、変更する集合だけ
 
 再利用・比較元: [pkg/sysctlprofile](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/sysctlprofile), [pkg/controller/chain/sysctl.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/sysctl.go), [pkg/controller/chain/package.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/package.go), [pkg/inventory](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/inventory)。
 
-実装先の案: `internal/system (新設予定)`, `internal/network`, `internal/boot`, `internal/kmod`, `internal/legacyconfig`。
+実装先の案: `internal/system (新設予定)`, `internal/network`, `internal/boot`, `internal/kmod`。
 
 #### SYS-02 — NTP client/server と時刻品質
 
@@ -619,8 +619,8 @@ network intentのprotocol投影もJSON往復を除き、変更する集合だけ
 
 部分実装: `time-sources` / native-59。固定chronyd 4.8をPID 1配下のworkerが所有し、private command socketと型付きtrackingを使う。
 旧`resolveServers`の学習先優先/固定代替先選択を接続し、情報元のBOOTTIME期限でsourceだけを再読込する。
-`make check-ntp-dhcp6`は独立ISC/chronyd/keepalivedと実LANで終了0。学習IPv6先・元期限・代替IPv4先・再取得、
-VRRP主系条件でのclient停止/復帰、control/supervisor停止中の元期限とLAN応答を同一chronyd PIDで確認した。
+2026-11-02、homert02/03の実設定で使うfallback FQDNを独立dnsmasq peerに解決させ、実supervisor/control/network/NTP/DHCPv6/VRRP worker、ISC DHCPv6、Keepalived、chronyd、独立LAN chronydとpacket captureで検証した。実DNS query、NTP packet drop後の再同期、学習IPv6先の元期限、fallbackへの切替と再取得、VRRP主系条件、control/supervisor停止中の期限とLAN応答を同一chronyd PIDで確認した。
+試験用leaseは18秒で、通常のPD lifetime、homertのDoH/条件付きDNS service、DHCPv4学習、長時間holdover/slew、未同期TLS方針、実ONU/NICと全homert構成の受入には流用しない。
 `ntp-quality-native59`の実APK/Alpine/PID 1では、仮想RTCの約1200秒補正、初回品質の64.72秒での収束、
 独立LAN時刻取得、ext4のdrift読込・再起動後の再補正とLAN応答・IPv4/IPv6/DNS/管理復旧まで終了0。
 固定5engineとsourceを配布へ接続した。DHCPv4学習、旧resourceの静的/条件付き同期先併存、IPv6 LAN access、
@@ -674,7 +674,7 @@ confirmed rollbackが通った。旧条件付き起動・動的target・EgressRo
 
 再利用・比較元: [pkg/egressroute/selection.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/egressroute/selection.go), [pkg/controller/chain/policyroute.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/policyroute.go), [pkg/api/cluster_routes.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/cluster_routes.go)。
 
-実装先の案: `internal/policy/egress (新設予定)`, `internal/network`, `internal/runtimeplan`, `internal/legacyconfig`。
+実装先の案: `internal/policy/egress (新設予定)`, `internal/network`, `internal/runtimeplan`。
 
 2026-10-28 `egress-route` / native-46: 旧 advisory 選択と実 policyroute 適用を読み、
 条件が真の最高 preference 候補を、同順位の kernel ECMP として一つの route owner へ投影する。
@@ -745,7 +745,7 @@ DS-Lite1420、IPv61400で、1200は不変。bridge向け処理とinterface/tunne
 
 再利用・比較元: [pkg/render/nftables.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/render/nftables.go), [pkg/controller/firewall](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/firewall), [pkg/controller/nat44](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/nat44), [pkg/controller/chain/ipaddressset.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/ipaddressset.go), [pkg/controller/chain/mtu.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/mtu.go), [pkg/controller/ingressservice](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/ingressservice), [pkg/ingressdrain](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/ingressdrain)。
 
-実装先の案: `internal/network`, `internal/policy/firewall (新設予定)`, `internal/runtimeplan`, `internal/legacyconfig`。
+実装先の案: `internal/network`, `internal/policy/firewall (新設予定)`, `internal/runtimeplan`。
 
 #### NET-04 — PPPoE の engine 選定と session 運用
 
@@ -1012,7 +1012,7 @@ PD側TCP/UDPの共存、server停止・M解除後の元NA/PD期限復旧とRebin
 
 再利用・比較元: [pkg/api/provides.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/provides.go), [pkg/lan](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/lan), [pkg/controller/chain/phase2.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/phase2.go), [pkg/controller/chain/bridge.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/bridge.go), [pkg/controller/chain/vxlan_tunnel.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/vxlan_tunnel.go), [pkg/vrf](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/vrf), [pkg/vxlan](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/vxlan), [pkg/render/netplan.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/render/netplan.go), [pkg/apply/engine.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/apply/engine.go), [pkg/hostdeps/hostdeps.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/hostdeps/hostdeps.go)。
 
-実装先の案: `internal/network`, `internal/runtimeplan`, `internal/protocol/raclient`, `internal/protocol/aftr`, `internal/legacyconfig`, `internal/protocol/dhcp6`, `internal/protocol/dhcp6config`。
+実装先の案: `internal/network`, `internal/runtimeplan`, `internal/protocol/raclient`, `internal/protocol/aftr`, `internal/protocol/dhcp6`, `internal/protocol/dhcp6config`。
 
 PD/IA_NA由来のDS-Lite sourceを実装した。`source_delegation`でLAN割当を選び、
 同じ/64のLAN `::1`とB4 `::100`を一つのPD worker/writerが管理する。旧localDelegatedAddressと
@@ -1148,7 +1148,7 @@ DHCPv6 server自身の別途policy必須issueは出なくなった。変換全�
 
 再利用・比較元: [pkg/controller/chain/chain.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/chain.go), [pkg/controller/chain/dhcp_profile_leases.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/dhcp_profile_leases.go), [pkg/controller/dnsresolver](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/dnsresolver), [pkg/dhcpeventqueue](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/dhcpeventqueue), [pkg/dhcpfingerprint](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/dhcpfingerprint), [pkg/raobserver](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/raobserver)。
 
-実装先の案: `internal/protocol/dhcpserver`, `internal/protocol/dhcp6server (新設予定)`, `internal/protocol/dhcprelay (新設予定)`, `internal/protocol/dns`, `internal/runtimeplan`, `internal/legacyconfig`。
+実装先の案: `internal/protocol/dhcpserver`, `internal/protocol/dhcp6server (新設予定)`, `internal/protocol/dhcprelay (新設予定)`, `internal/protocol/dns`, `internal/runtimeplan`。
 
 #### OPS-01 — resource ControlAPI と基本 CLI
 
@@ -1229,7 +1229,7 @@ default凍結後のIPv4 TCP接続が一度300msでtimeoutし、trace付き／通
 
 再利用・比較元: [pkg/bgp](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/bgp), [pkg/bgpdaemon](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/bgpdaemon), [pkg/controller/bgp](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/bgp), [pkg/controller/bfd](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/bfd)。
 
-実装先の案: `internal/protocol/bgp`, `internal/protocol/bfd`, `internal/runtimeplan`, `internal/network`, `internal/legacyconfig`。
+実装先の案: `internal/protocol/bgp`, `internal/protocol/bfd`, `internal/runtimeplan`, `internal/network`。
 
 BGPの補助status/history書込み失敗はprotocol停止と結合しない。
 実filesystem失敗下のsession/FIB更新・撤去と、supervisor/control/BGP停止中に
@@ -1261,7 +1261,7 @@ subnet・cached MAC・受信high-portの不要な制約を削除した。全prof
 
 再利用・比較元: [pkg/wireguard](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/wireguard), [pkg/controller/chain/wireguard.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/wireguard.go)。
 
-実装先の案: `internal/network`, `internal/runtimeplan`, `internal/legacyconfig`, `internal/protocol/wireguard-control (新設予定)`。
+実装先の案: `internal/network`, `internal/runtimeplan`, `internal/protocol/wireguard-control (新設予定)`。
 
 #### HA-01 — VRRP・VirtualAddress・RouterdCluster
 
@@ -1307,7 +1307,7 @@ track参照を宣言resource IDへ統一し、BFD/BGPも元の有限な状態観
 
 再利用・比較元: [pkg/controller/vrrp](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/vrrp), [pkg/ha](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/ha), [pkg/api/specs.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go)。
 
-実装先の案: `internal/protocol/vrrp`, `internal/runtimeplan`, `internal/network`, `internal/cluster (新設予定)`, `internal/legacyconfig`。
+実装先の案: `internal/protocol/vrrp`, `internal/runtimeplan`, `internal/network`, `internal/cluster (新設予定)`。
 
 通常DADの独立keepalived 2.2.8試験で、IPv6 unicast/multicastのworker再起動を再現・修正した。
 第1世代起動、実VIP TCP/UDP、切替/交替/復旧を確認した。仮想HA addressの意図したNoDADとは別である。
@@ -1492,7 +1492,7 @@ HA-02/EXT-02も未完了であり、今回の接続継続だけでhomert置換�
 
 再利用・比較元: [pkg/dynamicconfig](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/dynamicconfig), [pkg/plugin](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/plugin), [pkg/lifecycle](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/lifecycle)。
 
-実装先の案: `internal/resourceprogram (新設予定)`, `internal/extensions (新設予定)`, `internal/legacyconfig`。
+実装先の案: `internal/resourceprogram (新設予定)`, `internal/extensions (新設予定)`。
 
 #### CLOUD-01 — provider inventory/action の native adapter
 
@@ -2010,7 +2010,7 @@ source fixture、isolated lab、engine PoC、provider simulator の実装は現�
 
 | 使用する段階 | 必要な入力 |
 | --- | --- |
-| CORE-01 / QUAL-01 | 2026-11-02、homert03（VM 158）の現行設定は既存の読取専用PVE guest-agent経路で取得済み。109 resource全体はcurrent mainのmigrationで39 issueとなり未受入。homert02は同じ経路のControlMaster socketを利用できず、ローカルにPVE CLI/APIとVM一覧もないため現行設定を取得できなかった。homert02/03差分は未確認。新規SSH接続・VM起動・設定変更はしていない。homert02の読取専用経路、対象機のengine版、期待するWAN/PBR/HA動作は引き続き確認対象。 |
+| CORE-01 / QUAL-01 | 2026-11-02、ユーザー指定の `~/homert02/hosts/{homert02,homert03}/router.yaml` 作業コピーを読取専用で確認した。両方109 resourceで、同じ主要機能を持ち、node固有のaddress/interface、BGP router ID、VRRP priority/peer、DHCP lease同期先、Tailscale node名などが異なる。両router.yamlはremote worktreeで未commitのためimmutableなcommit baselineではない。保存設定はintentであり、現在の適用状態・live status・外部engine版・実WAN通信の証拠ではない。旧設定の自動変換は製品入口にせず、native設定例で必要な機能を表す。対象機/NIC・ONU接続とhomert全体の通信受入は引き続き必要。 |
 | CORE-06 | 各engineの正確な版・plugin・配布条件。用途に必要な機能集合をPoCの合否にする。 |
 | HA-02 / HA-03 | 新旧node混在を必要とするか、maintenance切替を許すか。選んだ方式のfixtureと戻し手順を用意する。 |
 | CLOUD-01 / DIST-03 | 使い捨てcloud環境、許可範囲、費用/cleanup条件。実credentialをrepositoryやimageへ保存しない。 |

@@ -3,12 +3,9 @@ package dhcpserverconfig
 import (
 	"encoding/json"
 	"net"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/imksoo/routerd/pkg/api"
 )
 
 func validConfig() Config {
@@ -97,52 +94,6 @@ func TestScopeSelectorsAndNormalizationAreStable(t *testing.T) {
 	c.Scopes[1].Match.OUIPrefixes = []string{"02-aa-bb"}
 	if err := Validate(c); err == nil {
 		t.Fatal("duplicate OUI selectors accepted")
-	}
-}
-
-func TestLegacyAdapterPreservesDefaultsProfilesAndOptions(t *testing.T) {
-	seed := validConfig()
-	spec := api.DHCPv4ServerSpec{Interface: "lan0", AddressPool: api.DHCPAddressPoolSpec{Start: "192.0.2.100", End: "192.0.2.150", LeaseTime: "2h"}, Gateway: "192.0.2.1", DNSServers: []string{"192.0.2.53"}, Domain: "example.test", Profiles: []api.DHCPv4ServerProfileSpec{{Name: "voice", AddressPool: api.DHCPAddressPoolSpec{Start: "192.0.2.160", End: "192.0.2.180", LeaseTime: "1d"}, Netmask: "255.255.255.0", Gateway: "192.0.2.1", Options: []Option{{Name: "mtu", Value: "1400"}}}}, Scopes: []api.DHCPv4ServerScopeSpec{{Name: "phones", ProfileRef: "voice", Match: Match{OUIPrefixes: []string{"02:aa:bb"}}}}}
-	c, err := FromSpec(seed, spec, []api.DHCPv4ReservationSpec{{MACAddress: "02:00:00:00:00:01", IPAddress: "192.0.2.10", Hostname: "printer", LeaseTime: "30m"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.Primary.LeaseSeconds != 7200 || c.Primary.Router != "192.0.2.1" || !reflect.DeepEqual(c.Primary.DNSServers, []string{"192.0.2.53"}) || c.Scopes[0].LeaseSeconds != 86400 || c.Scopes[0].Options[0].Name != "mtu" || c.Reservations[0].LeaseSeconds != 1800 {
-		t.Fatalf("%+v", c)
-	}
-	spec.RouterSource = "none"
-	spec.DNSSource = "none"
-	c, err = FromSpec(seed, spec, nil)
-	if err != nil || c.Primary.Router != "" || len(c.Primary.DNSServers) != 0 {
-		t.Fatalf("none sources: %+v %v", c, err)
-	}
-	spec.RouterSource = ""
-	spec.DNSSource = ""
-	spec.Authoritative = true
-	c, err = FromSpec(seed, spec, nil)
-	if err != nil || c.Primary.Router != seed.ServerAddress || !reflect.DeepEqual(c.Primary.DNSServers, []string{seed.ServerAddress}) {
-		t.Fatalf("scope-style defaults: %+v %v", c, err)
-	}
-	if _, err := FromSpec(seed, spec, []api.DHCPv4ReservationSpec{{MACAddress: "02:00:00:00:00:01", IPAddress: "192.0.2.10", LeaseTime: "4294967295"}}); err == nil {
-		t.Fatal("DHCPv4 reservation accepted an infinite lease")
-	}
-	for _, edit := range []func(*api.DHCPv4ServerSpec){
-		func(s *api.DHCPv4ServerSpec) { s.DNS.Enabled = true },
-		func(s *api.DHCPv4ServerSpec) { s.LeaseFile = "/var/lib/misc/dnsmasq.leases" },
-		func(s *api.DHCPv4ServerSpec) { s.GatewayFrom.Resource = "VirtualAddress/router" },
-		func(s *api.DHCPv4ServerSpec) { s.Server = "kea" },
-		func(s *api.DHCPv4ServerSpec) { s.Role = "transit" },
-		func(s *api.DHCPv4ServerSpec) { s.AddressPool.LeaseTime = "4294967295" },
-		func(s *api.DHCPv4ServerSpec) { s.Profiles[0].AddressPool.LeaseTime = "4294967295" },
-		func(s *api.DHCPv4ServerSpec) { s.Scopes[0].Gateway = "192.0.2.1" },
-	} {
-		b, _ := json.Marshal(spec)
-		var s api.DHCPv4ServerSpec
-		_ = json.Unmarshal(b, &s)
-		edit(&s)
-		if _, err := FromSpec(seed, s, nil); err == nil {
-			t.Fatal("unresolved/backend intent silently accepted")
-		}
 	}
 }
 

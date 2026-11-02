@@ -16,7 +16,7 @@ DHCP HA は VRRP が配布役を選び、dnsmasq に VIP と物理 ingress を�
 
 同じ`1a3843b`で`make check-health-pbr`を実行し、独立Linux peerと実supervisor/control/network/Health workerによる二WANの`TestDaemonConnectionMarkedEgressPolicy`、`TestDaemonHealthPBRFailoverAndRecovery`、`TestDaemonEgressRouteHealthyMultipath`が通過した。各試験はTCP/UDP、packet capture、Health worker復旧、失効とconfirmed rollbackを対象にする。PVEのfull homert03通信受入や実ONUの資格には流用しない。raw log/capture/stageは保持しない。
 
-同じcurrent buildでDHCP/DNS実daemon suiteを再実行し、独立BusyBox clientによる`TestDaemonImportedDHCPLeases`、`TestDaemonImportedDHCPStickyHistory`、`TestDaemonDHCPFingerprints`、`TestDaemonMigratedDHCPUnmanagedLAN`、`TestDaemonMigratedDHCPLogs`、`TestDaemonDHCPDNSAndOwnershipExpiry`、`TestDaemonDHCPDNSWithDelayedNetworkObservation`、`TestDaemonDHCPDNSWithDelayedStatePublication`、`TestDaemonMigratedDHCPDNSAndOwnershipExpiry`が通過した。これは独立clientを使う単体router経路のDHCPv4/DNS確認であり、PVE full profile、DHCPv6/SLAAC、DoH、NATまたは実回線の合格ではない。raw log/stageは削除する。
+旧設定変換に依存した DHCP/DNS fixture とその過去の合格記録は、変換器の削除に伴い現行実装の証拠から外した。現在の受入入口は `scripts/daemon-tests.py` の native `ResourceProgram` 試験である。この作業ツリーでは統合試験をまだ再実行しておらず、実行環境に `CAP_NET_ADMIN` / `CAP_NET_RAW` がないため、実daemonのnetns試験はここでは起動できない。
 
 `fff1e29`では`make check-dhcp6`も実行し、独立dnsmasq/radvd/DHCPv6 peerとの`TestDaemonDHCP6RAIndependentPeers`と`TestDaemonDHCP6DuplicateAddressDecline`が通過した。DUID、RA、PDを含むworker交換を確認するが、PVE full profileや実HGW/ONUの受入ではない。raw log/stageは削除する。
 
@@ -94,7 +94,7 @@ DHCPv6 PD の再起動後 Rebind と、不良 candidate から known-good runtim
 
 物理試験を開始するには、専用switch VLAN/portとONU/HGWへ至る専用回線、または既存経路の計画停止のいずれかが必要である。前者なら、新規の隔離VMまたは専用機へ三NICを接続し、試験専用のIPv4/IPv6 address、DHCP identity、観測用LAN client、WAN/LAN capture点を割り当てる。開始直前と切戻し後に、対象VM設定、NIC link/route、routerd設定のSHA-256を読取比較する。後者ではhomert02/03停止または物理ケーブル差替えの範囲、予定時間、旧VM再起動と元bridge/NIC/route hash一致を切戻し条件として明示した承認が必要である。現時点ではいずれの変更も実施していない。
 
-2026-11-02: homert02設定取得に使う既存読取専用guest-agent経路はControlMaster socketを利用できず、ローカルにもPVE CLI/APIやVM一覧がないため、VM IDの特定と設定読取はできなかった。homert02/03差分は未確認であり、新しいSSH接続・VM起動・設定変更はしていない。現在の開発hostには仮想NICしかない。次の対象実機受入には、専用switch port/VLANとONU/HGWへの隔離回線、対象router/NIC、独立有線client、WAN/LAN capture点が必要。既存共有経路を使う場合は計画停止と具体的な復旧手順が必要。
+2026-11-02: ユーザーが示した `chatty.lain.local:~/homert02` の設定を読み取り専用で確認した。homert02/03は各109 resourceで、NTPはDHCPv6 informationから学習するsourceと `ntp.jst.mfeed.ad.jp` / `ntp.nict.jp` の条件付きstatic fallbackを使う。続いてcurrent source treeから `make check-ntp-dhcp6 DHCP6_SERVER=/usr/sbin/dhcpd DOCKER='sudo -n docker'` をexit 0で実行した。実supervisor/control/network/NTP/DHCPv6/VRRP worker、ISC DHCPv6、Keepalived、chronyd、独立LAN chronyd、実DNS peerを使い、設定中の両hostnameをDNS照会し、実NTP packet drop後の復旧、learned source期限切れ/fallback/reacquisition、VRRP切替、supervisor/control停止中の期限切れと復旧、LAN NTP応答をpcapで確認した。これは独立Linux namespaceの実通信であり、homertのDoH/条件付きDNSサービスそのもの、通常PD lifetime、実ONU/NIC、全設定を載せたPVE VM受入ではない。リモートrepo/configは変更していない。PVE VM IDと実行時設定差分は未確認で、現在の開発hostには仮想NICしかない。対象機器での受入には、隔離L2接続先、独立有線client、WAN/LAN capture点が必要である。既存共有経路を使う場合は計画停止と復旧手順が必要。
 
 同日、管理hostの実HGW接続に、別MAC・private network namespace・独立LAN clientだけを作る`make check-uplink UPLINK_SECONDS=60`をcurrent `4dc020c`で実行した。WAN RA/DHCPv6 PD初回交換、実AFTR DS-LiteとIPv4復路、LAN DHCPv4/DHCPv6/SLAAC、IPv4/IPv6 HTTPS、学習DNS UDP/TCP、条件付きDNS障害/復帰、PD workerのSIGKILL/正常再起動、zero-lifetime RA撤去を確認した。自然PD Renewは既存の7,800秒受入結果を再利用し、この60秒試験では待たなかった。namespace、別MAC、capture、stateは終了時に削除した。本番homert02/03、管理address、IPv4/IPv6 route、resolver、PVE VM設定は操作しなかった。route/resolver/PVE設定のhashは開始前後で一致した。管理interfaceの生JSONにはDHCP lifetimeが含まれて毎秒変わるため、今後の比較はaddress本体のみを正規化してhash化する。これはONU直結、物理NIC MTU/PMTU、連続TCPまたは切替受入ではない。
 

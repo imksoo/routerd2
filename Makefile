@@ -53,8 +53,6 @@ help:
 	  'make check-dslite-pmtu Verify IPv4 PMTU feedback and same-socket UDP recovery over DS-Lite' \
 	  'make check-pppoe        Verify real PPPoE PAP/CHAP, LAN forwarding and recovery' \
 	  'make check-pppoe-pd     Verify PPP PD recovery, WAN replacement and LAN IPv6 with independent ISC DHCP' \
-	  'make check-ha-dhcp-initial Verify old live lease import, takeover and peer reconciliation' \
-	  'make check-ha-import   Verify imported NAT synchronization across two-router handoff' \
 	  'make check-ha-dhcp-scopes Verify shared secondary DHCP ranges across HA handoff' \
 	  'make check-ha-state    Preserve DHCP/TCP/UDP state across two native routers' \
 	  'make check-ha-pd       Verify shared PD across two routers with different BOOTTIME clocks' \
@@ -71,7 +69,6 @@ help:
 	  'make check-syslog      Verify UDP log delivery, replacement and receiver outage with forwarding' \
 	  'make check-ntp         Verify time synchronization and LAN NTP with independent chronyd' \
 	  'make check-ntp-dhcp6   Verify learned time sources, original expiry and VRRP conditions with independent peers' \
-	  'make check-ntp-import  Verify imported client/server time sources, conditions and LAN forwarding' \
 	  'make check-bfd         Verify BFD/BGP routing domains with real workers' \
 	  'make check-dns-upstream Verify independent probe/query deadlines with dnsmasq' \
 	  'make check-dhcp6-server Verify LAN information service and durable DUID with BusyBox' \
@@ -401,7 +398,7 @@ qemu-vrrp-clock:
 	$(PYTHON) scripts/qemu-network.py --suite daemon-vrrp-clock --go '$(GO)' --image-dir $(IMAGE_DIR)
 
 qemu-protocols:
-	@set -eu; for suite in boot-address daemon-dhcp4 daemon-dhcp4-clock daemon-dhcp6-clock daemon-ra-clock daemon-vrrp daemon-vrrp-activation daemon-vrrp-conditional daemon-vrrp-clock daemon-resource-program daemon-health-pbr daemon-management daemon-startup daemon-startup-recovery daemon-eventrule daemon-event-archive daemon-derived daemon-stopped-health daemon-dhcp-dns daemon-legacy-dhcp-dns daemon-bgp daemon-bgp-derived daemon-bfd daemon-bfd-derived dhcp dhcp-server vrrp ra-client aftr bfd; do \
+	@set -eu; for suite in boot-address daemon-dhcp4 daemon-dhcp4-clock daemon-dhcp6-clock daemon-ra-clock daemon-vrrp daemon-vrrp-activation daemon-vrrp-conditional daemon-vrrp-clock daemon-resource-program daemon-health-pbr daemon-management daemon-startup daemon-startup-recovery daemon-eventrule daemon-event-archive daemon-derived daemon-stopped-health daemon-dhcp-dns daemon-bgp daemon-bgp-derived daemon-bfd daemon-bfd-derived dhcp dhcp-server vrrp ra-client aftr bfd; do \
 	  $(PYTHON) scripts/qemu-network.py --suite "$$suite" --go '$(GO)' --image-dir $(IMAGE_DIR); \
 	done
 
@@ -439,15 +436,6 @@ dnsmasq-engine:
 	  trap '$(DOCKER) rm "$$engine_id" >/dev/null' EXIT HUP INT TERM; \
 	  $(DOCKER) export "$$engine_id" | tar --no-same-owner -xf - -C $(DNSMASQ_DIR) dnsmasq-engine.tar dnsmasq-sources.tar
 
-# The imported graph shares the existing isolated two-router state-handoff peer.
-.PHONY: check-ha-dhcp-initial
-check-ha-dhcp-initial: build build-publisher conntrack-engine dnsmasq-engine
-	$(PYTHON) scripts/ha-state-peer.py --initial-leases
-
-.PHONY: check-ha-import
-check-ha-import: build build-publisher conntrack-engine dnsmasq-engine
-	$(PYTHON) scripts/ha-state-peer.py --import-conntrack
-
 .PHONY: check-ha-dhcp-scopes
 check-ha-dhcp-scopes: build build-publisher conntrack-engine dnsmasq-engine
 	$(PYTHON) scripts/ha-state-peer.py --dhcp-scopes
@@ -455,10 +443,6 @@ check-ha-dhcp-scopes: build build-publisher conntrack-engine dnsmasq-engine
 .PHONY: check-ha-state
 check-ha-state: build build-publisher conntrack-engine dnsmasq-engine
 	$(PYTHON) scripts/ha-state-peer.py
-
-.PHONY: check-ha-lease-import
-check-ha-lease-import: build build-publisher conntrack-engine dnsmasq-engine
-	$(PYTHON) scripts/ha-state-peer.py --dhcp6-server '$(DHCP6_SERVER)' --lease-sync-import
 
 .PHONY: check-ha-pd
 check-ha-pd: build build-publisher conntrack-engine dnsmasq-engine
@@ -506,20 +490,16 @@ chrony-engine:
 	  $(DOCKER) export "$$engine_id" | tar --no-same-owner -xf - -C $(CHRONY_DIR) chrony-engine.tar chrony-sources.tar
 
 .PHONY: check-ntp
-check-ntp: build chrony-engine
+check-ntp: build chrony-engine dnsmasq-engine
 	$(PYTHON) scripts/ntp-peer.py
 
 .PHONY: check-ntp-dhcp6
-check-ntp-dhcp6: build chrony-engine
+check-ntp-dhcp6: build chrony-engine dnsmasq-engine
 	$(PYTHON) scripts/ntp-peer.py --profile learned --dhcp6-server '$(DHCP6_SERVER)' --output dist/ntp-dhcp6-peer
 
 .PHONY: qemu-ntp
 qemu-ntp:
 	$(MAKE) qemu-pppoe QEMU_PROFILE=time QEMU_POWER_ACTION=reboot QEMU_OUTPUT=dist/ntp-appliance
-
-.PHONY: check-ntp-import
-check-ntp-import: build chrony-engine
-	$(PYTHON) scripts/ntp-peer.py --profile import --dhcp6-server '$(DHCP6_SERVER)' --output dist/ntp-import-peer
 
 .PHONY: check-dns-retention
 check-dns-retention: build
@@ -552,7 +532,6 @@ check-sam-admission:
 check-event-group:
 	@test -n "$(OLD_EVENTD)" || (echo "set OLD_EVENTD to an independent Linux routerd-eventd executable"; exit 1)
 	@umask 022; OLD_EVENTD="$(OLD_EVENTD)" go test -race -count=1 -v ./internal/control -run '^TestEventGroup'
-	@umask 022; go test ./internal/legacyconfig -run '^TestEventGroup'
 
 .PHONY: check-event-group-product
 check-event-group-product: build

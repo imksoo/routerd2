@@ -17,7 +17,7 @@ revoke it. A failed remote withdrawal is retried without registering that identi
 again. Worker shutdown is not a revoke. A deliberately changed signed identity
 can enroll after the old identity was revoked.
 
-`go test -race ./internal/protocol/samclient ./internal/legacyconfig` covers the
+`go test -race ./internal/protocol/samclient` covers the
 HTTP client lifecycle, two-RR direct agreement, renewal, deadline expiration,
 withdrawal delivery and restart. `make check-sam-enrollment
 OLD_ROUTERD=/absolute/path/to/linux/routerd` runs against an independent actual

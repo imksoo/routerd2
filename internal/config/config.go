@@ -42,7 +42,7 @@ const MaxStoredReadSize = MaxRecordSize
 type Document = resourceprogram.Program
 type Native = resourceprogram.Native
 
-// FromNative constructs a source program for internal importers and fixtures.
+// FromNative constructs a source program for tests and fixtures.
 // It does not decode the discarded routerd2 prototype configuration format.
 func FromNative(native Native) Document { return resourceprogram.FromNative(native) }
 

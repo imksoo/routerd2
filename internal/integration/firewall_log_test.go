@@ -14,6 +14,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -27,13 +28,19 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd/pkg/logstore"
+	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
-	"github.com/imksoo/routerd2/internal/legacyconfig"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/logging"
+	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/firewalllogconfig"
+	"github.com/imksoo/routerd2/internal/protocol/syslogconfig"
+	"github.com/imksoo/routerd2/internal/protocol/webconsoleconfig"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
+	"github.com/imksoo/routerd2/internal/retention"
 	"github.com/imksoo/routerd2/internal/runtimeconfig"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
+	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sys/unix"
@@ -89,17 +96,31 @@ func TestDaemonFirewallPacketLogs(t *testing.T) {
 		}
 	}()
 	defer func() { archive.Close(); <-archiveDone }()
-	raw := []byte(firewallLogFixture)
-	imported, err := legacyconfig.Compile(append(append([]byte{}, raw...), []byte(firewallHistoryPolicy)...))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// NFLOG is family-independent. The IPv6 fixture address is explicit native
+	retentionConfig := &retention.Config{MaxAgeSeconds: 8, IntervalSeconds: 86400, Vacuum: true, Syslog: []syslogconfig.Config{{Address: "198.51.100.3:5514", Facility: "local0", Tag: "firewall-archive", MinLevel: "info"}}}
+	doc := config.FromNative(config.Native{
+		Network: network.Desired{
+			Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"198.51.100.1/24"}}},
+			Firewall: &network.Firewall{Input: &network.FirewallChain{
+				Policy: "drop",
+				Log:    &network.PacketLog{Group: 1, CopyRange: 2048, Every: 1},
+				Rules: []network.FirewallRule{
+					{Match: network.PacketMatch{Protocol: "udp", DestinationPorts: []network.PortRange{{Start: 18081}}}, Action: "accept"},
+					{Match: network.PacketMatch{Protocol: "udp", DestinationPorts: []network.PortRange{{Start: 18082}}}, Action: "reject", Log: &network.PacketLog{Group: 1, CopyRange: 2048, Every: 1}},
+					{Match: network.PacketMatch{Protocol: "tcp", DestinationPorts: []network.PortRange{{Start: 8080}, {Start: 2222}}}, Action: "accept"},
+				},
+			}},
+		},
+		Services: []serviceconfig.Service{
+			{Name: "packets", FirewallLog: &firewalllogconfig.Config{Group: 1, Retention: retentionConfig}},
+			{Name: "history", WebConsole: &webconsoleconfig.Config{Listen: netip.MustParseAddrPort("198.51.100.1:8080"), BasePath: "/ops/"}},
+		},
+	})
+	// NFLOG is family-independent. The IPv6 address is explicit native
 	// configuration; no DHCP/PD setup is needed to test packet logging.
-	imported.Document.Resources = append(imported.Document.Resources, resourceprogram.Resource{ID: "address/router-v6", Address: &resourceprogram.Address{Interface: "wan0", CIDR: "2001:db8:1::1/64"}})
+	doc.Resources = append(doc.Resources, resourceprogram.Resource{ID: "address/router-v6", Address: &resourceprogram.Address{Interface: "wan0", CIDR: "2001:db8:1::1/64"}})
 	work := t.TempDir()
 	var historyPath, historyService string
-	for _, resource := range imported.Document.Resources {
+	for _, resource := range doc.Resources {
 		if resource.Service != nil && resource.Service.FirewallLog != nil {
 			cfg := resource.Service.FirewallLog
 			historyService = resource.Service.ModuleName()
@@ -123,7 +144,7 @@ func TestDaemonFirewallPacketLogs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := startFixtureDaemonConfigured(t, imported.Document, work, nil, runtimeconfig.SSH{
+	f := startFixtureDaemonConfigured(t, doc, work, nil, runtimeconfig.SSH{
 		Listen: "0.0.0.0:2222", User: "admin", AuthorizedKeys: []string{string(ssh.MarshalAuthorizedKey(signer.PublicKey()))},
 	})
 	hostBytes, err := os.ReadFile(filepath.Join(work, "state", "ssh_host_ed25519_key"))
@@ -526,7 +547,7 @@ func TestDaemonFirewallPacketLogs(t *testing.T) {
 		t.Fatalf("invalid firewall history filter produced successful output: %v %s", err, failedOutput.String())
 	}
 	var consolePath string
-	for _, resource := range imported.Document.Resources {
+	for _, resource := range doc.Resources {
 		if resource.Service != nil && resource.Service.WebConsole != nil {
 			consolePath = "resources[" + resource.ID + "].service.web_console.title"
 		}
@@ -632,13 +653,15 @@ func TestDaemonFirewallPacketLogs(t *testing.T) {
 	t.Log("independent HTTP history retained events through restart/archive failure and removed expired events only after archive recovery")
 	t.Logf("firewall history survived restart, expired at its original packet age, and reached independent UDP archive before deletion; newer rows retained; IPv4/IPv6 allow/drop/reject held for %d maintenance rounds", rounds)
 
-	// Remove only logging through the same import boundary; packet verdicts stay.
-	disabled, err := legacyconfig.Compile([]byte(strings.Replace(string(raw), "enabled: true", "enabled: false", 1)))
-	if err != nil {
-		t.Fatal(err)
+	// Remove only the logging service; packet verdicts remain configured.
+	disabled := doc
+	disabled.Resources = nil
+	for _, resource := range doc.Resources {
+		if resource.Service == nil || resource.Service.FirewallLog == nil {
+			disabled.Resources = append(disabled.Resources, resource)
+		}
 	}
-	disabled.Document.Resources = append(disabled.Document.Resources, imported.Document.Resources[len(imported.Document.Resources)-1])
-	if err := f.control.Do(context.Background(), "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: 1, RequestID: "remove-packet-log", Config: disabled.Document}, nil); err != nil {
+	if err := f.control.Do(context.Background(), "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: 1, RequestID: "remove-packet-log", Config: disabled}, nil); err != nil {
 		t.Fatal(err)
 	}
 	// A stopped collector releases its group; the kernel has no listener ownership
@@ -680,68 +703,3 @@ func TestDaemonFirewallPacketLogs(t *testing.T) {
 	f.stop()
 	t.Log("logging removal stopped its worker without changing packet verdicts; complete product shutdown succeeded")
 }
-
-const firewallLogFixture = `apiVersion: routerd.net/v1alpha1
-kind: Router
-metadata: {name: firewall-events}
-spec:
-  resources:
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: Interface
-      metadata: {name: wan}
-      spec: {ifname: wan0, managed: true, adminUp: true}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: IPv4StaticAddress
-      metadata: {name: router}
-      spec: {interface: wan, address: 198.51.100.1/24}
-    - apiVersion: firewall.routerd.net/v1alpha1
-      kind: FirewallZone
-      metadata: {name: outside}
-      spec: {role: untrust, interfaces: [Interface/wan]}
-    - apiVersion: firewall.routerd.net/v1alpha1
-      kind: FirewallPolicy
-      metadata: {name: policy}
-      spec: {logDeny: true, sameRoleAccept: true}
-    - apiVersion: firewall.routerd.net/v1alpha1
-      kind: FirewallRule
-      metadata: {name: allow-echo}
-      spec: {fromZone: outside, toZone: self, protocol: udp, port: 18081, action: accept}
-    - apiVersion: firewall.routerd.net/v1alpha1
-      kind: FirewallRule
-      metadata: {name: reject-probe}
-      spec: {fromZone: outside, toZone: self, protocol: udp, port: 18082, action: reject, log: true}
-    - apiVersion: firewall.routerd.net/v1alpha1
-      kind: FirewallEventLog
-      metadata: {name: packets}
-      spec:
-        enabled: true
-        path: /var/log/routerd/firewall-events.db
-        nflogGroup: 1
-        log: {acceptSampleRate: 0, dropSampleRate: 1, copyRange: 2048, reject: true}
-    - apiVersion: system.routerd.net/v1alpha1
-      kind: WebConsole
-      metadata: {name: history}
-      spec: {enabled: true, listenAddress: 198.51.100.1, port: 8080, basePath: /ops/}
-    - apiVersion: firewall.routerd.net/v1alpha1
-      kind: FirewallRule
-      metadata: {name: allow-console}
-      spec: {fromZone: outside, toZone: self, protocol: tcp, port: 8080, action: accept}
-    - apiVersion: firewall.routerd.net/v1alpha1
-      kind: FirewallRule
-      metadata: {name: allow-ssh}
-      spec: {fromZone: outside, toZone: self, protocol: tcp, port: 2222, action: accept}
-`
-
-const firewallHistoryPolicy = `
-    - apiVersion: system.routerd.net/v1alpha1
-      kind: LogSink
-      metadata: {name: archive}
-      spec:
-        type: syslog
-        minLevel: info
-        syslog: {network: udp, address: "198.51.100.3:5514", facility: local0, tag: firewall-archive}
-    - apiVersion: system.routerd.net/v1alpha1
-      kind: LogRetention
-      metadata: {name: packets}
-      spec: {retention: 8s, schedule: daily, vacuum: true, signals: [firewallEvents], sinks: [LogSink/archive]}
-`

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,19 +20,16 @@ import (
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
+	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 )
 
-//go:embed testdata/ingress.yaml
-var legacyIngress []byte
-
-// The independent HTTPS servers and client share an isolated LAN with static
-// fixture addresses. The deployed ingress request, intervals, thresholds and
-// VIP tracking remain unchanged. DHCP, DNS, BGP, SAM, a second router and physical
-// deployment are outside this acceptance.
-func TestDaemonImportedIngressHTTPS(t *testing.T) {
+// Independent HTTPS backends and a client exercise native health, conditional
+// DNAT, hairpin source NAT and VRRP tracking through the real kernel.
+func TestDaemonIngressHTTPS(t *testing.T) {
 	if !isolateFixtureTimeout(t, t.Name(), 150*time.Second) {
 		return
 	}
@@ -115,39 +113,9 @@ func TestDaemonImportedIngressHTTPS(t *testing.T) {
 		}
 	})
 	until(t, 5*time.Second, func() bool { _, err := os.Stat(readyPath); return err == nil })
-	source, policy := filepath.Join(work, "source.yaml"), filepath.Join(work, "policy.yaml")
-	if err := os.WriteFile(source, legacyIngress, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(policy, []byte("schema_version: 1\nvrrp:\n  VirtualAddress/k8s-routerd-vip:\n    source_address: 192.0.2.38\n    vip_interface: ingress-ha\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	migrate := exec.CommandContext(t.Context(), filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "config", "migrate", "--policy", policy, source)
-	var diagnostic bytes.Buffer
-	migrate.Stderr = &diagnostic
-	raw, err := migrate.Output()
-	if err != nil {
-		t.Fatal("migrate", err, diagnostic.String())
-	}
-	program, err := config.Parse(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	healthNames := map[string]string{}
-	vrrpName := ""
-	for _, resource := range program.Resources {
-		if resource.Service == nil {
-			continue
-		}
-		if c := resource.Service.Health; c != nil {
-			healthNames[c.Target] = resource.Service.ModuleName()
-		}
-		if resource.Service.VRRP != nil {
-			vrrpName = resource.Service.ModuleName()
-		}
-	}
+	program, healthNames, vrrpName := ingressProgram()
 	if len(healthNames) != 3 || vrrpName == "" {
-		t.Fatal("migrate omitted declared probes or VIP election", healthNames, vrrpName)
+		t.Fatal("native ingress config omitted probes or VIP election", healthNames, vrrpName)
 	}
 	f := startFixtureDaemon(t, program)
 	snapshot := func(module string) json.RawMessage {
@@ -369,7 +337,38 @@ func TestDaemonImportedIngressHTTPS(t *testing.T) {
 	if len(observed) != 3 {
 		t.Fatal("independent HTTPS readiness observations incomplete", observed)
 	}
-	t.Log("imported ingress: exact HTTPS readiness, thresholds, ordered backend handoff/recovery, scoped same-LAN hairpin, all-unhealthy rejection and VRRP wire priority 150/90/150 passed")
+	t.Log("native ingress: exact HTTPS readiness, ordered backend handoff/recovery, same-LAN hairpin, all-unhealthy rejection and VRRP wire priority 150/90/150 passed")
+}
+
+func ingressProgram() (config.Document, map[string]string, string) {
+	const (
+		listenAddress = "192.0.2.248"
+		listenPort    = 6443
+		lan           = "lan0"
+	)
+	forwarding := true
+	listen := network.PacketMatch{Family: 4, InInterface: lan, Destination: listenAddress + "/32", Protocol: "tcp", DestinationPorts: []network.PortRange{{Start: listenPort}}}
+	healthNames := map[string]string{}
+	services := make([]serviceconfig.Service, 0, 4)
+	var resources []resourceprogram.Resource
+	backends := []struct{ address, name string }{{"192.0.2.62", "cp-01"}, {"192.0.2.63", "cp-02"}, {"192.0.2.64", "cp-03"}}
+	var healthIDs []string
+	for i, backend := range backends {
+		name := fmt.Sprintf("kubernetes-api-ing%d", i+1)
+		healthIDs = append(healthIDs, "service."+name)
+		probe := &health.Config{Interface: lan, Target: backend.address, Protocol: "https", Port: listenPort, HTTP: &health.HTTPCheck{Path: "/readyz", Host: "k8s-api.lain.local", ExpectedStatus: []int{200}, TLSSkipVerify: true}, IntervalMillis: 5000, TimeoutMillis: 1000, HealthyThreshold: 2, UnhealthyThreshold: 2}
+		services = append(services, serviceconfig.Service{Name: name, Health: probe})
+		healthNames[backend.address] = "service." + name
+		resources = append(resources, resourceprogram.Resource{ID: "ingress/kubernetes-api/" + backend.name, When: &resourceprogram.FactCondition{Fact: "service." + name + ".active"}, NAT: []network.NATRule{
+			{Type: "dnat", Match: listen, Address: backend.address, Ports: &network.PortRange{Start: listenPort}},
+			{Type: "masquerade", Match: network.PacketMatch{Family: 4, InInterface: lan, OutInterface: lan, Destination: backend.address + "/32", Protocol: "tcp", DestinationPorts: []network.PortRange{{Start: listenPort}}}, OriginalDestination: listenAddress, OriginalPort: listenPort},
+		}})
+	}
+	services = append(services, serviceconfig.Service{Name: "kubernetes-api-vip", VRRP: &vrrp.Config{Interface: lan, VIPInterface: "ingress-ha", Family: "ipv4", SourceAddress: "192.0.2.38", UnicastPeers: []netip.Addr{netip.MustParseAddr("192.0.2.53")}, VirtualRouterID: 50, Priority: 150, Addresses: []string{listenAddress + "/32"}, Track: []vrrp.Track{{Resource: "IngressService/kubernetes-api", IngressHealth: healthIDs, Penalty: 60, HealthyThreshold: 2, UnhealthyThreshold: 3, MaxAgeMillis: 120000}}}})
+	resources = append(resources, resourceprogram.Resource{ID: "ingress/unhealthy-reject", Firewall: &network.Firewall{DisableForward: true, Input: &network.FirewallChain{Policy: "accept", Rules: []network.FirewallRule{{Match: listen, Action: "reject"}}}}})
+	program := config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: lan, AdminState: network.AdminUp, Addresses: []string{"192.0.2.38/24"}}}, Forwarding: network.Forwarding{IPv4: &forwarding}}, Services: services})
+	program.Resources = append(program.Resources, resources...)
+	return program, healthNames, "service.kubernetes-api-vip"
 }
 
 const ingressHTTPSPeer = `import http.server,json,pathlib,ssl,sys,threading

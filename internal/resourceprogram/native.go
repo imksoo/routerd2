@@ -11,10 +11,10 @@ import (
 	"github.com/imksoo/routerd2/internal/network"
 )
 
-// FromNative constructs a program for trusted internal builders such as the
-// original-routerd importer and tests. It is not a decoder for any previous
-// routerd2 format. Compile still validates the result; invalid input is not
-// repaired by dropping fields. No host state is read, and input is not mutated.
+// FromNative constructs a program for trusted internal builders and tests. It
+// is not a decoder for any previous routerd2 format. Compile still validates
+// the result; invalid input is not repaired by dropping fields. No host state
+// is read, and input is not mutated.
 // Interface and service IDs are readable; identities containing IP literals
 // use a short SHA-256 suffix. IDs do not depend on mutable route next hops.
 func FromNative(native Native) Program {

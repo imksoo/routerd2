@@ -171,23 +171,16 @@ def peer(stage, dns_queries=False):
         destination = {'address': '192.0.2.3:5514', 'facility': 'local0', 'tag': 'routerd', 'min_level': 'info'}
         policy = {'max_age_seconds': 3600, 'max_records': 3, 'interval_seconds': 1, 'vacuum': True, 'syslog': [destination]}
         if dns_queries:
-            import yaml
-            source = {"apiVersion": "routerd.net/v1alpha1", "kind": "Router", "metadata": {"name": "dns-retention"}, "spec": {"resources": []}}
-            def add(version, kind, name, spec):
-                source["spec"]["resources"].append({"apiVersion": version+".routerd.net/v1alpha1", "kind": kind, "metadata": {"name": name}, "spec": spec})
-            add("net", "DNSResolver", "resolver", {"listen": [{"name": "lan", "addresses": ["198.51.100.1"], "port": 53, "sources": ["local"]}], "queryLog": {"enabled": True, "path": "/legacy/dns-queries.db"}})
-            add("net", "DNSZone", "home", {"zone": "home.arpa", "records": [{"hostname": "*.lab", "ipv4": "203.0.113.25"}]})
-            add("net", "DNSForwarder", "local", {"resolver": "DNSResolver/resolver", "match": ["home.arpa"], "zoneRefs": ["DNSZone/home"]})
-            add("system", "LogSink", "archive", {"type": "syslog", "syslog": {"network": "udp", "address": destination['address'], "facility": "local0", "tag": "routerd"}})
-            add("system", "LogRetention", "queries", {"retention": "2s", "schedule": "daily", "vacuum": True, "signals": ["dnsQueries"], "sinks": ["LogSink/archive"]})
-            (stage/'legacy.json').write_text(json.dumps(source))
-            imported = yaml.safe_load(run([str(stage/'routerd'), 'config', 'migrate', str(stage/'legacy.json')]))
-            dns_service = next(r['service'] for r in imported['resources'] if r.get('service', {}).get('dns'))
-            dns_name = dns_service['name']
-            dns_policy = dns_service['dns']['query_log_retention']
-            assert dns_policy['max_age_seconds'] == 2 and dns_policy['interval_seconds'] == 86400 and dns_policy['vacuum']
-            dns_policy['interval_seconds'] = 1  # Short natural-expiry acceptance window.
-            resources.extend(imported['resources'])
+            dns_name = 'dns'
+            dns_service = {'id': dns_name, 'service': {'name': dns_name, 'dns': {
+                'resource': dns_name,
+                'spec': {'listen': [{'name': 'lan', 'addresses': ['198.51.100.1'], 'port': 53, 'sources': ['local']}],
+                         'queryLog': {'enabled': True},
+                         'sources': [{'name': 'local', 'kind': 'zone', 'match': ['home.arpa'], 'zoneRef': ['home']}]},
+                'zones': [{'name': 'home', 'spec': {'zone': 'home.arpa', 'records': [{'hostname': '*.lab', 'ipv4': '203.0.113.25'}]}}],
+                'query_log_retention': {'max_age_seconds': 2, 'interval_seconds': 1, 'vacuum': True, 'syslog': [destination]},
+            }}}
+            resources.append(dns_service)
             resources.append({'id': 'console', 'service': {'name': 'console', 'web_console': {'listen': '198.51.100.1:8088', 'base_path': '/ops/', 'title': 'routerd2'}}})
             resources.append({'id': 'console-input', 'firewall': {'disable_forward': True, 'input': {'policy': 'drop', 'rules': [
                 {'match': {'in_interface': 'lo'}, 'action': 'accept'},

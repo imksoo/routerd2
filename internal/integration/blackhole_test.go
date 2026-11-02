@@ -12,7 +12,6 @@ import (
 
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
-	"github.com/imksoo/routerd2/internal/legacyconfig"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
@@ -54,25 +53,10 @@ func TestDaemonBlackholeRoute(t *testing.T) {
 	wanCapture := healthPBRCapture(t, "wan0")
 	lanCapture := healthPBRCapture(t, "lan0")
 	vrrpVIPResponders(t, wan, "4", []string{"198.51.100.20", "10.1.1.1"}, "R")
-	result, err := legacyconfig.Compile([]byte(`apiVersion: routerd.net/v1alpha1
-kind: Router
-metadata: {name: blackhole}
-spec:
-  resources:
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: IPv4Route
-      metadata: {name: private-10-blackhole}
-      spec: {type: blackhole, destination: 10.0.0.0/8, metric: 20}
-`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	plan, err := config.Compile(result.Document)
-	if err != nil {
-		t.Fatal(err)
-	}
-	doc := plan.Native
-	doc.Network.Interfaces = []network.Interface{{Name: "wan0", Addresses: []string{"192.0.2.2/24"}}, {Name: "lan0", Addresses: []string{"198.18.0.1/24"}}}
+	doc := config.Native{Network: network.Desired{
+		Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"192.0.2.2/24"}}, {Name: "lan0", Addresses: []string{"198.18.0.1/24"}}},
+		Routes:     []network.Route{{Destination: "10.0.0.0/8", Blackhole: true, Metric: 20}},
+	}}
 	forward := true
 	doc.Network.Forwarding.IPv4 = &forward
 	doc.Network.Routes = append(doc.Network.Routes, network.Route{Destination: "0.0.0.0/0", Gateway: "192.0.2.1", Interface: "wan0"})

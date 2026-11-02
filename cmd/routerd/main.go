@@ -151,10 +151,6 @@ func run(args []string) error {
 		}
 	case "config":
 		return configure(args[1:])
-	case "dhcp":
-		if len(args) > 1 && (args[1] == "import-leases" || args[1] == "import-sticky") {
-			return importDHCPState(args[1], args[2:], os.Stdout)
-		}
 	case "help", "--help", "-h":
 		return usage()
 	}
@@ -183,10 +179,7 @@ func usage() error {
   routerd config restore --snapshot FILE --expected-revision N [--request-id ID] [--confirmed SECONDS] [--runtime-dir /run/routerd]
   routerd config validate FILE
   routerd config plan FILE
-  routerd config migrate [--policy FILE] FILE
-  routerd dhcp import-leases --config FILE --service NAME --state-dir DIR LEASE_FILE
   routerd config apply --file FILE --expected-revision N [--request-id ID --confirmed SECONDS --runtime-dir ...]
-  routerd dhcp import-sticky --config FILE --service NAME --state-dir DIR STICKY_DATABASE
   routerd release help
   routerd version
 
@@ -331,7 +324,7 @@ func remote(args []string, command string) error {
 
 func configure(args []string) error {
 	if len(args) == 0 {
-		return errors.New("config requires show, export, validate, plan, migrate, apply, confirm, snapshot, snapshots, export-snapshot, delete-snapshot, or restore")
+		return errors.New("config requires show, export, validate, plan, apply, confirm, snapshot, snapshots, export-snapshot, delete-snapshot, or restore")
 	}
 	if args[0] == "show" {
 		return remote(args[1:], "show config")
@@ -356,9 +349,6 @@ func configure(args []string) error {
 	}
 	if args[0] == "restore" {
 		return restoreConfig(args[1:], os.Stdout)
-	}
-	if args[0] == "migrate" {
-		return migrate(args[1:], os.Stdout, os.Stderr)
 	}
 	if args[0] == "plan" {
 		return planConfig(args[1:], os.Stdout)

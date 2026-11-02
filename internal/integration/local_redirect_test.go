@@ -11,10 +11,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
-	"github.com/imksoo/routerd2/internal/legacyconfig"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
+	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/miekg/dns"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
@@ -67,75 +69,33 @@ func TestDaemonLocalDNSRedirect(t *testing.T) {
 	peer := startFixtureDNSMasq(t, wan, "server0", []string{"--no-hosts", "--no-resolv", "--addn-hosts=" + hosts, "--local-ttl=2", "--host-record=who.probe.test,203.0.113.99"})
 	wanCapture := healthPBRCapture(t, "wan0")
 	_ = healthPBRCapture(t, "lan0")
-	result, err := legacyconfig.Compile([]byte(`apiVersion: routerd.net/v1alpha1
-kind: Router
-metadata: {name: local-dns}
-spec:
-  resources:
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: Interface
-      metadata: {name: lan}
-      spec: {ifname: lan0, managed: true, adminUp: true}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: Interface
-      metadata: {name: wan}
-      spec: {ifname: wan0, managed: true, adminUp: true}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: IPv4StaticAddress
-      metadata: {name: router}
-      spec: {interface: lan, address: 198.18.0.1/24}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: IPAddressSet
-      metadata: {name: public-dns}
-      spec: {names: [redirected.test], refreshInterval: 1s}
-    - apiVersion: firewall.routerd.net/v1alpha1
-      kind: LocalServiceRedirect
-      metadata: {name: lan-local-services}
-      spec:
-        interface: lan
-        rules: [{name: public-dns, protocols: [tcp, udp], destinationSetRef: IPAddressSet/public-dns, destinationPort: 53, redirectPort: 5353}]
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: DNSResolver
-      metadata: {name: dns}
-      spec:
-        listen: [{name: local, addresses: [198.18.0.1, '2001:db8:1::1'], port: 5353, sources: [local-zone]}, {name: core, addresses: [127.0.0.1], port: 53, sources: [membership]}]
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: DNSUpstream
-      metadata: {name: member-peer}
-      spec: {protocol: udp, address: 192.0.2.1, port: 53, sourceInterface: wan}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: DNSForwarder
-      metadata: {name: membership}
-      spec: {resolver: DNSResolver/dns, match: [redirected.test], upstreams: [DNSUpstream/member-peer]}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: DNSZone
-      metadata: {name: zone}
-      spec: {zone: probe.test, records: [{hostname: who, ipv4: 203.0.113.7}]}
-    - apiVersion: net.routerd.net/v1alpha1
-      kind: DNSForwarder
-      metadata: {name: local-zone}
-      spec: {resolver: DNSResolver/dns, match: [probe.test], zoneRefs: [DNSZone/zone]}
-    - apiVersion: firewall.routerd.net/v1alpha1
-      kind: FirewallZone
-      metadata: {name: clients}
-      spec: {role: untrust, interfaces: [Interface/lan]}
-    - apiVersion: firewall.routerd.net/v1alpha1
-      kind: FirewallZone
-      metadata: {name: uplink}
-      spec: {role: untrust, interfaces: [Interface/wan]}
-    - apiVersion: firewall.routerd.net/v1alpha1
-      kind: FirewallRule
-      metadata: {name: reject-local}
-      spec: {fromZone: clients, toZone: self, protocol: tcp, port: 5353, action: drop}
-`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	plan, err := config.Compile(result.Document)
-	if err != nil {
-		t.Fatal(err)
-	}
-	doc := plan.Native
+	doc := config.Native{Network: network.Desired{
+		Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"198.18.0.1/24"}}, {Name: "wan0"}},
+		Firewall: &network.Firewall{
+			AddressSets: []network.AddressSet{{Name: "public-dns", Names: []string{"redirected.test"}, RefreshInterval: "1s", Resolvers: []string{"192.0.2.1:53"}}},
+			LocalRedirects: []network.LocalRedirect{
+				{Interface: "lan0", DestinationSet: "public-dns", Protocol: "tcp", DestinationPort: 53, Port: 5353},
+				{Interface: "lan0", DestinationSet: "public-dns", Protocol: "udp", DestinationPort: 53, Port: 5353},
+			},
+			Input: &network.FirewallChain{Policy: "drop", Rules: []network.FirewallRule{
+				{Match: network.PacketMatch{InInterface: "lan0", Protocol: "tcp", DestinationPorts: []network.PortRange{{Start: 5353}}}, Action: "accept"},
+				{Match: network.PacketMatch{InInterface: "lan0", Protocol: "udp", DestinationPorts: []network.PortRange{{Start: 5353}}}, Action: "accept"},
+			}},
+		},
+	}, Services: []serviceconfig.Service{{Name: "dns", DNS: &serviceconfig.DNS{RuntimeConfig: dnsconfig.RuntimeConfig{
+		Resource: "dns",
+		Spec: api.DNSResolverSpec{
+			Listen: []api.DNSResolverListenSpec{
+				{Name: "local", Addresses: []string{"198.18.0.1", "2001:db8:1::1"}, Port: 5353, Sources: []string{"local-zone"}},
+				{Name: "core", Addresses: []string{"127.0.0.1"}, Port: 53, Sources: []string{"membership"}},
+			},
+			Sources: []api.DNSResolverSourceSpec{
+				{Name: "membership", Kind: "upstream", Match: []string{"redirected.test"}, Upstreams: []string{"udp://192.0.2.1:53"}},
+				{Name: "local-zone", Kind: "zone", Match: []string{"probe.test"}, ZoneRef: []string{"zone"}},
+			},
+		},
+		Zones: []dnsconfig.RuntimeZone{{Name: "zone", Spec: api.DNSZoneSpec{Zone: "probe.test", Records: []api.DNSZoneRecordSpec{{Hostname: "who", IPv4: "203.0.113.7"}}}}},
+	}}}}}
 	for i := range doc.Network.Interfaces {
 		if doc.Network.Interfaces[i].Name == "lan0" {
 			doc.Network.Interfaces[i].Addresses = append(doc.Network.Interfaces[i].Addresses, "2001:db8:1::1/64")

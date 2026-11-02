@@ -29,13 +29,13 @@ SUITES = {
     "local-redirect": (("TestDaemonLocalDNSRedirect", ("wan0", "lan0"), 85),),
     "blackhole": (("TestDaemonBlackholeRoute", ("wan0", "lan0"), 55),),
     "firewall": (("TestDaemonFirewallSourceCIDRs", ("wan0",), 55), ("TestDaemonFirewallPacketLogs", ("wan0",), 75)),
-    "host-route": (("TestDaemonImportedIPv6HostRoute", ("wan0",), 75), ("TestDaemonRAHostRoute", ("wan0",), 75), ("TestDaemonImplicitIPv6HostRoute", ("wan0",), 75)),
+    "host-route": (("TestDaemonIPv6HostRoute", ("wan0",), 75), ("TestDaemonRAHostRoute", ("wan0",), 75)),
     "health-pbr": (
         ("TestDaemonConnectionMarkedEgressPolicy", ("wan0", "wan1", "wan2", "wan3", "wan4", "lan0"), 165),
         ("TestDaemonHealthPBRFailoverAndRecovery", ("wan0", "wan1"), 195),
         ("TestDaemonEgressRouteHealthyMultipath", ("wan0", "wan1"), 120),
     ),
-    "ingress": (("TestDaemonImportedIngressHTTPS", ("lan0",), 165),),
+    "ingress": (("TestDaemonIngressHTTPS", ("lan0",), 165),),
     "bgp": (
         ("TestDaemonBGPFIBAndOwnershipExpiry", (), 120),
         ("TestDaemonBGPRecursivePrerequisiteExpiry", (), 120),
@@ -43,7 +43,6 @@ SUITES = {
     "bgp-frr": (
         ("TestDaemonBGPWithFRR", ("wan0", "lan0"), 110),
         ("TestDaemonIPIPBGPWithFRR", ("wan0", "lan0"), 110),
-        ("TestDaemonDHCP4IPIPBGPWithFRR", ("wan0", "lan0"), 260),
         ("TestDaemonBGPTwoFRRPeers", ("wan0", "wan1", "lan0"), 140),
     ),
     "bfd": (
@@ -61,7 +60,7 @@ SUITES = {
     "dhcp6-server": (("TestDaemonDHCP6InformationIndependentClient", ("lan0",), 100),),
     "dhcp6-ra-pd": (
         ("TestDaemonDHCP6RAAddsAddressToPD", ("wire0", "lan0"), 160),
-        ("TestDaemonImportedConditionalLAN", ("wan0", "lan0"), 145),
+        ("TestDaemonConditionalLAN", ("wan0", "lan0"), 145),
     ),
     "pd-ra": (("TestDaemonPDGeneratedRAWorkerLifetime", ("wan0", "lan0"), 120),),
     "dhcp-relay": (
@@ -69,15 +68,13 @@ SUITES = {
         ("TestDaemonDHCPRelayVRFIsolation", ("wan0", "lan0", "wan1", "lan1", "wan2", "lan2"), 120),
     ),
     "dhcp-server": (
-        ("TestDaemonImportedDHCPLeases", (), 90),
-        ("TestDaemonImportedDHCPStickyHistory", (), 90),
         ("TestDaemonDHCPFingerprints", (), 75),
-        ("TestDaemonMigratedDHCPUnmanagedLAN", (), 75),
-        ("TestDaemonMigratedDHCPLogs", (), 75),
+        ("TestDaemonDHCPUnmanagedLAN", (), 75),
+        ("TestDaemonDHCPLogs", (), 75),
         ("TestDaemonDHCPDNSAndOwnershipExpiry", (), 120),
         ("TestDaemonDHCPDNSWithDelayedNetworkObservation", (), 120),
         ("TestDaemonDHCPDNSWithDelayedStatePublication", (), 120),
-        ("TestDaemonMigratedDHCPDNSAndOwnershipExpiry", (), 120),
+        ("TestDaemonScopedDHCPDNSAndOwnershipExpiry", (), 120),
     ),
     "dhcp4": (
         ("TestDaemonDHCPv4DelayedACK", ("wan0",), 180),

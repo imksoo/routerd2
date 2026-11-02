@@ -185,9 +185,9 @@ by service removal/reapply. No product implementation change was needed.
 This qualifies the isolated official 1.104.2 state transition, not the actual
 homert state path, hardware-sealed state or production tailnet migration.
 
-Legacy `TailscaleNode` import requires explicit enrollment and kernel/bootstrap
-ownership policy; see [the importer](../../legacyconfig/README.md). The actual
-CLI-to-PID1 fixture also checks stopped external-daemon state provisioning,
+Fresh native configuration owns Tailscale enrollment and kernel/bootstrap
+policy directly; old routerd dynamic-configuration import is outside this
+product path. The actual CLI-to-PID1 fixture also checks stopped external-daemon state provisioning,
 identity reuse after reauthentication, and accepted IPv4/IPv6 subnet routes
 with LAN TCP/UDP forwarding without NAT. These checks use version 1.104.2 on
 both sides; they do not qualify older or hardware-sealed identity migration.

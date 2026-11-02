@@ -34,11 +34,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-//go:embed testdata/dhcp6-pd-import.yaml
-var legacyDHCP6PD []byte
-
-//go:embed testdata/dhcp6-pd-import-policy.yaml
-var legacyDHCP6PDPolicy []byte
+//go:embed testdata/dhcp6-pd-native.yaml
+var nativeDHCP6PD []byte
 
 func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 	if !isolateFixtureTimeout(t, "TestDaemonDHCP6RAAddsAddressToPD", 140*time.Second) {
@@ -92,37 +89,17 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 	lan := healthPBRCapture(t, "lan0")
 	bridge := "wan0"
 	work := t.TempDir()
-	sourcePath, policyPath := filepath.Join(work, "legacy.yaml"), filepath.Join(work, "policy.yaml")
-	if err := os.WriteFile(policyPath, legacyDHCP6PDPolicy, 0600); err != nil {
+	var program config.Document
+	if err := config.Decode(bytes.NewReader(nativeDHCP6PD), &program); err != nil {
 		t.Fatal(err)
 	}
-	migrate := func(source []byte) config.Native {
-		t.Helper()
-		if err := os.WriteFile(sourcePath, source, 0600); err != nil {
-			t.Fatal(err)
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "config", "migrate", "--policy", policyPath, sourcePath)
-		var review bytes.Buffer
-		cmd.Stderr = &review
-		migrated, err := cmd.Output()
-		if err != nil {
-			t.Fatal(err, review.String())
-		}
-		var imported config.Document
-		if err := config.Decode(bytes.NewReader(migrated), &imported); err != nil {
-			t.Fatal(err)
-		}
-		compiled, err := config.Compile(imported)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return compiled.Native
+	compiled, err := config.Compile(program)
+	if err != nil {
+		t.Fatal(err)
 	}
-	doc := migrate(legacyDHCP6PD)
-	// The imported graph owns PD, LAN serving and advertisements. Add only
-	// the fixture's duplicate-host bridge and IA_NA scenario. Reuse imported RA.
+	doc := compiled.Native
+	// The native graph owns PD, LAN serving and advertisements. Add only
+	// the fixture's duplicate-host bridge and IA_NA scenario.
 	doc.Network.Links = append(doc.Network.Links, network.Link{Name: bridge, Kind: "bridge"})
 	doc.Network.Interfaces = append(doc.Network.Interfaces, network.Interface{Name: "wire0", Master: &bridge}, network.Interface{Name: "dup0", Master: &bridge})
 	var wanName, wanRA string
@@ -133,7 +110,7 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 		}
 	}
 	if wanRA == "" {
-		t.Fatal("PD import did not provide its implicit WAN RA owner")
+		t.Fatal("native configuration has no WAN RA owner")
 	}
 	var wanIAID uint32
 	for _, service := range doc.Services {
@@ -193,7 +170,7 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 	cf, leases := filepath.Join(work, "dhcp6.conf"), filepath.Join(work, "dhcp6.leases")
 	// ISC supplies DNS with IA_PD, but serves the remaining requested options
 	// through Information-request. One option in the PD Reply is not the whole
-	// information exchange declared by the migrated configuration.
+	// information exchange declared by the native configuration.
 	if err := os.WriteFile(cf, []byte(`default-lease-time 30; preferred-lifetime 20;
 option dhcp-renewal-time 10; option dhcp-rebinding-time 20;
 option dhcp6.aftr-name code 64 = text;
@@ -479,9 +456,9 @@ subnet6 2001:db8:42::/64 {
 	}
 	lan.mu.Unlock()
 	if refresh != 12*60*60 {
-		t.Fatalf("Information Reply refresh = %d seconds; legacy leaseTime 12h requires 43200", refresh)
+		t.Fatalf("Information Reply refresh = %d seconds; configured 12h refresh requires 43200", refresh)
 	}
-	t.Log("Information Reply retained legacy leaseTime as refresh seconds", refresh)
+	t.Log("Information Reply retained the configured refresh interval", refresh)
 	changed := time.Now()
 	advertise(true)
 	if err := router.Process.Signal(unix.SIGHUP); err != nil {
@@ -623,7 +600,7 @@ subnet6 2001:db8:42::/64 {
 		t.Fatal("no actual request carried both IA_NA and IA_PD with the shared IAID")
 	}
 	if !requestedInformation {
-		t.Fatal("imported information selection was absent from the WAN option request list")
+		t.Fatal("configured information selection was absent from the WAN option request list")
 	}
 	// Freeze the original authority and input owner. The information server
 	// must expire its learned bytes itself while static search remains usable.
@@ -735,7 +712,7 @@ subnet6 2001:db8:42::/64 {
 			if o.code == 2 {
 				if !bytes.Equal(o.value, []byte{0, 3, 0, 1, 2, 0, 0, 0, 0, 0x42}) {
 					lan.mu.Unlock()
-					t.Fatalf("imported server changed selected DUID on wire: %x", o.value)
+					t.Fatalf("server changed the configured DUID on wire: %x", o.value)
 				}
 				selectedIdentity = true
 			}
@@ -744,7 +721,7 @@ subnet6 2001:db8:42::/64 {
 	}
 	lan.mu.Unlock()
 	if !learnedSNTP || !otherConfig || !rdnss || !dnssl || !selectedIdentity {
-		t.Fatal("missing imported DHCPv6/RA information, original DNS budgets or selected DUID", learnedSNTP, otherConfig, rdnss, dnssl, selectedIdentity)
+		t.Fatal("missing configured DHCPv6/RA information, original DNS budgets or selected DUID", learnedSNTP, otherConfig, rdnss, dnssl, selectedIdentity)
 	}
 	// An explicit client identity is trial intent; reverting it must not
 	// adopt that trial's checkpoint identity as the new automatic default.
@@ -835,18 +812,14 @@ subnet6 2001:db8:42::/64 {
 	information()
 	traffic()
 
-	self := migrate(bytes.Replace(legacyDHCP6PD, []byte("dnsServerFrom: [{resource: DHCPv6Information/wan-info, field: dnsServers}]"), []byte("dnsServerFrom: [{resource: IPv6DelegatedAddress/lan-address, field: address}]"), 1))
-	for i, service := range doc.Services {
-		for _, replacement := range self.Services {
-			if service.Name != replacement.Name {
-				continue
-			}
-			if service.DHCP6Server != nil {
-				doc.Services[i] = replacement
-			}
-			if service.RA != nil {
-				doc.Services[i] = replacement
-			}
+	for i := range doc.Services {
+		if server := doc.Services[i].DHCP6Server; server != nil {
+			server.DNSFrom = nil
+			server.DNSDelegation = &serviceconfig.DNSDelegation{Service: "wan-pd", Delegation: "lan"}
+		}
+		if advertisement := doc.Services[i].RA; advertisement != nil && advertisement.From != nil {
+			advertisement.From.UseLearnedRDNSS = false
+			advertisement.From.RDNSSRouter = true
 		}
 	}
 	doc.Services = append(doc.Services, serviceconfig.Service{Name: "lan-dns", DNS: &serviceconfig.DNS{ListenInterface: "lan0", RuntimeConfig: dnsconfig.RuntimeConfig{
@@ -903,7 +876,7 @@ subnet6 2001:db8:42::/64 {
 		for _, transport := range []string{"+notcp", "+tcp"} {
 			answer, err := exec.Command("dig", "-6", "@"+got.dns[0].String(), "host.wan.test", "AAAA", "+short", "+time=2", "+tries=1", transport).CombinedOutput()
 			if err != nil || !strings.Contains(string(answer), "2001:db8:ffff::9") {
-				return fmt.Errorf("imported self DNS %s: %v: %s", transport, err, answer)
+				return fmt.Errorf("delegated self DNS %s: %v: %s", transport, err, answer)
 			}
 		}
 		return nil

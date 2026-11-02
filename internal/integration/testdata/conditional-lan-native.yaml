@@ -1,0 +1,101 @@
+schema_version: 2
+resources:
+  - id: interface/wan0
+    interface: {name: wan0}
+  - id: interface/lan0
+    interface: {name: lan0}
+  - id: lan-source
+    address: {interface: lan0, cidr: 192.0.2.2/24}
+  - id: forwarding
+    forwarding: {ipv6: true}
+  - id: firewall
+    firewall:
+      input: {policy: accept}
+      forward:
+        - {from: lan0, to: wan0}
+  - id: service/wan-pd
+    service:
+      name: wan-pd
+      dhcp6:
+        interface: wan0
+        iaid: 1
+        request_prefix: true
+        prefix_length: 60
+        delegations:
+          - {name: lan, interface: lan0, subnet_id: 0, host_id: 1}
+  - id: service/gateway
+    service:
+      name: gateway
+      vrrp:
+        interface: lan0
+        family: ipv4
+        version: 3
+        ipv4_checksum: rfc5798
+        source_address: 192.0.2.2
+        unicast_peers: [192.0.2.3]
+        virtual_router_id: 42
+        priority: 100
+        accept_mode: true
+        advert_interval_centiseconds: 100
+        addresses: [192.0.2.254/32]
+        graceful_activation:
+          timeout: 5s
+          ready_when: {fact: service.wan-pd.active}
+  - id: service/announcement
+    when: {fact: service.gateway.elected}
+    service:
+      name: announcement
+      ra:
+        interface: lan0
+        router_lifetime_seconds: 1800
+        dns_lifetime_seconds: 1800
+        mtu: 1500
+        router_preference: high
+        dnssl: [home.test]
+        from:
+          service: wan-pd
+          delegation: lan
+          rdnss_router: true
+  - id: service/information
+    when: {fact: service.gateway.elected}
+    service:
+      name: information
+      dhcp6_server:
+        interface: lan0
+        server_duid: "00030001020000000042"
+        dns_delegation: {service: wan-pd, delegation: lan}
+        domain_search: [home.test]
+        refresh_seconds: 43200
+  - id: service/resolver
+    service:
+      name: resolver
+      dns:
+        resource: resolver
+        spec:
+          listen:
+            - name: local
+              addresses: [127.0.0.1]
+              addressFrom:
+                - {resource: VirtualAddress/gateway, field: address}
+                - {resource: IPv6DelegatedAddress/wan-pd/lan, field: address}
+              port: 53
+              sources: [local, learned, bootstrap]
+          sources:
+            - {name: local, kind: zone, match: [home.test], zoneRef: [home]}
+            - name: learned
+              kind: forward
+              match: [learned.test]
+              upstreamFrom:
+                - {resource: DHCPv6PrefixDelegation/wan-pd, field: dnsServers}
+            - name: bootstrap
+              kind: forward
+              match: [boot.test]
+              upstreams: [udp://peer.provider.test:53]
+              bootstrapResolverFrom:
+                - {resource: DHCPv6PrefixDelegation/wan-pd, field: dnsServers}
+        zones:
+          - name: home
+            spec:
+              zone: home.test
+              records:
+                - {hostname: destination, ipv6: "2001:db8:ffff::9"}

@@ -354,31 +354,31 @@ def peer(stage, homert=False, collector=None):
         target.mkdir(mode=0o700, parents=True)
         shutil.copyfile(seed / "tailscaled.state", target / "tailscaled.state")
         (target / "tailscaled.state").chmod(0o600)
-        legacy = PRODUCT.parents[1] / "internal/integration/testdata/tailscale-import.yaml"
-        if homert:
-            source = stage / "homert-tailscale.yaml"
-            source.write_text(legacy.read_text().replace('advertiseRoutes: [10.42.0.0/24, "fd42::/64"]', "advertiseRoutes: [" + ", ".join(advertised) + "]"))
-            legacy = source
-        policyfile = stage / "import-policy.json"
-        policy = {"schema_version": 1, "tailscale": {"TailscaleNode/overlay": {
-            "interface": "tailscale0", "bootstrap_dns": ["192.0.2.1"], "control_ca_file": str(cert),
-            "enrollment": "key_file", "auth_key_file": str(authfile)}}}
-        if homert:
-            # Existing homert nodes have identity, not a fresh enrollment key.
+        tailscale_intent = {
+            "interface": "tailscale0", "server_url": "https://control.test:8443",
+            "hostname": "product-a", "bootstrap_dns": ["192.0.2.1"],
+            "control_ca_file": str(cert), "advertise_exit_node": True,
+            "advertise_routes": advertised, "accept_routes": False, "shields_up": False,
+        }
+        if not homert:
+            tailscale_intent["auth_key_file"] = str(authfile)
+        else:
+            # This profile starts from an existing identity, not an enrollment key.
             authfile.unlink()
-            policy["tailscale"]["TailscaleNode/overlay"].update(enrollment="saved_identity")
-            policy["tailscale"]["TailscaleNode/overlay"].pop("auth_key_file")
-        def imported_native():
-            policyfile.write_text(json.dumps(policy))
-            file = stage / "imported.yaml"
-            file.write_text(run([str(PRODUCT / "routerd"), "config", "migrate", "--policy", str(policyfile), str(legacy)]))
-            plan = json.loads(run([str(PRODUCT / "routerd"), "config", "plan", str(file)]))
-            return plan["native"]
-        migrated = imported_native()
-        imported = next(s for s in migrated["services"] if "tailscale" in s)
-        if homert:
-            assert not authfile.exists() and not imported["tailscale"].get("auth_key_file")
-        firewall = migrated["network"]["firewall"]
+
+        def native_tailnet_service():
+            return {"name": "overlay", "tailscale": copy.deepcopy(tailscale_intent)}
+
+        imported = native_tailnet_service()
+        firewall = {
+            "input": {"policy": "drop", "rules": [
+                {"match": {"in_interface": "lo"}, "action": "accept"},
+                {"match": {"family": 6, "protocol": "icmpv6"}, "action": "accept"},
+            ]},
+            "forward_chain": {"policy": "drop", "rules": [
+                {"match": {"family": 6, "protocol": "icmpv6"}, "action": "accept"},
+            ]},
+        }
         # New LAN DNS listener: authorize only its declared transport/port.
         firewall["input"]["rules"] += [{"match": {"in_interface": "lan0", "protocol": protocol, "destination_ports": [{"start": 53}]}, "action": "accept"} for protocol in ("udp", "tcp")]
         firewall["input"]["rules"].append({"match": {"in_interface": "lan0", "protocol": "tcp", "destination_ports": [{"start": 8088}]}, "action": "accept"})
@@ -388,7 +388,7 @@ def peer(stage, homert=False, collector=None):
         firewall["forward"] = [{"from": "tailscale0", "to": "lan0"}, {"from": "tailscale0", "to": "uplink0"}, {"from": "lan0", "to": "tailscale0"}]
         module = "service." + imported["name"]
         resources = [
-            {"id": "uplink", "interface": next(i for i in migrated["network"]["interfaces"] if i["name"] == "uplink0")},
+            {"id": "uplink", "interface": {"name": "uplink0", "admin_state": "up"}},
             {"id": "lan", "interface": {"name": "lan0"}},
             {"id": "forwarding", "forwarding": {"ipv4": True, "ipv6": True, "ipv4_rp_filter": 0}},
             {"id": "firewall", "firewall": firewall},
@@ -782,9 +782,8 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
         # Remove enrollment material from current intent. Restart must use the
         # persistent node identity, not silently enroll another node with a key.
         saved = copy.deepcopy(document)
-        policy["tailscale"]["TailscaleNode/overlay"]["enrollment"] = "saved_identity"
-        policy["tailscale"]["TailscaleNode/overlay"].pop("auth_key_file")
-        saved_service = next(s for s in imported_native()["services"] if "tailscale" in s)
+        tailscale_intent.pop("auth_key_file", None)
+        saved_service = native_tailnet_service()
         next(r for r in saved["resources"] if r["id"] == "tailnet")["service"] = saved_service
         product_api("control.sock", "/v1/config/commit", {"expected_revision": 1, "request_id": "saved-identity", "config": saved}, timeout=12)
         wait(lambda: observation().get("backend_state") == "Running" and modules()[module]["generation"] > old["generation"] + 1, 30)
@@ -873,12 +872,10 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
         renewed_file = stage / "renewed.key"
         renewed_file.write_text(renewed["key"])
         renewed_file.chmod(0o600)
-        policy["tailscale"]["TailscaleNode/overlay"].update(enrollment="key_file", auth_key_file=str(renewed_file))
-        accepted_source = stage / "accepted-routes.yaml"
-        accepted_source.write_text(legacy.read_text().replace("acceptRoutes: false", "acceptRoutes: true"))
-        legacy = accepted_source
+        tailscale_intent["auth_key_file"] = str(renewed_file)
+        tailscale_intent["accept_routes"] = True
         reauthenticated = copy.deepcopy(saved)
-        next(r for r in reauthenticated["resources"] if r["id"] == "tailnet")["service"] = next(s for s in imported_native()["services"] if "tailscale" in s)
+        next(r for r in reauthenticated["resources"] if r["id"] == "tailnet")["service"] = native_tailnet_service()
         product_api("control.sock", "/v1/config/commit", {"expected_revision": 4, "request_id": "reauthenticated", "config": reauthenticated}, timeout=12)
         wait(lambda: observation().get("backend_state") == "Running" and observation().get("online"), 30)
         assert observation()["node_id"] == original["node_id"] and observation()["addresses"] == original["addresses"]
@@ -899,11 +896,9 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
         # First establish incoming host traffic before enabling shieldsUp.
         for host in original["addresses"]:
             traffic(host, peer_ips[ipaddress.ip_address(host).version])
-        shielded_source = stage / "shielded.yaml"
-        shielded_source.write_text(legacy.read_text().replace("shieldsUp: false", "shieldsUp: true"))
-        legacy = shielded_source
+        tailscale_intent["shields_up"] = True
         shielded = copy.deepcopy(reauthenticated)
-        next(r for r in shielded["resources"] if r["id"] == "tailnet")["service"] = next(s for s in imported_native()["services"] if "tailscale" in s)
+        next(r for r in shielded["resources"] if r["id"] == "tailnet")["service"] = native_tailnet_service()
         product_api("control.sock", "/v1/config/commit", {"expected_revision": 5, "request_id": "shields-up", "config": shielded, "confirm_timeout_seconds": 30}, timeout=12)
         wait(lambda: observation().get("backend_state") == "Running" and observation().get("online"), 30)
         for host in original["addresses"] + ["10.42.0.2", "fd42::2"]:
@@ -920,12 +915,10 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
         traffic("fd42::2", "fd42::1")
         assert observation()["node_id"] == original["node_id"]
         print("PASS confirmed rollback restored inbound host/subnet traffic with the same identity", flush=True)
-        legacy = accepted_source
-        tagged_source = stage / "tagged.yaml"
-        tagged_source.write_text(legacy.read_text().replace("hostname: product-a", "hostname: product-a\n        advertiseTags: [tag:router]"))
-        legacy = tagged_source
+        tailscale_intent["shields_up"] = False
+        tailscale_intent["advertise_tags"] = ["tag:router"]
         tagged = copy.deepcopy(reauthenticated)
-        next(r for r in tagged["resources"] if r["id"] == "tailnet")["service"] = next(s for s in imported_native()["services"] if "tailscale" in s)
+        next(r for r in tagged["resources"] if r["id"] == "tailnet")["service"] = native_tailnet_service()
         product_api("control.sock", "/v1/config/commit", {"expected_revision": 7, "request_id": "tagged", "config": tagged}, timeout=12)
         wait(lambda: observation().get("backend_state") == "Running" and observation().get("online"), 30)
         assert not observation().get("tags")
@@ -938,9 +931,9 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
         tagged_keyfile = stage / "tagged.key"
         tagged_keyfile.write_text(tag_key["key"])
         tagged_keyfile.chmod(0o600)
-        policy["tailscale"]["TailscaleNode/overlay"]["auth_key_file"] = str(tagged_keyfile)
+        tailscale_intent["auth_key_file"] = str(tagged_keyfile)
         approved = copy.deepcopy(tagged)
-        next(r for r in approved["resources"] if r["id"] == "tailnet")["service"] = next(s for s in imported_native()["services"] if "tailscale" in s)
+        next(r for r in approved["resources"] if r["id"] == "tailnet")["service"] = native_tailnet_service()
         product_api("control.sock", "/v1/config/commit", {"expected_revision": 8, "request_id": "approved-tag", "config": approved}, timeout=12)
         wait(lambda: observation().get("backend_state") == "Running" and observation().get("tags") == ["tag:router"], 30)
         tagged_id = observation()["node_id"]
@@ -953,11 +946,9 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
         traffic("fd42::2", "fd42::1")
         print("PASS approved tagged enrollment was exposed as observed tags with real IPv4/IPv6 forwarding", flush=True)
         # Removing a client request is not server-side tag revocation.
-        legacy = accepted_source
-        policy["tailscale"]["TailscaleNode/overlay"].update(enrollment="saved_identity")
-        policy["tailscale"]["TailscaleNode/overlay"].pop("auth_key_file")
+        tailscale_intent.pop("auth_key_file", None)
         retained = copy.deepcopy(approved)
-        next(r for r in retained["resources"] if r["id"] == "tailnet")["service"] = next(s for s in imported_native()["services"] if "tailscale" in s)
+        next(r for r in retained["resources"] if r["id"] == "tailnet")["service"] = native_tailnet_service()
         product_api("control.sock", "/v1/config/commit", {"expected_revision": 9, "request_id": "retained-server-tags", "config": retained}, timeout=12)
         tagged_keyfile.unlink()
         renewed_file.unlink()
