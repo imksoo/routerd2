@@ -4,7 +4,7 @@
 
 保存済みのhomert02/03設定を読み取り専用で解析し、resource種別と参照関係の形だけを確認した。各設定は109 resourceで、種別ごとの件数と抽出できた型付き依存関係は一致した。設定値、アドレス、identity、credential、鍵はこのリポジトリへ保存していない。
 
-[homert02の例](../examples/homert02-native.yaml)と[homert03の例](../examples/homert03-native.yaml)は、文書用アドレスを使ったResourceProgramの例である。DHCP、DNS、PD、RA、DS-Liteと、VRRP/lease replicationの相方設定を含む。保存設定の変換結果ではなく、配備可能な設定でも、HA・クライアント相互接続の合格証跡でもない。特に、旧DHCPv6 server lease-syncに対応するpeer replication fieldは、現在のnative DHCPv6 server契約にない。
+[homert02の例](../examples/homert02-native.yaml)と[homert03の例](../examples/homert03-native.yaml)は、文書用アドレスを使ったResourceProgramの例である。DHCP、DNS、PD、RA、DS-Liteと、VRRP/lease replicationの相方設定を含む。保存設定の変換結果ではなく、配備可能な設定でも、HA・クライアント相互接続の合格証跡でもない。旧routerdの[`DHCPv6ServerLeaseSync`契約](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/docs/how-to/dhcp-lease-sync.md)はstateful DHCPv6 address poolのlease state同期用である。保存設定のLAN DHCPv6 serverはstatelessでpoolを持たないため、この同期機能は現行homertの単体・HA動作に必要なstateを表していない。
 
 ## 機能対応
 
@@ -16,7 +16,7 @@
 | `IPv6DelegatedAddress` (5), `VirtualAddress` (2) | `service.dhcp6.delegations`、`service.vrrp` のaddressとVIP interface | 例ではPD由来のLAN addressを物理LAN linkに、IPv4 VIPをVRRP所有interfaceに置く。実際のactive/standbyでの所有関係は実peerで確認が必要。 |
 | `DHCPv4Server` (1), `DHCPv4Reservation` (2), `DHCPv4ServerLeaseSync` (1) | `service.dhcp_server` のscope/reservationと `ha` TLS replication | 契約はある。例では待機側でもDHCP workerを動かし、`ha.owner` が配布役を決める。実profileのlease transferとclient renewは未確認。 |
 | `DHCPv6PrefixDelegation` (1), `DHCPv6PrefixDelegationLeaseSync` (1), `DHCPv6Information` (1) | `service.dhcp6`、`dhcp6.ha`、delegation、RA client factと各consumer | native PD state replicationと学習情報を表現できる。保存済みDUID/IAIDとpeer動作は転記・受入していない。 |
-| `DHCPv6Server` (1), `DHCPv6ServerLeaseSync` (1), `IPv6RouterAdvertisement` (1) | `service.dhcp6_server`、`service.ra` | RAとstateless DHCPv6は表現可能。現在のserviceにDHCPv6 server lease-sync fieldはない。同じserver DUIDを設定しても、旧server-state同期を保つ証拠にはならない。 |
+| `DHCPv6Server` (1), `DHCPv6ServerLeaseSync` (1), `IPv6RouterAdvertisement` (1) | `service.dhcp6_server`、`service.ra` | 保存設定はpoolのないstateless DHCPv6である。旧routerdのlease-syncはstateful address pool用なので、このprofileでは同期すべきserver lease stateがない。native server DUIDは各nodeで永続化され、対になるサービスでは同じ明示DUIDを使える。WAN DHCPv6 clientのDUID/IAIDとPD lease同期は別の機能である。 |
 | `DNSResolver` (2), `DNSForwarder` (10), `DNSUpstream` (13), `DNSZone` (1) | `service.dns` のlistener、suffix source、upstream、zone、DHCP由来record | 条件付きforwardとDoHはnative例がある。listener addressの依存関係とsourceごとの詳細は、保存値を使って見直すまで同等とは扱わない。 |
 | `DSLiteTunnel` (4), `EgressRoutePolicy` (3), `HealthCheck` (6) | `service.ds_lite`、`egress_policy`/`egress_route`、`service.health` | 機能種別を表すnative typeはある。候補、tunnel依存、選択条件、MTU、復旧動作は保存値から再構成していない。 |
 | `NAT44Rule` (7), `NAT44SessionSync` (1) | `nat` resource、`service.vrrp.conntrack_sync` | 対応するnative機構はある。実際のsource/egress matchと同期除外値は未確認で、packet試験も必要。 |
