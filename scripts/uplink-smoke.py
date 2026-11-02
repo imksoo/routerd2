@@ -773,6 +773,9 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         ]
         renew_due = initial["nanos"] / 1e9 - time.clock_gettime(time.CLOCK_BOOTTIME)
         print("Observed natural PD renewal due in seconds", round(renew_due), flush=True)
+        if seconds == 0:
+            seconds = max(75, int(renew_due) + 90)
+            print("Waiting through observed PD T1 and 90 seconds for the renewal exchange", seconds, flush=True)
         started_at = time.time()
         start_time, rounds, updates = time.monotonic(), 0, 0
         while time.monotonic() - start_time < seconds:
@@ -1024,7 +1027,7 @@ def main():
         default="",
         help="Resolve this upstream hostname using WAN-learned bootstrap DNS",
     )
-    parser.add_argument("--seconds", type=int, default=7800)
+    parser.add_argument("--seconds", type=int, default=7800, help="observation duration; 0 waits through the live DHCPv6 renewal timer")
     parser.add_argument("--binary-dir", type=Path, default=Path("dist/bin"))
     parser.add_argument("--state-dir", type=Path, help="Private persistent test identity and lease directory")
     parser.add_argument("--wan-mac", default="02:72:6f:75:74:02")
@@ -1033,8 +1036,8 @@ def main():
     parser.add_argument("--tailnet", action="store_true", help="Add independent Headscale/Tailscale with a fixed private underlay; exercise automatic LAN and real WAN exit together")
     parser.add_argument("--inside", type=Path)
     args = parser.parse_args()
-    if args.seconds < 1:
-        parser.error("--seconds must be positive")
+    if args.seconds < 0:
+        parser.error("--seconds cannot be negative")
     if args.inside:
         owner(args.inside, args.uplink, args.aftr, args.seconds, args.dns_upstream, args.wan_mac, args.wan_outage, args.full_restart, args.tailnet)
         return
@@ -1101,7 +1104,7 @@ def main():
         subprocess.run(
             command,
             check=True,
-            timeout=args.seconds + 240,
+            timeout=args.seconds + 240 if args.seconds else None,
         )
     finally:
         try:

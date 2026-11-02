@@ -82,7 +82,7 @@ help:
 	  'make check-ra-client   Verify real RA, source/default-route TCP/UDP and expiry' \
 	  'make check-ra-aftr     Verify learned RA/DNS to DS-Lite LAN forwarding and expiry' \
 	  'make check-ra-route-refresh Verify routed AFTR TCP/UDP during independent RA renewal' \
-	  'make check-uplink UPLINK_INTERFACE=... UPLINK_AFTR=...  Use an explicit local uplink with a private MAC/LAN' \
+	  'make check-uplink UPLINK_INTERFACE=... UPLINK_AFTR=... [UPLINK_SECONDS=0 waits for the live PD renewal]  Use an explicit local uplink with a private MAC/LAN' \
 	  'make check-dhcp-relay  Verify DHCP peers, fragmentation and VRF isolation' \
 	  'make licenses          Collect dependency licenses and their manifest' \
 	  'make build             Build the native commands for the current platform' \
