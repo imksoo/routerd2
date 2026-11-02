@@ -1033,8 +1033,8 @@ def main():
     parser.add_argument("--tailnet", action="store_true", help="Add independent Headscale/Tailscale with a fixed private underlay; exercise automatic LAN and real WAN exit together")
     parser.add_argument("--inside", type=Path)
     args = parser.parse_args()
-    if not 1 <= args.seconds <= 10800:
-        parser.error("--seconds must be 1..10800")
+    if args.seconds < 1:
+        parser.error("--seconds must be positive")
     if args.inside:
         owner(args.inside, args.uplink, args.aftr, args.seconds, args.dns_upstream, args.wan_mac, args.wan_outage, args.full_restart, args.tailnet)
         return
