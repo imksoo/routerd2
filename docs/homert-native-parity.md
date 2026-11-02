@@ -1,48 +1,48 @@
-# Homert native profile and feature mapping
+# homert設定のnative対応表
 
-## Scope
+## 対象と範囲
 
-The saved homert02 and homert03 router files were parsed read-only for resource kinds and reference shape. Each contains 109 resources, and both have the same per-kind counts and the same extracted typed dependency edges. No configuration values, addresses, identities, credentials, or keys were copied into this repository.
+保存済みのhomert02/03設定を読み取り専用で解析し、resource種別と参照関係の形だけを確認した。各設定は109 resourceで、種別ごとの件数と抽出できた型付き依存関係は一致した。設定値、アドレス、identity、credential、鍵はこのリポジトリへ保存していない。
 
-`examples/homert02-native.yaml` and `examples/homert03-native.yaml` are sanitized ResourceProgram examples using documentation-only addresses. They show a single-router DHCP/DNS/PD/RA/DS-Lite path and its VRRP/lease-replication peer settings. They are schema examples, not a translation of either saved file, not suitable for installation, and not evidence of HA or client interoperability. In particular, the DHCPv6 server lease-sync resource has no equivalent peer-replication field in the current native DHCPv6 server contract.
+[homert02の例](../examples/homert02-native.yaml)と[homert03の例](../examples/homert03-native.yaml)は、文書用アドレスを使ったResourceProgramの例である。DHCP、DNS、PD、RA、DS-Liteと、VRRP/lease replicationの相方設定を含む。保存設定の変換結果ではなく、配備可能な設定でも、HA・クライアント相互接続の合格証跡でもない。特に、旧DHCPv6 server lease-syncに対応するpeer replication fieldは、現在のnative DHCPv6 server契約にない。
 
-## Feature mapping
+## 機能対応
 
-The counts below are resource-kind counts observed in each saved file; corresponding counts were equal between the two files. A row describes the closest current ResourceProgram area, not automatic one-to-one conversion.
+件数は両方の保存設定から読み取ったresource種別の数である。対応欄は現在のResourceProgramで表現する場合の候補であり、自動または一対一の変換を意味しない。
 
-| Saved resource kinds (count) | Current routerd2 representation | Status / unresolved point |
+| 保存設定のresource種別（件数） | routerd2のnative表現 | 状態・未確定事項 |
 | --- | --- | --- |
-| `Interface` (10), `IPv4StaticAddress` (7), `IPv4Route` (4) | `interface`, `address`, `route`, `host_route`, or `egress_route` | Core intent is representable. Exact route type, ownership, source, and interface values were not retained. |
-| `IPv6DelegatedAddress` (5), `VirtualAddress` (2) | `service.dhcp6.delegations`; `service.vrrp` addresses and VIP interface | The native example keeps LAN PD on the physical LAN link and the IPv4 VIP on its VRRP-owned interface. Exact active/standby address roles still need real-peer acceptance. |
-| `DHCPv4Server` (1), `DHCPv4Reservation` (2), `DHCPv4ServerLeaseSync` (1) | `service.dhcp_server` scopes, reservations, and `ha` TLS replication | The contract exists; the example keeps the DHCP worker present on standby and assigns serving ownership through `ha.owner`. Real lease transfer and client renewals remain to be demonstrated for this profile. |
-| `DHCPv6PrefixDelegation` (1), `DHCPv6PrefixDelegationLeaseSync` (1), `DHCPv6Information` (1) | `service.dhcp6`, `dhcp6.ha`, delegated addresses, RA client facts, and their consumers | Native PD state replication and learned information are represented. The saved DUID/IAID and peer behavior were not copied or qualified here. |
-| `DHCPv6Server` (1), `DHCPv6ServerLeaseSync` (1), `IPv6RouterAdvertisement` (1) | `service.dhcp6_server` and `service.ra` | RA and stateless DHCPv6 are representable. There is no DHCPv6 server lease-sync field in the current native service; a shared configured server DUID is not proof that old server-state synchronization is preserved. |
-| `DNSResolver` (2), `DNSForwarder` (10), `DNSUpstream` (13), `DNSZone` (1) | `service.dns` listeners, ordered suffix sources, upstreams, zones, and DHCP-derived records | Conditional forwarding and DoH have native examples. Saved listener address dependencies and per-source details still need review against the full value-level configuration before claiming parity. |
-| `DSLiteTunnel` (4), `EgressRoutePolicy` (3), `HealthCheck` (6) | `service.ds_lite`, `egress_policy`/`egress_route`, and `service.health` | The native types cover the function classes. The exact candidate set, tunnel dependencies, selection policy, MTU and recovery behavior have not been reproduced from saved values. |
-| `NAT44Rule` (7), `NAT44SessionSync` (1) | `nat` resources and `service.vrrp.conntrack_sync` | Both native mechanisms exist. Actual source/egress matches and state-sync exclusions require value-level review and packet verification. |
-| `FirewallZone` (3), `FirewallPolicy` (1), `FirewallRule` (2), `IPAddressSet` (2), `LocalServiceRedirect` (1), `FirewallEventLog` (1) | `firewall` rules, address sets, local redirects, and `service.firewall_log` | Native primitives exist, but there is no established one-to-one zone/policy translation. Do not replace these with a guessed rule set. |
-| `BGPRouter` (1), `BGPPeer` (1) | `service.bgp` | Native BGP service supports the feature class; router/peer values and actual route exchange still require review and a real independent peer. |
-| `NTPClient` (1), `NTPServer` (1) | `service.ntp` sources, listeners, and access prefixes | The native time service has client and server intent. Exact source selection and serving ACL were not copied. |
-| `TailscaleNode` (1) | `service.tailscale` | Native service exists; identity and enrollment state must remain separately provisioned. No identity data was read into this mapping. |
-| `LogSink` (2), `Telemetry` (1), `LogRetention` (1), `TrafficFlowLog` (1), `WebConsole` (1) | `service.otlp_logs`/`syslog`, retention settings, `service.traffic_flow`, and `service.web_console` | Typed service areas exist. The sink-to-telemetry reference and retention policy need exact value-level mapping. |
-| `ManagementAccess` (1) | No matching ResourceProgram payload identified | Unmapped. Keep the management-access behavior explicit in the management/startup contract; do not infer it from the web console. |
-| `Package` (1) | Image/build package manifest, outside ResourceProgram | Unmapped at runtime by design. Identify the required build package separately; do not add a generic package-execution resource. |
-| `Sysctl` (1) | Typed `forwarding` fields only where semantics match | Unmapped until its key and desired value are reviewed. There is no generic arbitrary-sysctl resource. |
+| `Interface` (10), `IPv4StaticAddress` (7), `IPv4Route` (4) | `interface`、`address`、`route`、`host_route`、`egress_route` | 基本的な意図は表現可能。route種別、所有者、source、interfaceの実値は保存していない。 |
+| `IPv6DelegatedAddress` (5), `VirtualAddress` (2) | `service.dhcp6.delegations`、`service.vrrp` のaddressとVIP interface | 例ではPD由来のLAN addressを物理LAN linkに、IPv4 VIPをVRRP所有interfaceに置く。実際のactive/standbyでの所有関係は実peerで確認が必要。 |
+| `DHCPv4Server` (1), `DHCPv4Reservation` (2), `DHCPv4ServerLeaseSync` (1) | `service.dhcp_server` のscope/reservationと `ha` TLS replication | 契約はある。例では待機側でもDHCP workerを動かし、`ha.owner` が配布役を決める。実profileのlease transferとclient renewは未確認。 |
+| `DHCPv6PrefixDelegation` (1), `DHCPv6PrefixDelegationLeaseSync` (1), `DHCPv6Information` (1) | `service.dhcp6`、`dhcp6.ha`、delegation、RA client factと各consumer | native PD state replicationと学習情報を表現できる。保存済みDUID/IAIDとpeer動作は転記・受入していない。 |
+| `DHCPv6Server` (1), `DHCPv6ServerLeaseSync` (1), `IPv6RouterAdvertisement` (1) | `service.dhcp6_server`、`service.ra` | RAとstateless DHCPv6は表現可能。現在のserviceにDHCPv6 server lease-sync fieldはない。同じserver DUIDを設定しても、旧server-state同期を保つ証拠にはならない。 |
+| `DNSResolver` (2), `DNSForwarder` (10), `DNSUpstream` (13), `DNSZone` (1) | `service.dns` のlistener、suffix source、upstream、zone、DHCP由来record | 条件付きforwardとDoHはnative例がある。listener addressの依存関係とsourceごとの詳細は、保存値を使って見直すまで同等とは扱わない。 |
+| `DSLiteTunnel` (4), `EgressRoutePolicy` (3), `HealthCheck` (6) | `service.ds_lite`、`egress_policy`/`egress_route`、`service.health` | 機能種別を表すnative typeはある。候補、tunnel依存、選択条件、MTU、復旧動作は保存値から再構成していない。 |
+| `NAT44Rule` (7), `NAT44SessionSync` (1) | `nat` resource、`service.vrrp.conntrack_sync` | 対応するnative機構はある。実際のsource/egress matchと同期除外値は未確認で、packet試験も必要。 |
+| `FirewallZone` (3), `FirewallPolicy` (1), `FirewallRule` (2), `IPAddressSet` (2), `LocalServiceRedirect` (1), `FirewallEventLog` (1) | `firewall` rule、address set、local redirect、`service.firewall_log` | native primitiveはあるが、zone/policyとの一対一対応は確立していない。推測したrule setで置き換えない。 |
+| `BGPRouter` (1), `BGPPeer` (1) | `service.bgp` | 機能種別を表すnative serviceはある。router/peer値と実route交換は別途確認が必要。 |
+| `NTPClient` (1), `NTPServer` (1) | `service.ntp` のsource、listener、access prefix | native time serviceはclient/server意図を持つ。実際のsource選択とserving ACLは転記していない。 |
+| `TailscaleNode` (1) | `service.tailscale` | native serviceはある。identityとenrollment stateは別に配備する。identity値はこの解析に取り込んでいない。 |
+| `LogSink` (2), `Telemetry` (1), `LogRetention` (1), `TrafficFlowLog` (1), `WebConsole` (1) | `service.otlp_logs`/`syslog`、retention設定、`service.traffic_flow`、`service.web_console` | 対応するtyped service領域はある。sinkからtelemetryへの参照とretention policyは実値での対応が未確認。 |
+| `ManagementAccess` (1) | 対応するResourceProgram payloadを特定できていない | 未対応。Web consoleから推測せず、management/startup契約で明示する。 |
+| `Package` (1) | ResourceProgram外のimage/build package manifest | runtime resourceには未対応。必要packageをimage側で確認し、任意package実行resourceは追加しない。 |
+| `Sysctl` (1) | 意味が一致する場合に限り、typed `forwarding` field | keyと設定値を確認するまで未対応。任意sysctlを設定する汎用resourceはない。 |
 
-## Extracted dependency shape
+## 抽出した依存関係の形
 
-The two files expose the same dependency categories. Resource identities and scalar values are deliberately omitted.
+両設定から同じ依存種別を抽出した。resource identityと設定値は記載しない。
 
-- A BGP peer references its BGP router. DHCPv4 lease sync references its server; DHCPv6 prefix sync references its PD client; DHCPv6 server sync references its DHCPv6 server.
-- DHCPv6 delegated addresses depend on the PD client. The PD and learned-information resources then feed LAN RA, DHCPv6 information, DNS upstream/bootstrap selection, DS-Lite source selection, and NTP sources.
-- DS-Lite tunnel resources depend on delegated IPv6 and local IPv4 addressing. Egress candidates refer to WAN/tunnel devices and health conditions; their dependencies also include firewall-zone resources.
-- DHCPv4 gateway/DNS and NAT source addresses refer to virtual addresses. Local redirects refer to address sets. DNS listeners and records draw from interface, static, delegated, and virtual address resources.
-- Some legacy references use names that occur under more than one resource kind. Because this pass intentionally did not retain scalar values, those references remain ambiguous here and must be resolved before producing a complete native profile.
+- BGP peerはBGP routerを参照する。DHCPv4 lease syncはserverを、DHCPv6 prefix syncはPD clientを、DHCPv6 server syncはDHCPv6 serverを参照する。
+- DHCPv6 delegated addressはPD clientに依存する。PDと学習情報はLAN RA、DHCPv6 information、DNS upstream/bootstrap、DS-Lite source、NTP sourceへ渡る。
+- DS-Lite tunnelはdelegated IPv6とローカルIPv4 addressに依存する。Egress候補はWAN/tunnel deviceとHealth条件を参照し、Firewall zoneにも依存する。
+- DHCPv4 gateway/DNSとNAT source addressはvirtual addressを参照する。Local redirectはaddress setを参照する。DNS listener/recordはinterface、static、delegated、virtual addressを参照する。
+- legacy参照名の一部は複数のresource kindで重複している。今回の解析ではscalar値を保持していないため、その参照先は曖昧なままであり、native profileを完成させる前に解決が必要。
 
-## Values to replace before any isolated deployment
+## 隔離環境で実行する前に置き換える値
 
-The examples use documentation networks and generic interfaces. A repeatable isolated run must explicitly substitute the test link names, WAN peer/AFTR behavior, LAN prefix and lease pool, stable DHCP client and server DUIDs, VRRP source/VIP/peer values, TLS certificate paths and provisioned certificates, DNS conditional upstream, and measured MTU/MSS policy. None of the example certificates or private keys exist; the paths are only schema values. Do not connect these documentation addresses to a live LAN.
+例のinterface名、アドレス、domainは文書用である。再現可能な隔離試験では、test link名、WAN peer/AFTR動作、LAN prefixとlease pool、安定したDHCP client/server DUID、VRRP source/VIP/peer、TLS certificate pathと証明書、DNS条件付きupstream、実測したMTU/MSS policyを明示的に置き換える。例の証明書・秘密鍵は存在せず、pathはschema値だけである。文書用アドレスを実LANへ接続しない。
 
-## Validation boundary
+## 検証の範囲
 
-Both examples were accepted by `routerd config validate`. That verifies ResourceProgram decoding and compile-time contracts only. It does not verify worker startup, physical WAN/ONU behavior, DHCP exchanges, client DNS/internet access, or HA failover. Those checks must use the actual routerd2 processes, kernel, an independent client/peer, and the isolated real-line fixture before these profiles can be treated as usable.
+両例は `routerd config validate` で受理された。これはResourceProgramのdecodeとcompile-time契約の確認だけである。worker起動、物理WAN/ONU、DHCP交換、端末DNS/Internet接続、HA failoverは確認していない。profileを利用可能と扱う前に、実routerd2 process、kernel、独立client/peer、隔離実回線fixtureで確認する必要がある。

@@ -1,7 +1,7 @@
-# Sanitized isolated single-router baseline for the homert02 feature inventory.
-# Every address/name below is an RFC documentation value, not a live setting.
-# Replace interfaces, paths, upstreams and protocol identities before deployment.
-# The HA peer profile is examples/homert03-native.yaml; never use these addresses live.
+# homert02の機能種別を基にした、隔離用の単体ルーター設定例です。
+# アドレスと名前は文書用の予約値で、実設定から転記していません。
+# interface、証明書パス、上流、protocol identityは配備前に置き換えてください。
+# 相方の例はexamples/homert03-native.yamlです。このアドレスを実LANに接続しないでください。
 schema_version: 2
 resources:
   - id: interface/wan0

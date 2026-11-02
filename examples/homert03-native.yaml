@@ -1,7 +1,7 @@
-# Sanitized isolated HA peer profile for the homert03 feature inventory.
-# Every address/name below is an RFC documentation value, not a live setting.
-# Replace interfaces, paths, upstreams and protocol identities before deployment.
-# This is an example schema, not an accepted production HA configuration.
+# homert03の機能種別を基にした、隔離用HA相方の設定例です。
+# アドレスと名前は文書用の予約値で、実設定から転記していません。
+# interface、証明書パス、上流、protocol identityは配備前に置き換えてください。
+# この例はschema検証用で、本番HA設定として受け入れたものではありません。
 schema_version: 2
 resources:
   - id: interface/wan0
