@@ -35,7 +35,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGALRM, stop)
-    signal.alarm(seconds + 180)
+    if seconds:
+        signal.alarm(seconds + 180)
     run(["mount", "-t", "tmpfs", "-o", "mode=755", "tmpfs", "/run"])
     run(["mount", "-t", "tmpfs", "-o", "mode=755", "tmpfs", "/var/lib/dhcpcd"])
     resolver_file = stage / "automatic-resolv.conf"
@@ -775,6 +776,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         print("Observed natural PD renewal due in seconds", round(renew_due), flush=True)
         if seconds == 0:
             seconds = max(75, int(renew_due) + 90)
+            signal.alarm(seconds + 180)
             print("Waiting through observed PD T1 and 90 seconds for the renewal exchange", seconds, flush=True)
         started_at = time.time()
         start_time, rounds, updates = time.monotonic(), 0, 0
