@@ -1,6 +1,6 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-02 04:06 JST。最初の製品は未完成であり、[実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[AGENTS.md](../AGENTS.md)を基準に進める。各実通信試験の直前に試験計画の実行手順と対象項目を読み直す。対象本番の置換はしていない。
+更新: 2026-11-02 13:46 JST。最初の製品は未完成であり、[実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[AGENTS.md](../AGENTS.md)を基準に進める。各実通信試験の直前に試験計画の実行手順と対象項目を読み直す。対象本番の置換はしていない。
 
 ## 現在の実装
 
@@ -138,3 +138,5 @@ DHCPv6 PD の再起動後 Rebind と、不良 candidate から known-good runtim
 2026-11-02: current main `44620b8` の更新・切戻し実受入は未実施。更新候補のPID 1採用と復帰には再起動が要るが、現用homertは停止しない。開発hostの`ens18`/`ens20`はvirtio_netで実ONU/NICがなく、既存の隔離boot経路はlocal QEMU/PVEであるため、今回の指示に従いどちらも起動しなかった。current main用Alpine imageはbuild成功後、bootせず削除した。旧`ops-management-integrated-native125`/`4fcdb89`の更新・明示rollback・Health失敗復帰は現mainと異なる候補の結果である。
 
 Tailscaleの最新独立peer実daemon結果は`b971ea6`で、worker/PID 1再起動、peer停止復帰、service撤去/再適用後のTCP/UDPを確認し、exit再適用復帰は6.344秒だった。別の6時間idle試験は初回TCPを固定2秒でtimeout扱いし、その後の通信を観測していない。current mainにTailscale実装差分はなく、既存runnerには6時間idle経路がないため、短い同一試験を重ねず長時間条件は未受入として残す。
+
+2026-11-02: `HEAD=3a69867`の未コミット変更を含む作業ツリーから`make check-uplink UPLINK_INTERFACE=ens18 UPLINK_AFTR=2404:8e00::feed:100 UPLINK_SECONDS=120 UPLINK_WAN_OUTAGE=1 UPLINK_FULL_RESTART=1 DOCKER='sudo -n docker'`を実行した。実HGW接続`ens18`に別MACの隔離namespaceを作り、実daemonと独立LAN端末で、DHCPv4 ACKから得た割当IPによるIPv4/IPv6 HTTPS、学習DNS UDP/TCP、条件付きDNS障害分離/復帰、二端末のDHCPv4自然更新、DHCPv6 information/SLAAC、WAN遮断後0.9秒での復帰、PD worker強制終了/通常再起動（1.76/2.93秒）、daemon再起動（3.8秒）、DUID/IAID/prefix保持、zero-lifetime RA撤去を確認した。WAN管理アドレスとdefault routeは試験前後で同一、namespace/stageは撤去済み。端末・WAN DHCPv4/PDの割当IPを固定していない。自然PD T1は約7,182秒先で今回未到達。runnerは各通信確認のPASSとcleanupを出力したが、実行ラッパーから最終終了statusを取得できなかったため終了コードは未確認とする。これは109-resource homert設定全体、実router appliance/NIC、ONU直結、連続TCP、HAの受入ではない。
