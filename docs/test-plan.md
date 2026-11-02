@@ -89,6 +89,10 @@ Race Detector・vet・build・秘密情報検査後にまとまりごとに comm
 
 ## 現在の状況
 
+2026-11-02に `chatty.lain.local:~/homert02` の homert02/03 設定を読み直した。両方109 resourcesで、WANのDHCPv6-PD `/60` とDHCPv6 Information、委譲LANのRA（M=0/O=1）・stateless DHCPv6、動的DHCPv4 poolとOUI/MAC scope、条件付きDNSとNextDNS/Cloudflare DoH、MTU 1454の4本のDS-Lite、Health付きIPv4出口選択、VRRP/貸出・接続状態同期を使う。二台差分は主に物理interface、node address、VRRP priority/peerである。現在の `scripts/uplink-smoke.py` は実HGWへ接続するが、単一DS-Liteと試験用LAN値を生成する別profileであり、この109-resource構成の受入ではない。次は互換converterを復活させず、この実設定の通信経路をnative ResourceProgramで表現して端末から通す。
+
+DHCPv6 clientの現行受信経路はUDP送信元を読まず、transaction/Client ID等で応答を処理する。比較した旧routerd `cmd/routerd-dhcpv6-client` も `ReadFromUDP` の送信元を捨てており、送信元ポート547固定の条件はない。実HGW runnerのclient addressもACKから読み、固定値とは比較しない。fixture自身が設定したgateway/DNSとの一致だけを確認する。なお、commit `5a652cc` でrunnerの3時間上限を除去し、観測時間を自然更新に合わせて指定できるようにした。長時間の再実行はまだ行っていない。
+
 - `native-single-lan-peer`（2026-11-02、worktree base `5033cbc`）: `make check`、static-linked 3-binary `make build`、`make check-dhcp-dns` の7項目が終了0。さらに `TestDaemonConditionalLAN` で実supervisor/control/network/VRRP/RA/DHCPv6/DNS worker、独立 ISC DHCPv6 4.4.3、Keepalived 2.2.8、Linux client を使い、DHCPv6-PD、SLAAC、DNS UDP/TCP、実上流のDNS往復、VRRP切替・復帰、PD期限切れと再取得を確認した。実peerの既定checksumと試験側DNS宛先を設定から合わせた。namespace内の実通信であり、homert設定全体・物理ONU/NICの受入ではない。raw capture/logはrunnerが終了時に削除した。
 
 - `health-ready-native105`: `make check-health-pbr` は独立二 WAN namespace peer と実 supervisor/control/network/Health worker で、Health→PBR の障害切替・復旧、worker/supervisor 再起動、古い通知・期限切れ、confirmed rollback、TCP/UDP と packet capture を確認した。対象回線・対象機器は未受入。
