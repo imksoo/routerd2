@@ -12,7 +12,6 @@ DHCP HA は VRRP が配布役を選び、dnsmasq に VIP と物理 ingress を�
 
 `6cd2404` では、同期断中に待機側だった DHCP owner が昇格しても、元ownerからmTLSで現在のlease stateを受け取るまでdnsmasqを起動しないようにした。current mainで`make check-ha-dhcp-failover`と`make check-ha-state`を実行し、独立Linux namespaceの二台、実supervisor/control/network/DHCP/VRRP/Health worker、ISC DHCPv6、AFTR、独立TCP/UDP peerとpacket captureで、遮断中に配布しないこと、再同期後の重複しない新規lease、既存leaseの更新、DHCP worker再起動後の更新、通常の両方向HA handoffを確認した。通常handoffではUDP 2,992送信中69期限切れ、最大無応答1.109秒、同一TCPの最大応答待ち1.660秒だった。無損失とは扱わない。stage、capture、鍵、namespaceは終了後に削除した。これはPVE二VM、homert実設定、対象ONU/HGW/NICの受入ではない。
 
-2026-11-01 current `1a3843b`: `make check`（Race Detector・vet を含む）、静的リンクした3実行物の build を完了した。新規4 CPU/4 GiB PVE VMを既存bridge/NICなしで起動し、現行homert03設定を隔離用に変換した実daemonで、Tailscaleの保護状態初期化まで確認した。最初の拒否は試験overlayが親`/etc`を`0775`で作ったことによるもので、製品imageの`/etc`は`0755`だった。overlayを`0755`/`0700`で作り直した再試行では同じ拒否は起きなかった。VM、設定、鍵、disk、serial logは削除済みである。これはWAN/LAN、DNS、PD、転送またはreadyの合格ではない。
 
 同じ`1a3843b`で`make check-health-pbr`を実行し、独立Linux peerと実supervisor/control/network/Health workerによる二WANの`TestDaemonConnectionMarkedEgressPolicy`、`TestDaemonHealthPBRFailoverAndRecovery`、`TestDaemonEgressRouteHealthyMultipath`が通過した。各試験はTCP/UDP、packet capture、Health worker復旧、失効とconfirmed rollbackを対象にする。PVEのfull homert03通信受入や実ONUの資格には流用しない。raw log/capture/stageは保持しない。
 
@@ -54,15 +53,10 @@ main統合版126のハッシュ一致3実行物でも、通常125の起動イメ
 公開は `25e7cf9`（PR #1統合済み）。PVEで固定した126版の変更対象Goソース29件・埋込みHTMLと一致し、試験した3実行物のハッシュも照合した。通常APKから新規作成した同じ126版の二台BIOSディスクも、実電源断・再参加の両方向が終了0。全通信復旧25.881/16.010秒、同じTCP接続とNATを保持して最大応答待ち7.196秒。UDP1,675送信中226期限切れ、DNS951件中20失敗。元60秒/15秒を維持した。旧主系不在の新規自動端末も取得DNSと両IP通信を利用でき、同じTailscale exit選択も再起動後に復旧した。両試験VMは撤去済み。実経路負荷・対象WAN/LANを閉じてからk8s/pve差分、Cloud SAMへ進む。
 
 
-2026-11-01: homert02/03 の現行 router YAML を読取専用で取得し、隔離VMの明示NIC名へ置換して current main の migration/validation に通した。両方とも56 resource のnative設定になった。これは現行入力と変換器の組合せ確認であり、Tailscale保存状態、旧lease、実WAN、実VM起動の移行受入ではない。入力と変換出力は確認後に削除する。
 
-2026-11-02: main `5508339`の読取専用PVE guest-agent経路で、稼働中homert03（VM 158）の最新router設定を再取得した。設定は109 resourceで、migrationは全体39 issueで拒否された。同一interfaceの明示RAが選ぶ`prefixFrom`委譲prefixをstateless DHCPv6 information serverのLAN選択にも使う変更後、当該DHCPv6 serverの別途policy必須issueは消えた。全体変換・実機通信の合格ではなく、稼働VMやworkerは変更していない。homert02と対象ONU/NICの受入は未確認。
-
-同日、homert02の現行設定取得に同じ読取専用guest-agent経路を使おうとしたが、既存ControlMaster socketを利用できず取得できなかった。新しいSSH接続やVM起動、設定変更はしていないため、homert02/03の設定差分は未確認のまま。次に必要なのは同じ読み取り専用経路の再利用可能化であり、試験器や代替設定は作らない。
 
 2026-11-01: 実HGW用macvlan fixtureはDS-Lite復路をcaptureするが、任意のIPv4 ICMP fragmentation-needed、IPv6 Packet Too Big、断片化を発生させる制御可能な実経路を持たない。そのため自然PD観測や隔離DS-Lite PMTU試験を再実行して物理PMTU受入と取り違えなかった。物理受入には、host管理経路から分離したL2、MTUを下げて両ICMPを返せる実対向、router/対向のcapture、試験前後の管理interfaceとhost経路の一致が必要である。
 
-2026-11-01: 現行入力の56 resourceにappliance用の明示管理addressを加えた57 resource候補はcurrent mainで`config validate`を通った。通常APK由来の新規diskを外部へ接続しないQEMU三NIC（`eth0`/`eth1`/`eth2`）で起動し、PID 1、supervisor、network/control/managementと設定workerの起動を確認した。空stateにはHA鍵・独立Tailnet enrollment・独立peerを供給していないため依存workerが停止しreadyに達しなかった。この結果は設定変換後の隔離起動確認に限り、単体router・HA・対象機の受入には数えない。QEMU停止後にhost管理interfaceとIPv4/IPv6経路が同一であることを照合した。disk、image、console、設定コピーを削除した。
 
 同日に、この結果へ圧縮済みの旧full-profile disk/image、設定コピー、raw logを削除し、3.8 GiBを解放した。稼働中のプロセスが参照していないことを確認してから削除しており、実入力・鍵・captureは残していない。
 
@@ -104,11 +98,9 @@ DHCPv6 PD の再起動後 Rebind と、不良 candidate から known-good runtim
 4. RR/leaf の実 WG/BGP、/32所有、NAT なし端末通信、移動・drain・revoke・capture を確認すること。
 5. 更新・復旧、対象 appliance/NIC/ONU、ARM、PVE/Kubernetes/Cloud の各環境をそれぞれ受け入れること。
 
-2026-11-01 の読取専用監査時点で、homert02/03 の置換は**不可**である。現行設定の変換と隔離ディスクの空状態起動、実HGWでの単体PD自然更新は確認済みだが、対象状態・lease/sticky の実移行、対象WAN/LAN、二台HA、既存接続、対象NIC/ONUの受入が未完了である。稼働中の旧サービスを停止せず、本番切替・本番配備を行わない。
 
 稼働中の試験資源だけを操作対象から外す。終了済み stage、生 capture、重複 image、詳細 log は結果と再現手順を短く記録後に削除する。秘密を含む実入力・鍵・identity・pcap・インフラ詳細は公開しない。
 
-2026-11-01: current main `4e70be1` で、homert03の現行設定を読取専用で取得し、現行migration policyと新規管理DHCP Option 61、隔離用HA証明書、独立Headscale enrollmentへ差し替えた。109入力resourceから57 native resourceを生成し、`routerd config validate`を通した。通常APKから作った新規BIOS diskを、PVEの新規4CPU/4GiB VM（ID 182、bridge/NICなし）で起動した。PID 1、supervisor、network/control/managementとworker起動までは実行したが、PVE UNIX socketとhost TAPを結ぶ既存QEMU `hubport`中継がEthernet frameを転送しておらず、管理DHCP、RA/DHCPv6-PD、Headscaleへpacketが到達しなかった。従ってready、LAN/DNS/forwarding、HA、Tailscaleの受入には数えない。VM、PVE remote stage、disk、鍵、capture/log、namespace、TAPを同じ作業で削除した。本番VM/NIC/WAN/Tailnet状態には変更していない。次はこの中継を実フレーム転送できる隔離L2へ置換してから、同じ57-resource current imageで再実行する。
 
 2026-11-01: `b5e0d5a`のQEMU stream/TAP直接中継を、閉域bridgeとLinux netnsで実frame双方向（stream→TAP 25 byte、TAP→stream 22 byte）確認した。current APK `b5e0d5a0fea4`、現行109→57 resource設定、新規管理DHCP identity・HA/Headscale鍵・空stateを使い、新規PVE VMで再起動した。既存ユーザーSSH control masterでsparse diskを転送し、2 GiBの論理サイズ、sparse allocation、SHA-256一致を確認した。guestは管理DHCP Bound、独立Headscale login、WAN RA prefix/default routeを実packetで確認した。disk builderへ渡した管理SSH公開鍵がguestに受理されず、control APIでのworker状態、DHCPv6-PD、LAN/DNS/forwarding以降を実施できなかった。未達項目は合格に数えない。VM、remote stage、disk、鍵、state、log、peer process、namespace、bridge、TAPを削除し、本番接続は変更していない。次はdisk boot overlayのSSH authorized key配備を実guestで修正・確認して同じ閉域受入を再開する。
 

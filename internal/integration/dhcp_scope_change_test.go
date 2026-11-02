@@ -21,7 +21,7 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-func TestDaemonDHCPSelectorScopeMigration(t *testing.T) {
+func TestDaemonDHCPSelectorScopeChange(t *testing.T) {
 	if !isolateFixtureTimeout(t, t.Name(), 70*time.Second) {
 		return
 	}
@@ -100,7 +100,7 @@ func TestDaemonDHCPSelectorScopeMigration(t *testing.T) {
 		Name: "special", Prefix: "198.51.100.128/25", Start: "198.51.100.160", End: "198.51.100.161", Router: "198.51.100.129", LeaseSeconds: 120,
 		Match: dhcpserverconfig.Match{MACAddresses: []string{"02:bb:00:00:00:01"}},
 	}})
-	if err := first.control.Do(context.Background(), "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: 1, RequestID: "selected-scope-migration", Config: selected}, nil); err != nil {
+	if err := first.control.Do(context.Background(), "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: 1, RequestID: "selected-scope-change", Config: selected}, nil); err != nil {
 		t.Fatal(err)
 	}
 	migrated := acquire(old.Address)
@@ -109,7 +109,7 @@ func TestDaemonDHCPSelectorScopeMigration(t *testing.T) {
 	}
 	after, err := os.ReadFile(state)
 	if err != nil || strings.Contains(string(after), " "+old.Address+" ") {
-		t.Fatalf("old selected-pool lease survived migration: %v\n%s", err, after)
+		t.Fatalf("old selected-pool lease survived scope change: %v\n%s", err, after)
 	}
-	t.Logf("real client migrated from %s to selected pool %s after worker restart", old.Address, migrated.Address)
+	t.Logf("real client changed from %s to selected pool %s after worker restart", old.Address, migrated.Address)
 }

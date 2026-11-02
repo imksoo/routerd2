@@ -1134,12 +1134,6 @@ MTU 600のLANでは大きいunicast/broadcast DHCPINFORM応答をIPv4分割し�
 `make check-dhcp-relay`で再実行できる。HA・動的なVRF/interface変更の受入と、
 DHCPv6 server・残るresource契約は未完了であり、NET-06全体の完了とはしない。
 
-2026-11-02: main `5508339`で、既存のPVE guest-agent読取経路から稼働中homert03（VM 158）の現行router設定を読み取った。
-109 resourceの設定をmain `5508339`のmigrationへ渡すと全体は39 issueで拒否されたが、同一interfaceの明示RAが
-`prefixFrom`で選ぶ委譲prefixをstateless DHCPv6 information serverのLAN選択にも使う修正後は、
-DHCPv6 server自身の別途policy必須issueは出なくなった。変換全体の成功や実機通信の合格ではない。
-稼働VM/workerは変更していない。homert02・対象ONU/NIC・全resource契約は未確認。
-
 **受入条件**
 
 - 独立client/relayでDORA/renew、v6、decline/release、renumbering、restart/INIT-REBOOTを確認する。
