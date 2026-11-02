@@ -106,7 +106,7 @@ DHCPv6 clientの現行受信経路はUDP送信元を読まず、transaction/Clie
 
 - `current-main-44620b8-update`: 更新・切戻しの再受入は未実施。現在の開発hostの`ens18`/`ens20`はvirtio_netで、実NIC/ONUは接続されていない。全PID 1切替を行う既存経路はlocal QEMUかPVEで、今回どちらも使わない指示のため起動していない。current main向けAlpine image buildは成功したが、bootせず生成imageを削除した。旧`ops-management-integrated-native125`/`4fcdb89`のPVE更新・明示rollback・Health失敗復帰は過去候補の結果で、現mainの受入へ流用しない。現用homertを止めて代用もしない。
 
-- Tailscale長時間条件: `b971ea6`の独立Headscale/公式peer試験はworker/PID 1再起動、停止peer復帰、service撤去/再適用後の実通信を確認し、exit通信の再適用復帰は6.344秒だった。6時間無通信後の初回TCPは別の`native120`試験で2秒待ちの後にtimeoutしたが、その後の再試行通信は観測されていないため、製品障害とも復旧成功とも判定しない。current mainにTailscale実装変更はなく、既存peer runnerに6時間idle経路はないため同じ短時間試験は繰り返さない。
+- Tailscale長時間条件: `b971ea6`の独立Headscale/公式peer試験はworker/PID 1再起動、停止peer復帰、service撤去/再適用後の実通信を確認し、exit通信の再適用復帰は6.344秒だった。6時間無通信後の初回TCPは別の`native120`試験で2秒待ちの後にtimeoutしたが、その後の再試行通信は観測されていないため、製品障害とも復旧成功とも判定しない。current mainにTailscale実装変更はない。`uplink-smoke.py` は長時間動作を指定できるようになったが、観測ループで周期的にWAN通信とtailnet通信を行うため6時間idleの代用にはならない。同じ短時間試験は繰り返さず、実製品と独立peer間を試験前後だけ通信させる実経路が必要である。
 
 - `dhcp-ingress-native105`: 隔離 PVE（4 CPU/4 GiB）の実 appliance で、ハッシュ・release ID を照合した三実行物と20 Ready moduleを使い、cold boot/reboot 後の DNS UDP/TCP（IPv4/IPv6）、TCP/UDP、BGP、NTP、Tailscale、および通常・特殊端末それぞれの120秒 DHCPv4自然T1 unicast/同一XID ACK/option 54=`172.18.0.1` を確認した。PVE kernel 試験であり、12時間の元lease、ONU/HGW・対象機器、全34 package は引き続き未受入。
 
