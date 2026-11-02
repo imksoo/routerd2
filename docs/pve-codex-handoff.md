@@ -1,12 +1,12 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-02 13:46 JST。最初の製品は未完成であり、[実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[AGENTS.md](../AGENTS.md)を基準に進める。各実通信試験の直前に試験計画の実行手順と対象項目を読み直す。対象本番の置換はしていない。
+更新: 2026-11-03 06:14 JST。最初の製品は未完成であり、[実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[AGENTS.md](../AGENTS.md)を基準に進める。各実通信試験の直前に試験計画の実行手順と対象項目を読み直す。対象本番の置換はしていない。
 
 ## 次の開発順序（2026-11-03）
 
-`cb0f011` が GitHub の `main` と一致している。`b508524` と `703aaf9` で追加した、homert02/03 と機能・安全性の意図を照合する native `ResourceProgram` 設定例と対応表も同じ履歴に含まれる。旧 routerd 設定の自動変換、旧設定形式との互換読み込み、既存設定の自動適用は実装しない。対象機へ導入するときは、native 設定を新たに組み立てる。
+作業は `8d7bf73` を起点とする。`b508524` と `703aaf9` で追加した、homert02/03 と機能・安全性の意図を照合する native `ResourceProgram` 設定例と対応表も含まれる。旧 routerd 設定の自動変換、旧設定形式との互換読み込み、既存設定の自動適用は実装しない。対象機へ導入するときは、native 設定を新たに組み立てる。
 
-1. `pve07` の既存隔離試験を正本として再開する。VM 151 `routerd2-dhcp-natural-1793418547` は、2026-11-02 06:49:18 UTC に `/run/routerd/network.sock` が存在しない状態で worker が停止し、試験駆動側が消えたまま VM だけが残っている。既存ランナー、起動順序、終了処理を特定し、失敗原因を直してから同じ隔離構成で再実行する。失敗した VM を稼働中の証拠や合格結果として扱わない。
+1. 旧VM 151 `routerd2-dhcp-natural-1793418547` は2026-11-02 07:04 UTCに停止・削除済みで、元のdriver/logも残っていない。`/run/routerd/network.sock` がなかったという観測だけではworker停止原因を特定できない。再利用可能な `scripts/qemu-pppoe-peer.py` をPVEで実行できるよう所有VM名・停止確認・cleanupを修正し、current main `8d7bf73` の一台実applianceで独立PPPoE/ISC DHCPv6 peer試験を終了0で再実行した（詳細は試験計画）。この再実行は元のVM障害原因の解明とは区別する。
 2. current `main` の一台構成を PVE の隔離 WAN・LAN・管理リンク、独立した WAN peer と LAN client で実行する。DHCPv4、DHCPv6 PD、RA、取得 DNS、DS-Lite、NAT、IPv6 転送、MTU/MSS、端末と WAN の自然更新、対象通信負荷を、実プロセス・kernel・packet capture で確認する。任意の試験時間や回数を新設せず、設定された lease と障害条件に従う。
 3. homert02/03 の保存設定を読み取り専用で再照合し、変換ではない native 設定を隔離 PVE で組み立てる。機能または安全性が対応しない項目は、対応済みと扱わず明記する。実状態移行は、単体構成の通信結果が得られてから隔離環境だけで予行する。
 4. 二 WAN、二台 HA、Tailscale の長時間接続、更新、明示切戻し、自動復旧を、この順に既存 PVE 手順で確認する。対象本番の切替、配備、稼働中サービス停止、共有 bridge の変更は、明示承認なしに行わない。

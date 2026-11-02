@@ -354,7 +354,7 @@ QEMU_PVE_JUMP ?=
 QEMU_PVE_IDENTITY ?=
 QEMU_HA_STABILITY_SECONDS ?= 0
 QEMU_OUTPUT ?= dist/pppoe-appliance$(if $(QEMU_PROFILE),-$(QEMU_PROFILE))
-qemu-pppoe:
+qemu-pppoe: image
 	$(PYTHON) scripts/qemu-pppoe-peer.py --image-dir $(IMAGE_DIR) --dhcp6-server '$(DHCP6_SERVER)' --power-action $(QEMU_POWER_ACTION) --output '$(QEMU_OUTPUT)' $(if $(QEMU_UPDATE_BINARIES),--update-binaries '$(QEMU_UPDATE_BINARIES)') $(if $(QEMU_PROFILE),--profile '$(QEMU_PROFILE)') $(if $(QEMU_PVE_HOST),--pve-host '$(QEMU_PVE_HOST)') $(if $(QEMU_PVE_JUMP),--pve-jump '$(QEMU_PVE_JUMP)') $(if $(QEMU_PVE_IDENTITY),--pve-identity '$(QEMU_PVE_IDENTITY)')
 
 qemu-ha-pve: image

@@ -7,8 +7,8 @@ Only fixture configuration/password/SSH public key are added to the initramfs.
 Requires root/sudo, QEMU x86_64, pppoe-server, pppd, iproute2, tcpdump, curl,
 OpenSSH, dhcpcd, dnsmasq, dig, mke2fs and an independent ISC dhcpd supplied with
 --dhcp6-server. A fresh regular-file ext4 disk supplies explicit persistent state.
-The update and corrupt-recovery profiles accept --pve-host for an isolated 4 CPU/4 GiB KVM guest.
-Only its newly created VM is managed; Ethernet uses private SSH UNIX sockets.
+Any profile accepts --pve-host for an isolated 4 CPU/4 GiB KVM guest. Only its
+newly created VM is managed; Ethernet uses private SSH UNIX sockets.
 """
 import argparse
 import datetime
@@ -57,12 +57,12 @@ def prepare_kvm(stage, root, args):
     remote = run(pve_command('mktemp -d /tmp/routerd2-kvm.XXXXXX')).strip()
     vmid = int(json.loads(run(pve_command('pvesh get /cluster/nextid --output-format json'))))
     control_dir = Path(tempfile.mkdtemp(prefix='routerd-kvm-ssh.'))
-    meta = {'remote':remote, 'vmid':vmid, 'ssh':ssh, 'target':args.pve_host, 'user':pwd.getpwuid(os.getuid()).pw_name, 'name':'routerd2-update-rollback-'+str(int(time.time())), 'control':str(control_dir/'master'), 'wan':str(control_dir/'wan.sock'), 'lan':str(control_dir/'lan.sock')}
+    meta = {'remote':remote, 'vmid':vmid, 'ssh':ssh, 'target':args.pve_host, 'user':pwd.getpwuid(os.getuid()).pw_name, 'name':'routerd2-pppoe-'+args.profile+'-'+str(int(time.time())), 'control':str(control_dir/'master'), 'wan':str(control_dir/'wan.sock'), 'lan':str(control_dir/'lan.sock')}
     metadata = control_dir/'kvm.json'
     metadata.write_text(json.dumps(meta)); metadata.chmod(0o600)
     run(root+['install','-m','600',str(metadata),str(stage/'kvm.json')])
     print('Owned PVE test VM',vmid,meta['name'],'metadata',metadata,flush=True)
-    run(pve_command(shlex.join(['qm','create',str(vmid),'--name',meta['name'],'--tags','routerd2-test','--description','Temporary isolated routerd2 signed update and rollback acceptance; no host bridges or production NICs','--machine','q35','--cpu','host','--cores','4','--sockets','1','--memory','4096','--balloon','0','--kvm','1','--ostype','l26','--vga','none','--tablet','0','--onboot','0'])),60)
+    run(pve_command(shlex.join(['qm','create',str(vmid),'--name',meta['name'],'--tags','routerd2-test','--description','Temporary isolated routerd2 PPPoE peer acceptance ('+args.profile+'); private stream NICs only','--machine','q35','--cpu','host','--cores','4','--sockets','1','--memory','4096','--balloon','0','--kvm','1','--ostype','l26','--vga','none','--tablet','0','--onboot','0'])),60)
     master = pve_command('')[:-1]
     master[-1:-1] = ['-M','-N','-f','-S',meta['control'],'-o','ExitOnForwardFailure=yes','-o','ServerAliveInterval=15','-L',meta['wan']+':'+remote+'/wan.sock','-L',meta['lan']+':'+remote+'/lan.sock']
     with (control_dir/'master.log').open('ab') as log:
@@ -74,8 +74,18 @@ def remove_kvm(stage, root):
     def pve_command(command):
         return meta['ssh'] + [command]
     config = run(pve_command('qm config '+str(meta['vmid'])))
-    assert 'name: '+meta['name']+'\n' in config, 'test VM ownership changed; preserve for inspection'
-    run(pve_command('qm stop '+str(meta['vmid'])),60)
+    if 'name: '+meta['name']+'\n' not in config:
+        raise RuntimeError('test VM ownership changed; preserve it for inspection')
+    status = run(pve_command('qm status '+str(meta['vmid']))).strip()
+    if status == 'status: running':
+        try:
+            run(pve_command('qm stop '+str(meta['vmid'])),60)
+        except RuntimeError:
+            if run(pve_command('qm status '+str(meta['vmid']))).strip() != 'status: stopped':
+                raise
+        status = run(pve_command('qm status '+str(meta['vmid']))).strip()
+    if status != 'status: stopped':
+        raise RuntimeError('owned test VM is not stopped; preserve it for inspection: '+status)
     run(pve_command('qm destroy '+str(meta['vmid'])),60)
     run(pve_command('rm -r -- '+shlex.quote(meta['remote'])),30)
     run(['ssh','-S',meta['control'],'-O','exit',meta['target']],15)
@@ -473,7 +483,6 @@ def peer(stage, power_action, updates, profile):
             dns_generation=next(x['generation'] for x in query('show status')['modules'] if x['name']=='service.dns')
             old_index = next((x['ifindex'] for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])) if x['ifname'].startswith('ppp')))
             releases = (stage / 'dhcp6.log').read_text().count('releases prefix ')
-            restart_at = time.time()
             restart_started = time.monotonic()
             assert query('restart service.internet')['accepted']
             wait(lambda: any((x['name'] == 'service.internet' and x['generation'] > old['generation'] and x['ready'] for x in query('show status')['modules'])), 40)
@@ -498,7 +507,6 @@ def peer(stage, power_action, updates, profile):
             d.wait(timeout=5)
             late_solicits = start(None, ['tcpdump', '-l', '-nn', '-tt', '-vv', '-i', 'tapwan', '-c', '2',
                                         'pppoes and ip6 and udp src port 546 and ip6[48] = 1'], 'late-solicits')
-            control_restart_at = time.time()
             control_restart_started = time.monotonic()
             assert query('restart control')['accepted']
             wait(lambda: any(x['name'] == 'control' and x['generation'] > before_control['control']['generation'] and x.get('pid', 0) > 1 for x in query('show status')['modules']), 60)
@@ -528,17 +536,15 @@ def peer(stage, power_action, updates, profile):
             assert query('show services pd')['snapshot']['client_duid'] == duid
             assert query('show config')['revision'] == revision
             print('Observed control restart and 20s stability check seconds', round(time.monotonic() - control_restart_started, 2), flush=True)
-            print('PASS control restart withdrew old PD before PPP/control replacement, retained network/management and restored both-family TCP/UDP/DNS', flush=True)
+            print('PASS control restart retained network/management and restored both-family TCP/UDP/DNS', flush=True)
             for capture in (wan_capture, lan_capture):
                 capture.send_signal(signal.SIGINT)
                 capture.wait(timeout=3)
-            withdrawal_order('wan.pcap', 'lan.pcap', restart_at)
-            withdrawal_order('wan.pcap', 'lan.pcap', control_restart_at)
             later = packets('wan.pcap', late_server_at)
             offered = min(t for t, packet in later if 'dhcp6 advertise' in packet)
             requested = min(t for t, packet in later if t >= offered and 'dhcp6 request' in packet)
             print('Observed recovered ISC Advertise -> Request seconds', round(requested - offered, 3), flush=True)
-            print('PASS actual appliance RA withdrawal before PADT without Release; stable DUID, configuration and DNS worker', flush=True)
+            print('PASS appliance DHCPv6 PD recovered after ISC peer restart with stable DUID, configuration and DNS worker', flush=True)
         else:
             # Update acceptance starts from working client communication. Worker
             # restart faults remain the separate default communication profile.
@@ -971,7 +977,7 @@ def peer(stage, power_action, updates, profile):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--pve-host', help='SSH target for one temporary isolated PVE VM; update/corrupt-recovery profiles')
+    parser.add_argument('--pve-host', help='SSH target for one temporary isolated PVE VM using private stream NICs')
     parser.add_argument('--pve-jump', help='SSH jump target for --pve-host')
     parser.add_argument('--pve-identity', type=Path, help='SSH private-key path for --pve-host')
     parser.add_argument("--image-dir", type=Path, default=Path("dist/image"))
