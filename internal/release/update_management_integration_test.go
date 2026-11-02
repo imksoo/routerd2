@@ -44,8 +44,7 @@ func TestBuiltRuntimeSSHRollback(t *testing.T) {
 		}
 		t.Skip("set ROUTERD2_RELEASE_BUILT_DIR and ROUTERD2_RELEASE_BUILT_ID")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
+	ctx := t.Context()
 	pub, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
