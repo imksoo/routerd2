@@ -53,7 +53,9 @@ decode an entire configuration merely to obtain independent mutable storage.
 
 Full snapshots carry boot-scoped `observed_nanos`/`expires_nanos` metadata.
 The worker stamps before the engine walk and preserves that age through the
-effect acknowledgment; active ownership lasts at most five seconds. UTC is
+effect acknowledgment; active ownership lasts at most five seconds. The effect call uses the
+remaining original lifetime, including time spent walking the RIB; there is no
+independent shorter timeout or renewal of that deadline. UTC is
 display metadata and cannot revive an expired observation after a correction.
 The controller validates the current supervisor instance/generation/digest
 even when its accepted cache is empty, and fences inner producer sequence,

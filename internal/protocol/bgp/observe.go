@@ -172,7 +172,20 @@ func (o *observation) publish(ctx context.Context, s Snapshot) error {
 	if err := bgpconfig.ValidateObservation(s); err != nil {
 		return err
 	}
-	call, cancel := context.WithTimeout(ctx, time.Duration(o.cfg.EffectTimeoutMilliseconds)*time.Millisecond)
+	wait := bgpconfig.ObservationLifetime
+	if s.Active {
+		clock, err := bfd.ReadClock()
+		if err != nil {
+			return err
+		}
+		if !bgpconfig.CurrentObservation(s, clock) {
+			return errors.New("BGP observation expired before publication")
+		}
+		wait = time.Duration(s.ExpiresNanos - uint64(clock.BoottimeNanoseconds))
+	}
+	// The original observation is the authority bound, including time spent
+	// reading the RIB. A separate shorter timeout needlessly tears down peers.
+	call, cancel := context.WithTimeout(ctx, wait)
 	err := o.effects.Update(call, cloneSnapshot(s))
 	if err == nil {
 		err = call.Err()

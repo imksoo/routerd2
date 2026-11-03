@@ -693,6 +693,8 @@ resources:
       bind_interface: bgp0
       fib_interface: bgp0
 - id: service/tailnet
+  when:
+    fact: service.lan-ha.elected
   depends_on:
   - address/tailnet-underlay
   - address/lan

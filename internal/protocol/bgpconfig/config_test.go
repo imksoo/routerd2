@@ -81,7 +81,7 @@ func TestNormalizeDoesNotMutateCallerAndHasExplicitDefaults(t *testing.T) {
 	if string(before) != string(after) {
 		t.Fatal("normalization modified caller input")
 	}
-	if n.Table != 254 || n.RouteMetric != 200 || n.EffectTimeoutMilliseconds != 2000 {
+	if n.Table != 254 || n.RouteMetric != 200 {
 		t.Fatalf("defaults: %#v", n)
 	}
 	if !reflect.DeepEqual(n.Runtime.Global.Families, []string{"ipv4-unicast", "ipv6-unicast"}) {

@@ -160,7 +160,7 @@ func runWorker(ctx context.Context, cfg Config, effects Effects, ready func(), a
 			// route-effect withdrawal can delay shutdown.
 			stopErr = stopEngine(server.Stop, serveDone, 5*time.Second)
 		}
-		withdraw, withdrawCancel := context.WithTimeout(context.Background(), time.Duration(cfg.EffectTimeoutMilliseconds)*time.Millisecond)
+		withdraw, withdrawCancel := context.WithTimeout(context.Background(), leaseDuration)
 		inactive := Snapshot{Peers: []Peer{}, Routes: []Route{}, BFD: gateView.snapshot()}
 		if result != nil {
 			inactive.Error = "BGP worker stopped after an error"
@@ -222,7 +222,7 @@ func runWorker(ctx context.Context, cfg Config, effects Effects, ready func(), a
 		}()
 	}
 	publish := func() error {
-		observe, observeCancel := context.WithTimeout(runCtx, time.Duration(cfg.EffectTimeoutMilliseconds)*time.Millisecond)
+		observe, observeCancel := context.WithTimeout(runCtx, leaseDuration)
 		snapshot, disabled, err := gateView.readSnapshot(func() (Snapshot, error) { return readSnapshot(observe, server, cfg) })
 		observeCancel()
 		if err != nil {

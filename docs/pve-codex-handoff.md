@@ -1,8 +1,14 @@
 # routerd2 開発引き継ぎ
 
-通常Makefile build ID `1ec748fbb2d8` + 本変更で、二台47-resource profileの拡張手順も終了0。初期通信と両方向切替後に、IPv4/IPv6 HTTPS、UDP/TCP DNS、広告されたIPv6 DNS、条件付きDNS/子suffix、Cloudflare/Google両DoHの状態と公開名への実query、VIP NTP、両FRRのLAN広告・現用側だけの戻り経路、端末の非NAT TCP/UDPを確認した。a→bは62.72秒（途中probe失敗2回）、b→aは34.00秒（1回）で全項目が復旧。同一TCPはSYN1回・69応答・最大応答間隔57.38秒、同一UDPは122応答・38欠落・最大応答間隔33.72秒（1秒返信予算）。両方向のNAT tuple/mark、DUID/IAID/prefix、実DHCP更新、再加入/同期/非preemptを維持した。長い断は残る改善対象であり、安定性や無停止を主張しない。
+更新: 2026-11-03 06:10 UTC。全体ゴールは継続中。
 
-Race Detector（`make race`）、vet、Python補助検査36件、通常build、3実行物のstatic linkが通過。初回の並行build中のRace試験では、既存の短時間fixtureが設定前に期限へ達して失敗した。最新ソースの全`make race`は再実行終了0。二台の特別scope、Tailscale双方向/exit、履歴・telemetry全経路と長時間安定性、単体BGP再起動、切替断の短縮、実機/配布先/34 package全体は残作業。
+通常Makefile build ID `875dfa6f1f84` + 本変更で、実HGWへ接続した二台47-resource profileの拡張手順が終了0。条件付きDNS/DoH・BGP・NTP・両IP Internetに加え、独立Headscale/Tailscale端末とのLAN→peer IPv4/IPv6、peer→LAN IPv4のTCP/UDPを両方向の現用停止・再加入後に確認した。LAN subnet routeは独立端末で手動変更せず切り替わった。最後に現用nodeを明示選択したIPv4/IPv6 exit HTTPS/UDP DNSも通過（同一exit node IDの自動引継ぎの受入ではない）。両nodeへのSSH鍵認証・保持host key、現用側のloopback/管理DNS・Webの実DNS履歴、LANからの管理拒否も通過した。
+
+全項目の復旧はa→b36.82秒（途中probe失敗1回）、b→a36.13秒（3回）。同一公開TCPはSYN1回、117応答、最大応答間隔11.68秒。同一UDPは126応答・17欠落・最大応答間隔9.52秒（1秒返信予算）。両方向でNAT tuple/mark、DUID/IAID/prefix、実DHCP更新、再加入/同期/非preemptを維持した。切替断の短縮と長時間安定性は引き続き必要。
+
+TailscaleのLAN通信は、両側で常時広告していた旧二台例で実際に失敗した。現用からtailscale0へ出るSYNをpacketで確認し、広告を現用権に合わせた設定へ修正した。独立制御サーバーの明示policyは試験userのLAN/exit広告だけを事前許可し、切替後の手動承認を合格条件にしない。各nodeの保持鍵・名称は別のまま再利用する。
+
+BGPは観測の元の5秒期限より短い2秒で適用待ちを切っていた。余分な`effect_timeout_milliseconds`設定をBGPのproducer/consumerから削除し、RIB走査に使った時間も差し引いた元の残り期限で待つ。期限を更新して待ち直す処理は追加しない。Race Detector・vet・Python補助検査36件・通常build・3実行物のstatic linkが通過。短時間の二台通信は確認済みだが、単体の長時間BGP安定性は再受入が必要。VRRPの適用待ち再起動と初期AFTR HTTP409も残る。
 
 ## 今回の自然更新とHA修正
 
@@ -11,8 +17,6 @@ Race Detector（`make race`）、vet、Python補助検査36件、通常build、3
 二台用設定の両側常時LAN広告では、独立FRRの戻りが待機側へ入りSYN/ACKをINVALIDとして破棄する実障害を確認した。保存中homertのBGPのexport/connected intentと旧routerdのrender/route同期を参照し、このstateful二台profileのBGPは現用権で有効化する。新しい通信手順は両FRRの実経路が現用側だけを向くこと、端末TCP/UDPの非NAT往復、条件付きDNS/子suffixと両DoH上流を切替前後に確認する。
 
 製品の修正は、経路適用に不要なkernel route dumpのsort削除と、VIPが未公開の待機/準備通知を既に適用したVIP不在で応答する処理。これにより、準備を進める通知がその準備の完了を待ってtimeoutする依存を外す。準備条件が満たされた現用化とVIP撤去は実適用を待つ。診断用のstack timerは除去し、通常Makefile buildで上記の最終確認を実施した。
-
-更新: 2026-11-03 05:46 UTC。全体ゴールは継続中。
 
 ## 前checkpointの単体結果
 
@@ -34,8 +38,8 @@ NTPのワイルドカード待受を許可する製品修正`19682da`はmainへp
 
 ## 次の作業
 
-1. 単体BGPのeffect ACK timeoutによる再起動と、全二台profileの長い切替断を直す。今回の待機/準備の応答改善を全ての適用待ちの解消へ読み替えない。初期AFTRのHTTP409/restartも残る。
-2. 二台の特別DHCP scope、Tailscale双方向/subnet/exit、管理・履歴・syslog/OTLP全経路と再起動後を実peerで受け入れる。DNS/DoH・BGPは今回確認した経路と長時間安定性を分ける。
+1. BGPの元の期限へ統一した変更を単体の長時間実通信で再受入し、残るVRRPの適用待ち再起動と二台の切替断を直す。初期AFTRのHTTP409/restartも残る。
+2. 二台の特別DHCP scope、nDPI/通信履歴・firewall履歴・syslog/OTLP全経路、保持期限と再起動後を実peerで受け入れる。今回確認したTailscale/管理/DNS/DoH/BGP経路と長時間安定性を分ける。
 3. 保存homert全意図と保持dataset、MTU/期限/更新/配布、残る34 work packageを完了する。対象ONU/NIC・実機性能・arm64・cloud等は未受入。各実通信の直前に[試験計画](test-plan.md)全体を読む。PVE/QEMUと追加PBR調査は実行しない。
 
-全体開始から9日18時間17分、記録済み期限から4日12時間49分経過（05:46 UTC）。全体ゴールは継続中。終了したstage/key/capture/log/重複build outputを撤去し、次の観測で必要な実行物・pinned peerだけを残す。
+全体開始から9日18時間41分、記録済み期限から4日13時間13分経過（06:10 UTC）。全体ゴールは継続中。終了したstage/key/capture/log/重複build outputを撤去し、次の観測で必要な実行物・pinned peerだけを残す。

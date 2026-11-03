@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 05:46 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 06:10 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 実行原則
 
@@ -14,7 +14,7 @@
 
 単体38-resource profileでは通常/予約/特別DHCP scope、IPv4/IPv6 Internet、条件付きDNS/DoH、BGP/NTP/Tailscale、管理、nDPI/履歴/syslog/OTLPとdaemon再起動を確認した。build `b03debf15982`の長時間観測では2026-11-03 05:24:16 UTCに実HGWとの自然PD Renew/Replyと期限更新を観測し、678通信roundと最終通信・全daemon再起動も終了0。BGP等のworker再起動を観測しており、長時間安定性は未受入。
 
-二台47-resource profileは両方向の同一TCP/UDP/NAT tuple・PD identity・DHCP更新・再加入が一回通過した。その後、条件付きDNS/DoH・BGPを含む再試験で待機側へ戻るBGP通信の破棄、effect ACK timeout、既存TCP断を再現した。常時両側からLANを広告する設定と不要な処理/待ちを修正し、条件付きDNS/DoH・BGPを含む両方向の拡張手順も終了0。全項目復旧は62.72/34.00秒、TCP最大応答間隔57.38秒で、断の短縮は残作業。一度の合格を安定性へ読み替えない。
+二台47-resource profileは両方向の同一TCP/UDP/NAT tuple・PD identity・DHCP更新・再加入が一回通過した。その後、条件付きDNS/DoH・BGPを含む再試験で待機側へ戻るBGP通信の破棄、effect ACK timeout、既存TCP断を再現した。常時両側からLANを広告する設定と不要な処理/待ちを修正し、条件付きDNS/DoH・BGPを含む両方向の拡張手順も終了0。Tailscale双方向/exitと管理SSH/Web履歴も含む最新手順は終了0、全項目復旧36.82/36.13秒、TCP最大応答間隔11.68秒。断の短縮と長時間安定性は残作業。一度の合格を安定性へ読み替えない。
 
 保存中homert02/03は各110 resources。件数一致ではなく実際の意図を照合する。全意図と34 work packageは未完了。ens18/ens20はvirtioであり、NTT ONU直結・対象NIC・実機性能・arm64・cloud/Kubernetesの資格へ読み替えない。
 
@@ -54,13 +54,15 @@ WAN/tailnet captureは各最大8MB、PD captureはudp546と実行時間で限定
 
 `make check-uplink-ha DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18`で通常buildと設定検証後に実行する。まず実HGWのRA/PD、共有WAN/LAN IPv6 identity、VRRPの準備完了後公開、実DHCP端末の両IP HTTPS・UDP/TCP DNS、現用daemon停止後の引継ぎを通す。FRR2台、DNS、chronyd、Headscale、syslog/Collectorを独立peerとして配置する。独立peerの配置だけでは各経路の受入としない。
 
+二台Tailscaleは現用権に合わせて有効化し、nodeごとの保持鍵を維持する。独立Headscaleの明示policyで試験userのLAN/exit広告を事前許可する（[公式route設定](https://headscale.net/stable/ref/routes/)）。独立端末はLAN経路を手動で切り替えず、制御サーバーが選んだPrimaryRoutesと実TCP/UDPを照合する。両方向の停止/再加入後もLAN→peer両IP・peer→LAN IPv4を確認する。exitは最後に現用nodeを明示選択して両IP HTTPS/UDP DNSを確認し、同一exit node IDの自動切替とは扱わない。両nodeへのSSH鍵認証/保持host key、現用側のloopback/管理DNS・Web履歴とLANからの管理拒否も確認する。
+
 隔離: private mountと専用namespace/bridgeを用い、ens18へ専用macvlanで接続する。共有WAN MACは`02:00:5e:00:01:43`、静的gateway用HGW接続は`02:72:6f:75:74:06`。自然更新ownerのMAC/protocol/stateへ触れない。hostの管理address/default route/時計は変更しない。各実行は最大600秒、peer/productのstdoutと状態はprivate stageのみとし、終了時にprocess/namespace/key/stageを撤去する。失敗の原因と必要な修正は簡潔に残す。
 
 再実行手順: 同じ設定で現用停止→待機側への復旧→旧現用の再加入を両方向へ進める。独立Python標準ライブラリのclientから公開HTTPSへTCP接続を一度だけ張り、公開DNSへ同じUDP socketで送信し続ける。TCPの再接続を禁止し、両nodeの実conntrack reply tupleとclient captureのSYNを照合する。UDPは1秒の返信期限で欠落と最大応答間隔を記録する。これは無損失条件ではない。DUID/IAID/prefixと同期済みDHCP leaseの実Renew/ACK、再加入後の非preemptも確認する。
 
 DHCPの現用権はVRRPが決める。元現用が停止しても、同期済みの保存leaseから配布を再開して実Renew/ACKを返す。同期は旧routerdと同じ非同期のため、未受信の新規割当を失った場合の重複回避までは保証しない。`--peer-loss`の既存namespace手順も、元現用不在中の既知lease更新と、同期復帰後の新規割当を確認する契約へ更新する。
 
-残作業: 特別scope、DNS/DoH・BGP・Tailscale・履歴/telemetry全経路と再起動後の安定性を同じ二台profileで受け入れる。複数回、BGP/VRRP effect ACK待ちのtimeoutでworker再起動を観測したため、全機能時の適用/停止順序も次の確認対象とする。
+残作業: 特別scope、nDPI/通信・firewall履歴、syslog/OTLP全経路と再起動後の安定性を同じ二台profileで受け入れる。複数回、BGP/VRRP effect ACK待ちのtimeoutでworker再起動を観測したため、全機能時の適用/停止順序も次の確認対象とする。
 
 ## 自然更新と残る全体受入
 

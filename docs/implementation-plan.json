@@ -11262,27 +11262,27 @@
         "open_observation": "One initial bring-up had BGP/VRRP effect acknowledgement timeout and worker restart; review full-profile coordinator/application and shutdown ordering."
       },
       "latest_full_profile_ha_continuity_gate": {
-        "as_of_utc": "2026-11-03T05:46:00Z",
+        "as_of_utc": "2026-11-03T06:10:00Z",
         "status": "passed_exit_0",
-        "build_identity": "1ec748fbb2d8 plus current patch",
+        "build_identity": "875dfa6f1f84 plus current patch",
         "resources_per_node": 47,
         "command": "make check-uplink-ha DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18",
         "recovery_seconds": [
-          62.72,
-          34.0
+          36.82,
+          36.13
         ],
         "tcp": {
-          "responses": 69,
+          "responses": 117,
           "syn_count": 1,
-          "maximum_reply_gap_seconds": 57.37519805319607
+          "maximum_reply_gap_seconds": 11.676069043576717
         },
         "udp": {
-          "responses": 122,
-          "missed": 38,
+          "responses": 126,
+          "missed": 17,
           "reply_budget_seconds": 1,
-          "maximum_reply_gap_seconds": 33.72179761622101
+          "maximum_reply_gap_seconds": 9.515961443074048
         },
-        "observed": "Both owner stops/rejoins with same TCP/UDP/NAT tuple/mark, real DHCP renewal and PD identity. IPv4/IPv6 HTTPS, UDP/TCP and advertised IPv6 DNS, conditional/nested suffix DNS, both public DoH upstreams, VIP NTP, two independent FRR route advertisements/current-owner return paths and non-NAT client TCP/UDP passed.",
+        "observed": "Previous DNS/DoH/BGP/NTP and Internet paths plus independent Tailscale LAN-to-peer IPv4/IPv6 and peer-to-LAN IPv4 TCP/UDP after both takeovers/rejoins. Automatic subnet selection without manual route changes; elected-node explicit IPv4/IPv6 exit HTTPS/UDP DNS. Both-node SSH/key retention, active loopback/management DNS/Web query history and LAN management rejection. Same public TCP/UDP/NAT tuple, PD identity and real DHCP renewal preserved.",
         "fixes": [
           "Source-scoped PD checkpoint ordering",
           "ARP identity on IPv6-only macvlan siblings",
@@ -11290,7 +11290,9 @@
           "RA DNS lifetime and fixed B4/shared-VIP SNAT limited to forwarded clients",
           "Serving-owner BGP advertisement for symmetric client traffic",
           "Acknowledge an already unpublished standby/preparing VIP without waiting for unrelated preparation",
-          "Remove route dump sorting from kernel reconciliation"
+          "Remove route dump sorting from kernel reconciliation",
+          "Elected-owner Tailscale advertisements with independent pre-approved fixture control policy",
+          "Remove the separate BGP effect timeout; preserve the original observation expiry through RIB walk and effect wait"
         ],
         "not_qualified": [
           "Uninterrupted/lossless traffic",
@@ -11298,10 +11300,10 @@
           "All two-node DNS/DoH/BGP/Tailscale/scopes/history/telemetry paths and stability",
           "Physical ONU/NIC qualification"
         ],
-        "open_observation": "Long takeover outages remain (TCP max gap57.38s). Old single natural-renewal build reached BGP generation17. Full paired scopes, Tailscale, history/telemetry and long-term stability remain open.",
+        "open_observation": "Outages remain (TCP max gap11.68s). BGP effect calls now use original observation authority instead of a shorter2s limit; single long-term stability needs reacceptance. VRRP effect timeouts and initial AFTR409 remain. Paired special scopes, nDPI/flow/firewall history, syslog/OTLP and full deployment qualification remain open.",
         "failed_probe_rounds": [
-          2,
-          1
+          1,
+          3
         ]
       },
       "full_profile_natural_renewal_gate": {

@@ -29,21 +29,20 @@ type AppliedPath = bgpdaemon.AppliedPath
 // resource and normalized committed Runtime digest still match this Config.
 // A module is one BGP instance in the worker's existing network namespace.
 type Config struct {
-	Resource                  string                   `json:"resource"`
-	Runtime                   bgpdaemon.AppliedConfig  `json:"runtime"`
-	SocketPath                string                   `json:"socket_path"`
-	GRPCSocketPath            string                   `json:"grpc_socket_path,omitempty"`
-	StatePath                 string                   `json:"state_path"`
-	StatusPath                string                   `json:"status_path,omitempty"`
-	EventPath                 string                   `json:"event_path,omitempty"`
-	PeerTransports            map[string]PeerTransport `json:"peer_transports,omitempty"`
-	PeerBFD                   map[string]BFDReference  `json:"peer_bfd,omitempty"`
-	BindInterface             string                   `json:"bind_interface,omitempty"`
-	FIBInterface              string                   `json:"fib_interface,omitempty"`
-	Table                     int                      `json:"table,omitempty"`
-	RouteMetric               int                      `json:"route_metric,omitempty"`
-	MaxRoutes                 int                      `json:"max_routes,omitempty"`
-	EffectTimeoutMilliseconds int                      `json:"effect_timeout_milliseconds,omitempty"`
+	Resource       string                   `json:"resource"`
+	Runtime        bgpdaemon.AppliedConfig  `json:"runtime"`
+	SocketPath     string                   `json:"socket_path"`
+	GRPCSocketPath string                   `json:"grpc_socket_path,omitempty"`
+	StatePath      string                   `json:"state_path"`
+	StatusPath     string                   `json:"status_path,omitempty"`
+	EventPath      string                   `json:"event_path,omitempty"`
+	PeerTransports map[string]PeerTransport `json:"peer_transports,omitempty"`
+	PeerBFD        map[string]BFDReference  `json:"peer_bfd,omitempty"`
+	BindInterface  string                   `json:"bind_interface,omitempty"`
+	FIBInterface   string                   `json:"fib_interface,omitempty"`
+	Table          int                      `json:"table,omitempty"`
+	RouteMetric    int                      `json:"route_metric,omitempty"`
+	MaxRoutes      int                      `json:"max_routes,omitempty"`
 }
 
 // PeerTransport is additional native transport intent. LocalAddress and
@@ -95,9 +94,6 @@ func Normalize(c Config) Config {
 	if out.MaxRoutes == 0 {
 		out.MaxRoutes = 100000
 	}
-	if out.EffectTimeoutMilliseconds == 0 {
-		out.EffectTimeoutMilliseconds = 2000
-	}
 	for peer, ref := range out.PeerBFD {
 		if ref.Address == "" {
 			ref.Address = peer
@@ -147,9 +143,6 @@ func Validate(c Config) error {
 	}
 	if c.MaxRoutes < 1 || c.MaxRoutes > 1000000 {
 		return errors.New("BGP max_routes must be 1..1000000")
-	}
-	if c.EffectTimeoutMilliseconds < 10 || c.EffectTimeoutMilliseconds > 4000 {
-		return errors.New("BGP effect timeout must be 10..4000 milliseconds")
 	}
 	if c.FIBInterface != "" && !validInterface(c.FIBInterface) {
 		return errors.New("BGP fib_interface is invalid")

@@ -1,10 +1,8 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
-自然PD更新を含む単体長時間手順は678通信roundと全daemon再起動まで終了0。BGP再起動は残り、長時間安定性は未受入。二台では非対称BGPの戻りとVRRP準備中の不要な適用待ちを修正し、条件付きDNS/DoH・BGPを含む両方向の手順も終了0。全項目復旧62.72/34.00秒、TCP最大応答間隔57.38秒のため切替断の短縮と長時間安定性は残る。実行版・条件・結果は[引き継ぎ](pve-codex-handoff.md)を参照する。
+更新: 2026-11-03 06:10 UTC。単体の自然PD更新・全daemon復旧と、DNS/DoH・BGP・Tailscale双方向/exit・SSH/Web履歴を含む両方向HAの実通信手順が終了0。最新の全項目復旧36.82/36.13秒、TCP最大応答間隔11.68秒。BGPの余分な2秒適用待ち制限を削除して元の観測期限へ統一した。切替断・VRRP/AFTR再起動・単体BGPの長時間安定性・未受入機能を解消する。実行版・条件・結果は[引き継ぎ](pve-codex-handoff.md)を参照する。
 
-更新: 2026-11-03 05:46 UTC。単体の自然PD更新・全daemon復旧と、DNS/DoH・BGPを含む両方向HAの実通信手順が終了0。残る切替断・worker再起動・未受入機能を解消し、全体の完成へ進める。
-
-全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で9日18時間17分、記録済み期限から4日12時間49分経過した。34 work packageはin_progress22件/planned12件。部分受入を全体の完成に数えない。
+全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で9日18時間41分、記録済み期限から4日13時間13分経過した。34 work packageはin_progress22件/planned12件。部分受入を全体の完成に数えない。
 
 HA基盤の並行確認: 基準main `9fb64f4`の通常実行物、build ID `9fb64f4267e9`で`make check-ha-state`が終了0。独立Linux namespace/PID1の2 product processとclient/serverで、A→B/B→AのVRRP/NAT引継ぎ、同一TCP socketとUDP mapping、同期済みDHCP leaseの実Renew/ACK、worker/conntrack engine再起動を確認した。TCP再接続なし（captureのSYNは1回）、最大応答待ち1.665秒。UDPは50ms送信/200ms返信予算で3009送信・2942受信・67期限超過、最大無応答1.110秒（このfixture条件での測定）。同期断中の独立割当/更新と復帰、未設定証明書の拒否、実lease期限での失効、3日sticky期限を変えない再起動/引継ぎ、保持中の別client割当と元client再取得も通過。設定削除で同期workerを回収し、元のconntrack sysctlへ復元した。実HGWの38-resource全体を二台化した結果や、14-resource例・実homert二台の資格とは分ける。
 

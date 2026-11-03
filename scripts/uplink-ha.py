@@ -139,26 +139,50 @@ def owner(stage, uplink):
         trusted = stage / "roots.pem"
         trusted.write_bytes(roots.read_bytes() + cert.read_bytes())
         run(["mount", "--bind", str(trusted), str(roots)])
+        policy = stage / "tail-policy.json"
+        policy.write_text(json.dumps({"grants": [{"src": ["*"], "dst": ["*"], "ip": ["*"]}], "autoApprovers": {"routes": {"198.18.0.0/24": ["fixture@"]}, "exitNode": ["fixture@"]}}))
         hs = stage / "headscale.json"
-        hs.write_text(json.dumps({"server_url": "https://198.51.100.1:8443", "listen_addr": "198.51.100.1:8443", "noise": {"private_key_path": str(stage / "noise.key")}, "prefixes": {"v4": "100.64.0.0/10", "v6": "fd7a:115c:a1e0::/48"}, "database": {"type": "sqlite", "sqlite": {"path": str(stage / "control.db")}}, "derp": {"urls": [], "paths": [], "auto_update_enabled": False, "server": {"enabled": True, "region_id": 999, "region_code": "fixture", "region_name": "isolated DERP", "stun_listen_addr": "0.0.0.0:3478", "private_key_path": str(stage / "derp.key"), "automatically_add_embedded_derp_region": True, "ipv4": "198.51.100.1"}}, "dns": {"override_local_dns": False, "magic_dns": True, "base_domain": "test.invalid"}, "unix_socket": str(stage / "headscale.sock"), "tls_cert_path": str(cert), "tls_key_path": str(key), "disable_check_updates": True, "log": {"level": "warn"}}))
+        hs.write_text(json.dumps({"server_url": "https://198.51.100.1:8443", "listen_addr": "198.51.100.1:8443", "noise": {"private_key_path": str(stage / "noise.key")}, "prefixes": {"v4": "100.64.0.0/10", "v6": "fd7a:115c:a1e0::/48"}, "database": {"type": "sqlite", "sqlite": {"path": str(stage / "control.db")}}, "derp": {"urls": [], "paths": [], "auto_update_enabled": False, "server": {"enabled": True, "region_id": 999, "region_code": "fixture", "region_name": "isolated DERP", "stun_listen_addr": "0.0.0.0:3478", "private_key_path": str(stage / "derp.key"), "automatically_add_embedded_derp_region": True, "ipv4": "198.51.100.1"}}, "dns": {"override_local_dns": False, "magic_dns": True, "base_domain": "test.invalid"}, "unix_socket": str(stage / "headscale.sock"), "tls_cert_path": str(cert), "tls_key_path": str(key), "policy": {"mode": "file", "path": str(policy)}, "disable_check_updates": True, "log": {"level": "warn"}}))
         head = [str(stage / "headscale"), "-c", str(hs)]
         start("tail", head + ["serve"], "headscale")
         wait(lambda: (stage / "headscale.sock").exists())
         user = json.loads(run(inside("tail", head + ["users", "create", "fixture", "-o", "json"])))
         auth = json.loads(run(inside("tail", head + ["preauthkeys", "create", "--user", str(user["id"]), "--reusable", "-o", "json"])))
+        peer_root = stage / "tail-peer"
+        peer_root.mkdir(mode=0o700)
+        peer_key = peer_root / "auth.key"
+        peer_key.write_text(auth["key"])
+        peer_key.chmod(0o600)
+        peer_socket = peer_root / "tailscaled.sock"
+        start("tail", ["env", "TS_LOGS_DIR="+str(peer_root), str(stage / "tailscaled"), "--state="+str(peer_root / "state"), "--statedir="+str(peer_root), "--socket="+str(peer_socket), "--tun=tailscale0", "--port=41641", "--no-logs-no-support"], "tail-peer")
+        wait(peer_socket.exists)
+        peer_cli = [str(stage / "tailscale"), "--socket="+str(peer_socket)]
+        run(inside("tail", peer_cli + ["up", "--timeout=15s", "--login-server=https://198.51.100.1:8443", "--hostname=independent-peer", "--auth-key=file:"+str(peer_key), "--accept-dns=false", "--accept-routes=true", "--netfilter-mode=off"]), 20)
+        peer_status = json.loads(run(inside("tail", peer_cli + ["status", "--json"])))
+        peer_ips = {ipaddress.ip_address(a).version: a for a in peer_status["TailscaleIPs"]}
+        for address in peer_ips.values():
+            name = "tail-echo-"+address.replace(":", "_")
+            start("tail", ["python3", "-u", "-c", echo["ECHO_SERVER"], address], name)
+            wait(lambda: "READY" in (stage / (name+".log")).read_text())
+        start("tail", ["tcpdump", "-n", "-Z", "root", "-l", "-i", "tailscale0", "-c", "80", "tcp port 18080 or udp port 18081"], "tail-flow-peer")
         for node in ("a", "b"):
             p = private / ("tailscale-" + node + ".key")
             p.write_text(auth["key"])
             p.chmod(0o600)
         roles = ("logging", "network", "control", "management", "ra_client", "dhcp4", "dhcp6", "dhcp_server", "dhcp6_server", "ra", "aftr", "dns", "health", "bgp", "ntp", "tailscale", "traffic_flow", "firewall_log", "syslog", "otlp_logs", "web_console", "vrrp")
+        management_key = stage / "management-key"
+        run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(management_key)])
+        management_public_key = management_key.with_suffix(".pub").read_text().strip()
         daemons = {}
         for index,node in enumerate(("a", "b")):
             directory = stage / node
             directory.mkdir()
             boot = {"platform": "host", "config": str(stage / ("node-" + node + ".yaml")), "runtime_dir": str(directory / "run"), "state_dir": str(directory / "state"), "ssh": {"listen": f"198.19.0.{index+2}:2222", "user": "admin"}, "workers": {r: str(stage / ("routerd-logging" if r=="logging" else "routerd-modules")) for r in roles}, "engines": {r: str(stage / image) for r,image in (("dhcp_server", "dnsmasq-engine.tar"), ("vrrp", "conntrack-engine.tar"), ("ntp", "chrony-engine.tar"), ("tailscale", "tailscale-engine.tar"))}}
             path = directory / "boot.json"
+            boot["ssh"]["authorized_keys"] = [management_public_key]
             path.write_text(json.dumps(boot))
             daemons[node] = start(node, [str(stage / "routerd"), "boot", "--file", str(path)], "router-" + node)
+            start(node, ["tcpdump", "-n", "-Z", "root", "-l", "-i", "any", "-c", "80", "tcp port 18080 or udp port 18081"], "tail-flow-"+node)
         (stage / "location.json").write_text(json.dumps({"owner_pid": os.getpid(), "namespaces": names, "stage": str(stage)}))
         print("Full native HA owner", os.getpid(), "stage", stage, flush=True)
         def elected():
@@ -244,6 +268,51 @@ def owner(stage, uplink):
                 print("HA startup probe failed", round(time.monotonic()-started, 2), str(error), flush=True)
                 return False
         wait(initial_traffic)
+        client_address = lease.read_text().split()[0]
+        start("client", ["python3", "-u", "-c", echo["ECHO_SERVER"], client_address], "client-echo")
+        wait(lambda: "READY" in (stage / "client-echo.log").read_text())
+        def tailnet_snapshot(node):
+            instances = api(node, "control.sock", "/v1/services").get("instances", [])
+            if not any(i["name"] == "service.tailnet" for i in instances):
+                return {}
+            return api(node, "control.sock", "/v1/services/service.tailnet").get("snapshot", {})
+        wait(lambda: tailnet_snapshot(elected()).get("backend_state") == "Running")
+        tailnet_ids = {}
+        def check_tailnet():
+            node = elected()
+            snapshot = tailnet_snapshot(node)
+            assert snapshot.get("backend_state") == "Running", "elected tailnet node is not running"
+            assert snapshot["node_id"] == tailnet_ids.setdefault(node, snapshot["node_id"]), "tailnet identity changed after daemon restart"
+            addresses = snapshot["addresses"]
+            router6 = next(a for a in addresses if ipaddress.ip_address(a).version == 6)
+            for family in (4, 6):
+                source = client_address if family == 4 else router6
+                run(inside("client", ["python3", "-c", echo["ECHO_CLIENT"], peer_ips[family], source]))
+            status = json.loads(run(inside("tail", peer_cli + ["status", "--json"])))
+            selected = [p for p in status.get("Peer", {}).values() if "198.18.0.0/24" in p.get("PrimaryRoutes", [])]
+            assert len(selected) == 1, "independent peer has no selected LAN subnet route"
+            source = {"hgw-router-a": "198.18.0.2", "hgw-router-b": "198.18.0.3"}[selected[0]["HostName"]]
+            run(inside("tail", ["python3", "-c", echo["ECHO_CLIENT"], client_address, source]))
+            print("PASS HA tailnet LAN-to-peer IPv4/IPv6 and peer-to-LAN IPv4 TCP/UDP; automatic subnet selection", selected[0]["HostName"], flush=True)
+        wait(lambda: any("198.18.0.0/24" in p.get("PrimaryRoutes", []) for p in json.loads(run(inside("tail", peer_cli + ["status", "--json"]))).get("Peer", {}).values()))
+        check_tailnet()
+        def check_management():
+            for node in daemons:
+                address = "198.19.0.2" if node == "a" else "198.19.0.3"
+                status = json.loads(run(inside("client", ["ssh", "-i", str(management_key), "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile="+str(stage / "known-hosts"), "-o", "ConnectTimeout=3", "-p", "2222", "admin@"+address, "show status"])))
+                assert status["ready"], "management SSH reported a router unavailable"
+            node = elected()
+            address = "198.19.0.2" if node == "a" else "198.19.0.3"
+            for target, server in ((node, "127.0.0.1"), ("client", address)):
+                assert run(inside(target, ["dig", "@"+server, "router.home.arpa", "A", "+short", "+time=3", "+tries=1"])).strip() == "198.18.0.1"
+            history = api(node, "control.sock", "/v1/services/service.dns/dns-history?name=available.split.test.&limit=20")
+            assert history.get("queries"), "actual DNS queries were not retained"
+            page = run(inside("client", ["curl", "--noproxy", "*", "--fail", "--max-time", "4", "-sS", "http://"+address+":8080/dns-queries?service=service.dns&name=available.split.test.&limit=20"]))
+            assert 'data-query="' in page and any(answer in page for answer in ("192.0.2.77", "192.0.2.78")), "Web console omitted the real DNS answer"
+            denied = subprocess.run(inside("client", ["curl", "--interface", "client0", "--noproxy", "*", "--max-time", "2", "-sS", "http://"+address+":8080/"]), capture_output=True)
+            assert denied.returncode != 0, "management Web was reachable from the LAN"
+            print("PASS HA management SSH, retained host keys, loopback/management DNS, Web query history and LAN access restriction", flush=True)
+        check_management()
         neighbor = json.loads(run(inside("client", ["ip", "-j", "neigh", "show", "to", "198.18.0.1", "dev", "client0"])))
         assert len(neighbor) == 1 and neighbor[0].get("lladdr") == "00:00:5e:00:01:2a", neighbor
         print("PASS client learned the IPv4 VIP MAC rather than its IPv6 sibling", flush=True)
@@ -304,6 +373,8 @@ def owner(stage, uplink):
                 nonlocal failed_probes
                 try:
                     traffic()
+                    check_tailnet()
+                    check_management()
                     return True
                 except (RuntimeError, AssertionError) as error:
                     failed_probes += 1
@@ -326,6 +397,8 @@ def owner(stage, uplink):
             daemons[previous] = start(previous, [str(stage / "routerd"), "boot", "--file", str(stage / previous / "boot.json")], "router-" + previous)
             wait(lambda: standby_synced(previous))
             assert elected() == survivor, "rejoining member preempted the configured non-preemptive owner"
+            check_tailnet()
+            check_management()
             print("PASS rejoined member synchronized without preemption", previous, flush=True)
         capture.send_signal(signal.SIGINT)
         capture.wait(timeout=5)
@@ -333,7 +406,19 @@ def owner(stage, uplink):
         packets = run(["tcpdump", "-nn", "-r", str(stage / "flow.pcap"), f"src port {tcp_port} and dst port 443 and tcp[tcpflags] & tcp-syn != 0"])
         assert len(packets.splitlines()) == 1, packets
         print("PASS one TCP SYN through both handoffs", {mode: progress(mode) for mode in flow_processes}, flush=True)
+        node = elected()
+        address = next(a for a in tailnet_snapshot(node)["addresses"] if ipaddress.ip_address(a).version == 4)
+        run(inside("tail", peer_cli + ["set", "--exit-node="+address, "--exit-node-allow-lan-access=true"]))
+        for family, server in (("-4", "1.1.1.1"), ("-6", "[2606:4700:4700::1111]")):
+            code = run(inside("tail", ["curl", family, "--noproxy", "*", "--max-time", "8", "--resolve", "one.one.one.one:443:"+server, "-sS", "-I", "-o", "/dev/null", "-w", "%{http_code}", "https://one.one.one.one/"]))
+            assert code in ("200", "301", "302", "308"), (family, code)
+            assert run(inside("tail", ["dig", family, "@"+server.strip("[]"), "example.net", "A", "+short", "+time=3", "+tries=1"])).strip()
+        print("PASS independent tailnet client used the elected node for IPv4/IPv6 exit HTTPS and UDP DNS", flush=True)
     except BaseException:
+        for name in ("tail-flow-a", "tail-flow-b", "tail-flow-peer", "tail-peer"):
+            path = stage / (name+".log")
+            if path.exists():
+                print("HA tailnet failure", name, path.read_text(errors="replace")[-10000:], flush=True)
         packets = stage / "flow.pcap"
         if packets.exists():
             print("HA flow flags", run(["tcpdump", "-nn", "-tt", "-r", str(packets)]), flush=True)
