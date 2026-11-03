@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 07:35 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 07:52 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 実行原則
 
@@ -69,6 +69,16 @@ WAN/tailnet captureは各最大8MB、PD captureはudp546と実行時間で限定
 DHCPの現用権はVRRPが決める。元現用が停止しても、同期済みの保存leaseから配布を再開して実Renew/ACKを返す。同期は旧routerdと同じ非同期のため、未受信の新規割当を失った場合の重複回避までは保証しない。`--peer-loss`の既存namespace手順も、元現用不在中の既知lease更新と、同期復帰後の新規割当を確認する契約へ更新する。
 
 残作業: 今回通過した特別scope・nDPI/履歴・syslog/OTLPに続き、保持期限/archive障害・cold start/再起動後の安定性を同じprofileで受け入れる。複数回、BGP/VRRP effect ACK待ちのtimeoutでworker再起動を観測したため、全機能時の適用/停止順序も次の確認対象とする。
+
+## MTU/MSSの実通信手順
+
+自然更新ownerを同じprofileで稼働させ、初期の上流遮断/復旧確認が終わって通常通信roundへ入ってから行う。表示されたprivate stageの`location.json`からowner PID/router/client namespaceを読み、`client-lease-events`の最後の実割当を送信元に使う。hostの経路/MTUやproduct設定は変更しない。
+
+rootで`nsenter --mount=/proc/<owner_pid>/ns/mnt ip netns exec <router>`内のWANを`tcpdump -n -v -i wan0 -c 8 'ip6 protochain 44'`で最大数秒捕捉する。同じprivate mountのclientから`ping -4 -n -I <実割当> -M do -s 1472 -c 1 -W 2 1.0.0.1`を送る。IPv4合計1500byte/DFの往復と、AFTRからの同一IPv6 fragment ID/offsetを照合する。`protochain`はkernel filter非対応時のuserspace filterでも観測可能で、filter警告を通信失敗へ読み替えない。captureは数秒で止め、raw出力を保存しない。
+
+同じrouterの`any`で`tcp and host 1.1.1.1 and port 443 and tcp[tcpflags] & tcp-syn != 0`を上限8packet/数秒捕捉し、clientから実割当にbindした公開HTTPSを実行する。curlの`%{local_ip}:%{local_port}`とpacketのsequenceで同じ接続を照合する。他の周期通信を混ぜず、LAN→tunnelとtunnel→LANのMSSを確認する。実行例は通常の`--resolve one.one.one.one:443:1.1.1.1`を使う。
+
+2026-11-03 build `df490351c3ff`: 実DHCP端末のDF1500往復、AFTR→B4のIPv6断片2個と再構成、同一TCPのSYN MSS1460→1414とSYN/ACK1420→1414、HTTPSが通過。B4送信断片化/IPv6 PTB/外側MTU縮小と性能は未確認。[RFC6333 section5.3](https://www.rfc-editor.org/rfc/rfc6333.html#section-5.3)は外側IPv6での断片化/再構成を規定するため、内側DF1500が成功したことを不具合や試験失敗と決めつけない。
 
 ## 自然更新と残る全体受入
 

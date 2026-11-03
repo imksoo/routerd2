@@ -1,6 +1,10 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03 07:35 UTC。全体ゴールは継続中。
+更新: 2026-11-03 07:52 UTC。全体ゴールは継続中。
+
+実行継続中（2026-11-03 07:52 UTC確認）: コミット済み`df49035`の通常build `df490351c3ff`、単体38-resource profileで`--seconds 0 --full-restart --tailnet`を07:42 UTCに起動した。初期機能一式、31通信roundまで通過し、28 worker全てgeneration1/Ready=trueを確認。実PD T1は09:42:40 UTCの予定で、まだ更新・最終再起動までの完了結果ではない。ownerの最小stage/log/captureは実行終了まで保持し、終了後に結果を確認して撤去する。待機中も独立する残作業を進める。
+
+同じ稼働中の実DHCP割当を読み、その送信元へbindしてMTU/MSSを確認した。IPv4合計1500byte・DF=1の実pingが公開peerと往復し、WANでAFTRからの同一IDのIPv6断片2個（offset0/752、payload752/748）を観測した。TCPは同じ実tuple/sequenceでLAN SYN MSS1460→DS-Lite送信1414、受信SYN/ACK1420→LAN1414となり、HTTPSが成功。ここで確認したのは選択されたDS-Lite経路の往復・受信側外側IPv6再構成と双方向MSS調整。B4側送信断片化、実IPv6 PTB/外側MTU縮小の全条件や性能は未受入。[RFC6333 section5.3](https://www.rfc-editor.org/rfc/rfc6333.html#section-5.3)に照らし、1500byte DFを一律のICMP拒否条件にしない。
 
 最新修正（基準main `a0ec3ac` + 本変更）: BGP/VRRPの元の期限より前に送信を打ち切る共通IPCの3秒制限を外した。AFTRは一つのループでtyped Input取得→snapshot通知を順に行い、入力世代を並列更新するgoroutine/channelを削除した。周期/取得budgetと元の依存期限は維持する。旧routerdのDS-Lite単一reconcileとcallerを照合した。supervisorの状態APIも管理ループへ要求して応答し、登録より古い状態を返すcache/mutexを削除した。producer未登録とAFTR入力世代不一致には、元のErrStaleを保ったまま原因を示すcontextを付けた。互換経路・retry・新しいepoch/stateは追加していない。
 
