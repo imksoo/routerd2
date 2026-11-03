@@ -13,7 +13,6 @@ import (
 	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
-	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
@@ -207,24 +206,19 @@ func (r *Runtime) DNSInput(moduleName string) (dnsconfig.Input, error) {
 	}
 	for _, zone := range cfg.runtime.Zones {
 		for _, ref := range zone.Spec.DHCPDerived.Sources {
-			source, valid := dnsconfig.LeaseSourceName(ref)
+			source, _, valid := dnsconfig.LeaseSource(ref)
 			if !valid {
 				return out, errors.New("invalid committed DNS lease source")
 			}
 			u, has := r.records["service."+source]
-			if !has || u.Role != "dhcp_server" {
+			if !has || (u.Role != "dhcp_server" && u.Role != "dhcp6_server") {
 				continue
 			}
-			s := r.dhcpServers[u.Name]
-			if !s.Active || !dhcpserverconfig.CurrentObservation(s, clock) {
+			s := r.leaseSources[u.Name]
+			if !s.Active || !s.current(clock) {
 				continue
 			}
-			set := dnsconfig.LeaseSet{Zone: zone.Name, Source: source, Epoch: s.Epoch, Sequence: s.Sequence, BootID: s.BootID, ObservedNanos: s.ObservedNanos, ExpiresNanos: s.ExpiresNanos, ObservedAt: s.ObservedAt, Records: []dnsconfig.LeaseRecord{}}
-			for _, lease := range s.Leases {
-				if lease.Hostname != "" {
-					set.Records = append(set.Records, dnsconfig.LeaseRecord{Hostname: lease.Hostname, Address: lease.IPAddress, ExpiresAt: lease.ExpiresAt})
-				}
-			}
+			set := dnsconfig.LeaseSet{Zone: zone.Name, Source: source, Epoch: s.Epoch, Sequence: s.Sequence, BootID: s.BootID, ObservedNanos: s.ObservedNanos, ExpiresNanos: s.ExpiresNanos, ObservedAt: s.ObservedAt, Records: s.Records}
 			out.Sets = append(out.Sets, set)
 		}
 	}

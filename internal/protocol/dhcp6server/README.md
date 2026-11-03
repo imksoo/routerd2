@@ -114,9 +114,21 @@ release and lease persistence are owned by dnsmasq, not another Go allocator.
 The existing atomic DUID identity is installed in the engine's lease file
 before it serves and is retained through worker and daemon restart.
 
-`make check-dhcp6-server` exercises both paths with independent BusyBox clients,
+`make check-dhcp6-server` exercises the information path with BusyBox and the
+address-pool path with independent dhcpcd,
 real product processes and packet capture. The address-pool check uses the
 client's actual assigned address for TCP/UDP, renewal and post-restart checks;
 it also compares the server identifier in actual packets with the persisted
-DUID. Stateful lease-to-DNS publication, lease synchronization, prefix change,
+DUID. The dhcpcd client automatically configures both families from DHCPv4/v6
+and the product RA. Queries use the distributed DNS addresses over IPv4/IPv6
+UDP/TCP, including same-name A/AAAA, both PTRs and hostname renewal.
+
+A DNS zone can consume `DHCPv6Server/<service-name>` alongside DHCPv4 sources.
+The worker observes the actual engine lease file; the engine remains the sole
+allocation owner. Each address retains its original lease expiry and finite
+source observation deadline. Adding AAAA preserves A for the same name, and
+expired addresses disappear independently. Ancillary publication failure does
+not stop allocation; an unrefreshed DNS observation expires.
+
+Stateful lease synchronization, prefix change, natural lease expiry,
 Reconfigure and complete deployment qualification remain open.

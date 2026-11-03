@@ -39,13 +39,15 @@ type zoneRecord struct {
 	IPv4             []string
 	IPv6             []string
 	TTL              uint32
-	AddressLifetimes map[string]lifetime.Deadline
+	AddressLifetimes map[string]addressLifetime
 	Source           zoneRecordSource
-	// Native leases retain client UTC expiry and the original server boot
-	// deadline. Query, polling and reload never extend either.
-	ExpiresAt    time.Time
-	BootID       string
-	ExpiresNanos uint64
+}
+
+// An address can depend on a producer's boot deadline and a client's UTC
+// lease simultaneously. Other addresses on the same hostname stay independent.
+type addressLifetime struct {
+	owner lifetime.Deadline
+	lease time.Time
 }
 
 type zoneRecordSource uint8
@@ -232,10 +234,13 @@ func (z *zoneData) liveRecord(name string) (zoneRecord, bool) {
 				if !learned {
 					return false
 				}
-				if !until.Live(clock) {
+				if !until.owner.Live(clock) || !until.lease.IsZero() && !clock.WallTime.Before(until.lease) {
 					return true
 				}
-				r.TTL = until.Seconds(r.TTL, clock)
+				r.TTL = until.owner.Seconds(r.TTL, clock)
+				if !until.lease.IsZero() {
+					r.TTL = min(r.TTL, uint32(until.lease.Sub(clock.WallTime)/time.Second))
+				}
 				return false
 			})
 		}
@@ -244,17 +249,6 @@ func (z *zoneData) liveRecord(name string) (zoneRecord, bool) {
 		if len(r.IPv4)+len(r.IPv6) == 0 {
 			return zoneRecord{}, false
 		}
-	}
-	if r.Source != zoneRecordSourceTypedLease {
-		return r, true
-	}
-	clock, err := boottime.Read()
-	if err != nil || r.BootID != clock.BootID || uint64(clock.BoottimeNanoseconds) >= r.ExpiresNanos || !clock.WallTime.Before(r.ExpiresAt) {
-		return zoneRecord{}, false
-	}
-	seconds := min(uint64(r.ExpiresAt.Sub(clock.WallTime)/time.Second), (r.ExpiresNanos-uint64(clock.BoottimeNanoseconds))/uint64(time.Second))
-	if seconds < uint64(r.TTL) {
-		r.TTL = uint32(seconds)
 	}
 	return r, true
 }

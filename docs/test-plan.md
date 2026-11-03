@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 16:14 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 実行原則
 
@@ -217,7 +217,12 @@ archive試験は既存の単体手順を共有し、各引継ぎ後に新しい�
 
 ## アドレス配布型DHCPv6
 
-`make check-dhcp6-server DOCKER='sudo -n docker'`で従来のInformation-requestとアドレス配布の両方を確認する。後者は実supervisor/control/network/worker、通常配布物のdnsmasq engine、独立BusyBoxクライアントとLinux kernelを専用namespaceで接続する。通常DADの実interfaceに/64を持たせ、poolのsuffixを旧routerdと同じconstructor方式で使う。クライアントの実割当を読み、配布範囲・DNS、TCP/UDP、実Renew/Reply、worker/daemon再起動後のDUIDと割当の保持を確認する。captureのserver identifierも保存identityと照合する。クライアント側のaddress/route設定は明示したhook/手順で行い、DHCPv6がdefault gatewayを配るとは仮定しない。ホストの時計/管理経路には触れない。
-これはNET-06のアドレス配布機能の受入であり、statelessを使う保存homertへpoolを新設するものではない。DHCPv6のDNS lease連携・同期・再番号付けと全構成でのInternet/更新受入は同じ製品経路で続ける。署名bundleの依存は既存dnsmasq archiveとsource/licenseを`dhcp6_server` roleへ明示的に結び付ける。終了後はpeer/process/state/captureを撤去する。
+`make check-dhcp6-server DOCKER='sudo -n docker'`で従来のInformation-requestとアドレス配布の両方を確認する。後者は実supervisor/control/network/worker、通常配布物のdnsmasq engine、独立dhcpcdクライアントとLinux kernelを専用namespaceで接続する。通常DADの実interfaceに/64を持たせ、poolのsuffixを旧routerdと同じconstructor方式で使う。クライアントの実割当を読み、配布範囲・DNS、TCP/UDP、実Renew/Reply、worker/daemon再起動後のDUIDと割当の保持を確認する。captureのserver identifierも保存identityと照合する。dhcpcdは製品RAとDHCPv4/v6からaddress/route/DNSを自動設定する。dhcpcd専用のmount namespaceで`/run`と`/var/lib/dhcpcd`をtmpfsにし、hostのDUID・PID・resolverを変更しない。通知hookはBOUND/RENEWの観測だけを行う。DHCPv6がdefault gatewayを配るとは仮定しない。ホストの時計/管理経路には触れない。
+これはNET-06のアドレス配布機能の受入であり、statelessを使う保存homertへpoolを新設するものではない。DHCPv6のlease同期・再番号付けと全構成でのInternet/更新受入は同じ製品経路で続ける。署名bundleの依存は既存dnsmasq archiveとsource/licenseを`dhcp6_server` roleへ明示的に結び付ける。終了後はpeer/process/state/captureを撤去する。
 
-最新結果: 基準main `e58d695` + 本変更、通常build `e58d695dbac6`で、独立BusyBoxクライアントのDHCPv6割当/実Renew、配布DNS、割当アドレスからのTCP/UDP、worker SIGKILL/全daemon再起動後の同一割当とDUID保持を確認した。captureの実Advertise/Replyのserver identifierも保存DUIDと一致。既存Information-requestの実通信、共通engine起動処理を使うDHCPv4の7手順も終了0。`make check`（Race Detector/vet/Python36件）・通常static3実行物・設定例検証が通過。 通常署名bundleを実publisherで生成し、receiverのstage/verifyが終了0。25 worker roles、6 engine bindings、15 artifactsで、DHCPv4/v6は同一dnsmasq engine/sourceを参照し二重収録しない。初回のbundle実行はローカルのPPPoE source archive不足で未生成となり、既存Makefileのengine準備後に最終確認を通した。 今回のアドレス配布は隔離Linux kernelと独立クライアントでの受入。保存homertはstatelessのままで、そこへpoolは新設していない。stateful leaseのDNS連携/同期、prefix変更と期限、HA、全構成Internet/署名起動・更新、ONU/NIC/性能、全34 packageは残る。
+最新結果: 基準main `e1d2b91` + DHCPv6/DNS変更、通常Makefile build `e1d2b91a96b5`で、独立dhcpcd端末が製品RA・DHCPv4/v6から両familyのaddress/routeを自動設定した。実配布された両DNSへUDP/TCPで同名A/AAAA・IPv4/v6 PTRを照会し、実割当と一致。hostname変更後の更新と旧名撤去、実Renew/Reply、割当からのTCP/UDP、worker SIGKILL/全daemon再起動後の割当・DUID・DNS復旧も通過した。Information-requestと既存DHCPv4の7手順も終了0。 隔離Linuxの実product process/kernelと独立端末での受入。保存homertのstateless構成にはpoolを追加していない。stateful lease同期、prefix変更/自然失効、HA、全構成Internet/署名起動・更新、ONU/NIC/性能と全34 packageは継続中。
+
+
+## DHCPv4/v6の同名DNS登録
+
+同じ`check-dhcp6-server`のアドレス配布試験で、独立dhcpcdから実FQDNを送信する。DNS sourceには実DHCPv4/v6 serverを両方設定し、実配布されたIPv4/IPv6 DNSへ、同名のA/AAAAと両familyの実割当のPTRをUDP/TCPで照合する。クライアントのhostname変更・実更新と、worker/daemon再起動後も確認する。元のlease UTC期限と各producerの元BOOTTIME期限をアドレスごとに保持し、一方のfamilyの登録で他方を消さない。lease読取や通知の失敗でworking DHCP engineを止めず、再観測できない情報は元期限で失効させる。prefix変更/自然失効・同期と全構成Internetの残作業は別に閉じる。

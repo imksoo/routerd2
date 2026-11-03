@@ -3,6 +3,7 @@
 package dns
 
 import (
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"testing"
 
 	"github.com/miekg/dns"
@@ -104,7 +105,7 @@ func TestZoneStaticAliasesSurviveTypedLeaseCollision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	zones.zones["example.test."].mergeRecord(zoneRecord{Hostname: "dynamic.example.test.", IPv4: []string{"192.0.2.1"}, TTL: 60, Source: zoneRecordSourceTypedLease, BootID: clock.BootID, ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(time.Second), ExpiresAt: clock.WallTime.Add(time.Second)})
+	zones.zones["example.test."].mergeRecord(zoneRecord{Hostname: "dynamic.example.test.", IPv4: []string{"192.0.2.1"}, TTL: 60, Source: zoneRecordSourceTypedLease, AddressLifetimes: map[string]addressLifetime{"192.0.2.1": {owner: lifetime.Deadline{BootID: clock.BootID, Nanos: uint64(clock.BoottimeNanoseconds) + uint64(time.Second)}, lease: clock.WallTime.Add(time.Second)}}})
 	assertZoneARecord(t, zones, "router.example.test.", "192.0.2.1")
 	assertZoneARecord(t, zones, "node.example.test.", "192.0.2.1")
 	assertZonePTRRecord(t, zones, "1.2.0.192.in-addr.arpa.", "router.example.test.")

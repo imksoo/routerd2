@@ -2,6 +2,7 @@ package runtimeplan
 
 import (
 	"context"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -53,7 +54,7 @@ func TestDHCPServerDNSProjectionFencesSourcesAndExpiresReplays(t *testing.T) {
 		t.Fatal("fresh DHCP server did not release its dependent", err)
 	}
 	projected, err := r.DNSInput("service.dns")
-	if err != nil || len(projected.Sets) != 1 || len(projected.Sets[0].Records) != 1 || projected.Sets[0].Records[0].Address != "192.0.2.123" {
+	if err != nil || len(projected.Sets) != 1 || len(projected.Sets[0].Records) != 1 || projected.Sets[0].Records[0].Address != netip.MustParseAddr("192.0.2.123") {
 		t.Fatalf("accepted lease not projected: %+v %v", projected, err)
 	}
 	bad := snapshot

@@ -54,22 +54,34 @@ type LeaseSet struct {
 }
 
 type LeaseRecord struct {
-	Hostname  string    `json:"hostname"`
-	Address   string    `json:"address"`
-	ExpiresAt time.Time `json:"expires_at"`
+	Hostname  string     `json:"hostname"`
+	Address   netip.Addr `json:"address"`
+	ExpiresAt time.Time  `json:"expires_at"`
 }
 
-func LeaseSourceName(ref string) (string, bool) {
-	name := strings.TrimPrefix(ref, "DHCPv4Server/")
+// LeaseSource resolves a configured resource reference or its normalized name.
+func LeaseSource(ref string) (name, role string, valid bool) {
+	name = ref
+	if kind, value, found := strings.Cut(ref, "/"); found {
+		name = value
+		switch kind {
+		case "DHCPv4Server":
+			role = "dhcp_server"
+		case "DHCPv6Server":
+			role = "dhcp6_server"
+		default:
+			return "", "", false
+		}
+	}
 	if name == "" || len(name) > 24 || name[0] < 'a' || name[0] > 'z' {
-		return "", false
+		return "", "", false
 	}
 	for _, r := range name {
 		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
-			return "", false
+			return "", "", false
 		}
 	}
-	return name, true
+	return name, role, true
 }
 
 func ValidLeaseHostname(name string) bool {
@@ -102,21 +114,15 @@ func NormalizeInput(p Input) Input {
 	for i := range out.Sets {
 		s := &out.Sets[i]
 		s.Records = slices.Clone(s.Records)
-		if name, ok := LeaseSourceName(s.Source); ok {
-			s.Source = name
-		}
 		for j := range s.Records {
 			r := &s.Records[j]
 			r.Hostname = strings.ToLower(strings.TrimSuffix(r.Hostname, "."))
-			if a, err := netip.ParseAddr(r.Address); err == nil {
-				r.Address = a.String()
-			}
 		}
 		sort.Slice(s.Records, func(i, j int) bool {
 			if s.Records[i].Hostname != s.Records[j].Hostname {
 				return s.Records[i].Hostname < s.Records[j].Hostname
 			}
-			return s.Records[i].Address < s.Records[j].Address
+			return s.Records[i].Address.Compare(s.Records[j].Address) < 0
 		})
 	}
 	sort.Slice(out.Sets, func(i, j int) bool {
@@ -141,16 +147,16 @@ func ValidateInput(c RuntimeConfig, p Input, clock boottime.Clock) error {
 	allowed := map[string]bool{}
 	for _, zone := range c.Zones {
 		for _, ref := range zone.Spec.DHCPDerived.Sources {
-			if name, ok := LeaseSourceName(ref); ok {
+			if name, _, ok := LeaseSource(ref); ok {
 				allowed[zone.Name+"/"+name] = true
 			}
 		}
 	}
 	seen, count := map[string]bool{}, 0
 	for _, s := range p.Sets {
-		source, ok := LeaseSourceName(s.Source)
+		source, role, ok := LeaseSource(s.Source)
 		key := s.Zone + "/" + source
-		if !ok || len(s.Zone) > 256 || !allowed[key] || seen[key] {
+		if !ok || role != "" || len(s.Zone) > 256 || !allowed[key] || seen[key] {
 			return fmt.Errorf("DNS lease source is duplicate or not authorized for zone %q", s.Zone)
 		}
 		seen[key] = true
@@ -163,17 +169,17 @@ func ValidateInput(c RuntimeConfig, p Input, clock boottime.Clock) error {
 		if s.ObservedAt.IsZero() || s.BootID != clock.BootID || s.ObservedNanos == 0 || s.ObservedNanos > uint64(clock.BoottimeNanoseconds) || s.ExpiresNanos <= s.ObservedNanos || s.ExpiresNanos-s.ObservedNanos > uint64(dhcpserverconfig.ObservationLifetime) {
 			return errors.New("DNS lease source requires its original boot-scoped observation and deadline")
 		}
-		addresses := map[string]bool{}
+		addresses := map[netip.Addr]bool{}
 		for _, r := range s.Records {
 			count++
 			if count > MaxLeaseRecords {
 				return errors.New("DNS lease projection exceeds 4096 records")
 			}
-			a, err := netip.ParseAddr(r.Address)
-			if err != nil || !a.Is4() || a.IsUnspecified() || a.IsMulticast() || a.IsLoopback() || a.String() == "255.255.255.255" || addresses[a.String()] {
-				return errors.New("DNS lease source requires unique unicast IPv4 addresses")
+			a := r.Address
+			if !a.IsValid() || a.Is4In6() || a.Zone() != "" || a.IsUnspecified() || a.IsMulticast() || a.IsLoopback() || a.String() == "255.255.255.255" || addresses[a] {
+				return errors.New("DNS lease source requires unique unicast IP addresses")
 			}
-			addresses[a.String()] = true
+			addresses[a] = true
 			if !ValidLeaseHostname(r.Hostname) || r.ExpiresAt.IsZero() || r.ExpiresAt.Year() < 1970 || r.ExpiresAt.Year() > 9999 {
 				return errors.New("DNS lease record requires a valid hostname and finite expiry")
 			}

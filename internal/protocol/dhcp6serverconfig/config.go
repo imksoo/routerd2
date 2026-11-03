@@ -3,9 +3,12 @@ package dhcp6serverconfig
 
 import (
 	"errors"
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"net/netip"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/miekg/dns"
@@ -49,10 +52,27 @@ type Input struct {
 	SNTPServers  []Address         `json:"sntp_servers,omitempty"`
 	DomainSearch []Domain          `json:"domain_search,omitempty"`
 }
+
+// MaxLeases is the bundled dnsmasq engine's configured default.
+const MaxLeases = 1000
+const ObservationLifetime = 5 * time.Second
+
+type Lease struct {
+	Address   netip.Addr `json:"address"`
+	Hostname  string     `json:"hostname,omitempty"`
+	ExpiresAt time.Time  `json:"expires_at"`
+}
+
 type Snapshot struct {
-	Resource   string `json:"resource"`
-	Interface  string `json:"interface"`
-	ServerDUID string `json:"server_duid"`
+	Active        bool      `json:"active"`
+	ObservedAt    time.Time `json:"observed_at,omitempty"`
+	BootID        string    `json:"boot_id,omitempty"`
+	ObservedNanos uint64    `json:"observed_nanos,omitempty"`
+	ExpiresNanos  uint64    `json:"expires_nanos,omitempty"`
+	Leases        []Lease   `json:"leases,omitempty"`
+	Resource      string    `json:"resource"`
+	Interface     string    `json:"interface"`
+	ServerDUID    string    `json:"server_duid"`
 }
 
 func Validate(c Config) error {
@@ -122,6 +142,38 @@ func ValidateInput(in Input) error {
 		if !validDomain(entry.Name) || !valid(entry.ValidUntil) {
 			return errors.New("invalid learned DHCPv6 domain or deadline")
 		}
+	}
+	return nil
+}
+
+// ValidateSnapshot checks the current internal producer contract. Information-only
+// services have no address leases or lease-observation lifetime.
+func ValidateSnapshot(c Config, s Snapshot, clock boottime.Clock) error {
+	if s.Resource != c.Resource || s.Interface != c.Interface {
+		return errors.New("DHCPv6 server snapshot identity mismatch")
+	}
+	if _, err := dhcp6config.ParseDUID(s.ServerDUID); err != nil {
+		return err
+	}
+	if c.Pool == nil {
+		if s.Active || len(s.Leases) != 0 {
+			return errors.New("information-only DHCPv6 server published address leases")
+		}
+		return nil
+	}
+	now := uint64(clock.BoottimeNanoseconds)
+	if s.BootID != clock.BootID || s.ObservedNanos == 0 || s.ObservedNanos > now || now >= s.ExpiresNanos || s.ExpiresNanos-s.ObservedNanos > uint64(ObservationLifetime) || s.ObservedAt.IsZero() {
+		return errors.New("DHCPv6 lease observation expired or has an invalid original clock")
+	}
+	if len(s.Leases) > MaxLeases || !s.Active && len(s.Leases) > 0 {
+		return errors.New("DHCPv6 lease observation exceeds its serving scope")
+	}
+	seen := make(map[netip.Addr]bool, len(s.Leases))
+	for _, l := range s.Leases {
+		if !l.Address.Is6() || l.Address.Is4In6() || l.Address.Zone() != "" || !l.Address.IsGlobalUnicast() || seen[l.Address] || !l.ExpiresAt.After(s.ObservedAt) {
+			return errors.New("DHCPv6 lease observation requires unique active IPv6 bindings")
+		}
+		seen[l.Address] = true
 	}
 	return nil
 }

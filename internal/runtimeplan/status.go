@@ -11,7 +11,6 @@ import (
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
-	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
@@ -61,9 +60,9 @@ func (r *Runtime) instanceStatusLocked(name string, b binding, v serviceconfig.U
 			out.OwnershipExpired = err != nil || !bgpconfig.CurrentObservation(provider.snapshot, clock)
 		}
 	}
-	if s := r.dhcpServers[name]; v.Role == "dhcp_server" && s.Active {
+	if s := r.leaseSources[name]; (v.Role == "dhcp_server" || v.Role == "dhcp6_server") && s.Active {
 		clock, err := boottime.Read()
-		out.OwnershipExpired = err != nil || !dhcpserverconfig.CurrentObservation(s, clock)
+		out.OwnershipExpired = err != nil || !s.current(clock)
 	}
 	return out
 }

@@ -1,6 +1,14 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03 16:14 UTC。全体ゴールは継続中。
+更新: 2026-11-03。全体ゴールは継続中。
+
+## DHCPv6 leaseのDNS登録と両familyの自動設定
+
+旧routerdのdnsmasq lease読取とzone回答を基に、engineが所有する実IPv6 leaseを有限の観測としてDNSへ接続した。DHCPv4/v6は同じtyped receive viewを使い、別のlease DBは作らない。同名レコードを丸ごと置き換える処理を修正し、A/AAAAを集約して各addressの元lease期限/producer期限を保持する。lease読取・通知はengine停止を妨げない所有goroutineで行い、報告失敗で配布自体を止めない。
+
+基準main `e1d2b91` + DHCPv6/DNS変更、通常Makefile build `e1d2b91a96b5`で、独立dhcpcd端末が製品RA・DHCPv4/v6から両familyのaddress/routeを自動設定した。実配布された両DNSへUDP/TCPで同名A/AAAA・IPv4/v6 PTRを照会し、実割当と一致。hostname変更後の更新と旧名撤去、実Renew/Reply、割当からのTCP/UDP、worker SIGKILL/全daemon再起動後の割当・DUID・DNS復旧も通過した。Information-requestと既存DHCPv4の7手順も終了0。
+
+隔離Linuxの実product process/kernelと独立端末での受入。保存homertのstateless構成にはpoolを追加していない。stateful lease同期、prefix変更/自然失効、HA、全構成Internet/署名起動・更新、ONU/NIC/性能と全34 packageは継続中。 再実行は`make check-dhcp6-server DOCKER='sudo -n docker'`と`python3 scripts/daemon-tests.py dhcp-server`。`make check`、最終関連Race/vet・通常static3実行物・設定例検証も通過。dhcpcdの設定再読込は一時的にaddressを外してConfirmするため、再取得後に通常Renewを行う手順へ修正した。固定IPや手動経路で補っていない。
 
 ## DHCPv6アドレス配布を既存engineへ接続
 

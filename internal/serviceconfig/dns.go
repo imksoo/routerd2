@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/imksoo/routerd/pkg/api"
-	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6serverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 )
 
@@ -18,10 +18,10 @@ type DNSUpstreamOwner struct {
 }
 
 func validateDNSSources(services []Service) error {
-	servers := map[string]dhcpserverconfig.Config{}
+	servers := map[string]Service{}
 	for _, s := range services {
-		if s.DHCPServer != nil {
-			servers[s.Name] = s.DHCPServerConfig("/var/lib/routerd")
+		if s.DHCPServer != nil || s.DHCP6Server != nil {
+			servers[s.Name] = s
 		}
 	}
 	for _, s := range services {
@@ -116,14 +116,18 @@ func validateDNSSources(services []Service) error {
 		for _, zone := range s.DNS.Zones {
 			seen := map[string]bool{}
 			for _, ref := range zone.Spec.DHCPDerived.Sources {
-				name, valid := dnsconfig.LeaseSourceName(ref)
+				name, role, valid := dnsconfig.LeaseSource(ref)
 				server, found := servers[name]
-				if !valid || !found || seen[name] || len(zone.Name) > 256 {
+				if !valid || !found || (role != "" && server.Role() != role) || seen[name] || len(zone.Name) > 256 {
 					return fmt.Errorf("DNS service %s zone %s requires distinct configured DHCP server sources; unresolved reference %q", s.Name, zone.Name, ref)
 				}
 				seen[name] = true
 				sets++
-				records += server.MaxLeases
+				if server.DHCPServer != nil {
+					records += server.DHCPServerConfig("/var/lib/routerd").MaxLeases
+				} else if server.DHCP6Server.Pool != nil {
+					records += dhcp6serverconfig.MaxLeases
+				}
 			}
 		}
 		if sets > 128 || records > dnsconfig.MaxLeaseRecords {

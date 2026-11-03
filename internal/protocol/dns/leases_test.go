@@ -27,7 +27,7 @@ func nativeProjection(t *testing.T) dnsconfig.Input {
 		t.Fatal(err)
 	}
 	now := clock.WallTime
-	return dnsconfig.Input{Resource: "lab", ConfigDigest: strings.Repeat("a", 64), Sets: []dnsconfig.LeaseSet{{Zone: "lan-zone", Source: "DHCPv4Server/dhcpv4", Epoch: strings.Repeat("b", 32), Sequence: 1, ObservedAt: now, BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(5*time.Second), Records: []dnsconfig.LeaseRecord{{Hostname: "laptop", Address: "192.0.2.73", ExpiresAt: now.Add(time.Hour)}}}}}
+	return dnsconfig.Input{Resource: "lab", ConfigDigest: strings.Repeat("a", 64), Sets: []dnsconfig.LeaseSet{{Zone: "lan-zone", Source: "dhcpv4", Epoch: strings.Repeat("b", 32), Sequence: 1, ObservedAt: now, BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(5*time.Second), Records: []dnsconfig.LeaseRecord{{Hostname: "laptop", Address: netip.MustParseAddr("192.0.2.73"), ExpiresAt: now.Add(time.Hour)}}}}}
 }
 
 func answerNative(t *testing.T, d *daemon, name string, typ uint16) *mdns.Msg {
@@ -45,7 +45,7 @@ func answerNative(t *testing.T, d *daemon, name string, typ uint16) *mdns.Msg {
 func TestNativeLeaseSourceScopeStaticPrecedenceAndMonotonicExpiry(t *testing.T) {
 	d := newTestDaemon(t, testResolverConfig(t, nil))
 	p := nativeProjection(t)
-	p.Sets[0].Records = append(p.Sets[0].Records, dnsconfig.LeaseRecord{Hostname: "router", Address: "192.0.2.99", ExpiresAt: time.Now().Add(time.Hour)})
+	p.Sets[0].Records = append(p.Sets[0].Records, dnsconfig.LeaseRecord{Hostname: "router", Address: netip.MustParseAddr("192.0.2.99"), ExpiresAt: time.Now().Add(time.Hour)})
 	if err := d.applyInput(p); err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestNativeLeaseUpdatesKeepTCPConnectionAndExpireWhenInputCloses(t *testing.
 	case <-time.After(3 * time.Second):
 		t.Fatal("DNS listener report did not start")
 	}
-	p.Sets[0].Records[0].Address = "192.0.2.74"
+	p.Sets[0].Records[0].Address = netip.MustParseAddr("192.0.2.74")
 	p.Sets[0].Sequence++
 	clock, err := boottime.Read()
 	if err != nil {

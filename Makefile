@@ -78,7 +78,7 @@ help:
 	  'make check-ntp-dhcp6   Verify learned time sources, original expiry and VRRP conditions with independent peers' \
 	  'make check-bfd         Verify BFD/BGP routing domains with real workers' \
 	  'make check-dns-upstream Verify independent probe/query deadlines with dnsmasq' \
-	  'make check-dhcp6-server Verify LAN information service and durable DUID with BusyBox' \
+	  'make check-dhcp6-server Verify DHCPv6 information, address pools, DNS and DUID with real clients' \
 	  'make check-dhcp6-ra-pd Verify shared IA_NA/PD, RA trigger and restart with ISC DHCP' \
 	  'make check-dhcp6       Verify RA-triggered IA_NA, kernel parameters and restart with radvd/dnsmasq' \
 	  'make check-dhcp4       Verify delayed independent ACKs, lease expiry and recovery' \

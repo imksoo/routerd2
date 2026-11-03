@@ -1,6 +1,6 @@
 # Isolated LAN example. Select the real LAN interface and an assigned IPv6 prefix.
 # Bind boot.engines.dhcp6_server to the bundled dnsmasq-engine.tar.
-# Routing/WAN and DNS resolution belong to the enclosing router configuration.
+# Routing/WAN and non-local DNS forwarding belong to the enclosing configuration.
 schema_version: 2
 resources:
   - id: interface/lan
@@ -15,6 +15,7 @@ resources:
       dhcp6_server:
         interface: lan0
         pool: {start: '::100', end: '::1ff', lease_seconds: 43200}
+        dns_servers: ['2001:db8:80::1']
         domain_search: [lan.test]
   - id: service/lan-ra
     depends_on: [address/lan]
@@ -32,3 +33,19 @@ resources:
             autonomous: false
             valid_lifetime_seconds: 7200
             preferred_lifetime_seconds: 3600
+  - id: service/lan-dns
+    depends_on: [address/lan]
+    service:
+      name: lan-dns
+      dns:
+        spec:
+          listen:
+            - {name: lan, addresses: ['2001:db8:80::1'], port: 53}
+          sources:
+            - {name: local, kind: zone, match: [lan.test, ip6.arpa], zoneRef: [lan]}
+        zones:
+          - name: lan
+            spec:
+              zone: lan.test
+              dhcpDerived:
+                sources: [DHCPv6Server/lan-addresses]

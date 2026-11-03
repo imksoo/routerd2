@@ -31,8 +31,6 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
-	"github.com/imksoo/routerd2/internal/protocol/dhcp6serverconfig"
-	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocol/ntpconfig"
@@ -159,14 +157,14 @@ type Runtime struct {
 	liveDHCP6            map[string]dhcp6config.RouterFlags
 	delegatedDNS         map[string][]delegatedDNSAddress
 	aftrInputs           map[string]aftr.Input
-	dhcpServers          map[string]dhcpserverconfig.Snapshot
+	leaseSources         map[string]leaseObservation
 	routeIssues          []RouteIssue
 	bgpApplied           map[string]bgpProjectionStatus
 	phase, lastError     string
 }
 
 func New(dir, stateDir string, n Network, supervisorInstance string) *Runtime {
-	return &Runtime{reconcileWake: make(chan struct{}, 1), waitWake: make(chan struct{}, 1), op: semaphore.NewWeighted(1), supervisorInstance: supervisorInstance, dir: dir, stateDir: stateDir, network: n, manager: managerClient{localapi.NewClient(filepath.Join(dir, supervisor.SocketName))}, bindings: map[string]binding{}, records: map[string]serviceconfig.Update{}, liveRA: map[string]ra.Config{}, dhcpServers: map[string]dhcpserverconfig.Snapshot{}, phase: "starting"}
+	return &Runtime{reconcileWake: make(chan struct{}, 1), waitWake: make(chan struct{}, 1), op: semaphore.NewWeighted(1), supervisorInstance: supervisorInstance, dir: dir, stateDir: stateDir, network: n, manager: managerClient{localapi.NewClient(filepath.Join(dir, supervisor.SocketName))}, bindings: map[string]binding{}, records: map[string]serviceconfig.Update{}, liveRA: map[string]ra.Config{}, leaseSources: map[string]leaseObservation{}, phase: "starting"}
 }
 
 var errApplicationPending = errors.New("accepted protocol observations await network application")
@@ -453,9 +451,9 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 			r.guardGrants[name] = grant
 		}
 	}
-	for name := range r.dhcpServers {
-		if record, ok := retained[name]; !ok || record.Role != "dhcp_server" {
-			delete(r.dhcpServers, name)
+	for name := range r.leaseSources {
+		if record, ok := retained[name]; !ok || (record.Role != "dhcp_server" && record.Role != "dhcp6_server") {
+			delete(r.leaseSources, name)
 		}
 	}
 	r.installBFDCacheLocked(bfdSources, bfdRecipients)
@@ -702,12 +700,12 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 		r.installGuardStatusLocked(*producerStatus, nil)
 	}
 
-	var server dhcpserverconfig.Snapshot
+	var server leaseObservation
 	var lease dhcp6config.Snapshot
 	var advertisement ra.Snapshot
-	if u.Role == "dhcp_server" {
+	if u.Role == "dhcp_server" || u.Role == "dhcp6_server" {
 		var err error
-		server, err = r.validateDHCPServerSnapshotLocked(b, u)
+		server, err = r.validateDHCPLeaseSnapshotLocked(b, u)
 		if err != nil {
 			return nil, err
 		}
@@ -760,8 +758,8 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 	if _, err := r.projectLocked(r.config.protocols, r.config.plan.Native, candidateRecords, time.Now(), resourceprogram.FactSnapshot{}, nil, nil); err != nil {
 		return nil, err
 	}
-	if u.Role == "dhcp_server" {
-		r.dhcpServers[u.Name] = server
+	if u.Role == "dhcp_server" || u.Role == "dhcp6_server" {
+		r.leaseSources[u.Name] = server
 	}
 	if (u.Role == "dhcp6" || u.Role == "ra") && r.guardGrants == nil {
 		r.guardGrants = make(map[string]guardGrant)
@@ -935,20 +933,6 @@ func validateSnapshot(instance serviceconfig.Instance, b json.RawMessage) error 
 			return err
 		}
 		return bfd.ValidateSnapshot(cfg, snapshot)
-	case "dhcp6_server":
-		var cfg dhcp6serverconfig.Config
-		var s dhcp6serverconfig.Snapshot
-		if err := strict(instance.Config, &cfg); err != nil {
-			return err
-		}
-		if err := strict(b, &s); err != nil {
-			return err
-		}
-		if s.Resource != cfg.Resource || s.Interface != cfg.Interface {
-			return errors.New("DHCPv6 server snapshot identity mismatch")
-		}
-		_, err := dhcp6config.ParseDUID(s.ServerDUID)
-		return err
 	case "ra_client":
 		var cfg raclient.Config
 		var snapshot raclient.Snapshot

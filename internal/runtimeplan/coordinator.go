@@ -443,7 +443,7 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 		for name := range r.records {
 			if _, ok := r.bindings[name]; !ok {
 				delete(r.records, name)
-				delete(r.dhcpServers, name)
+				delete(r.leaseSources, name)
 				delete(r.guardGrants, name)
 			}
 		}

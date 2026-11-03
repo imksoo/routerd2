@@ -10,7 +10,6 @@ import (
 	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
-	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
@@ -252,9 +251,9 @@ func (r *Runtime) conditionFactsLocked(cfg configuration) (result resourceprogra
 			facts.Facts[name+".active"] = resourceprogram.Fact{Value: value, ObservedNanos: session.ObservedNanos, ExpiresNanos: session.ValidUntil.Nanos, WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
 			continue
 		}
-		if record.Role == "dhcp_server" {
-			s := r.dhcpServers[name]
-			if !module.Ready || record.Generation != module.Generation || record.ConfigDigest != binding.digest || !dhcpserverconfig.CurrentObservation(s, clock) {
+		if record.Role == "dhcp_server" || record.Role == "dhcp6_server" && r.leaseSources[name].BootID != "" {
+			s := r.leaseSources[name]
+			if !module.Ready || record.Generation != module.Generation || record.ConfigDigest != binding.digest || !s.current(clock) {
 				continue
 			}
 			value := resourceprogram.False

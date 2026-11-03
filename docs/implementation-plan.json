@@ -11407,12 +11407,13 @@
         "limit": "短時間のLinux namespace/kernel・実HGW・独立peerでの受入であり、全110-resource intent、全private DNS、長時間安定性、物理ONU/NIC・性能と全34 packageの完成は残る。"
       },
       "latest_stateful_dhcp6_gate": {
-        "status": "address assignment, renew, worker/daemon restart and independent TCP/UDP passed; package remains in progress",
-        "source": "e58d695 plus stateful DHCPv6/shared dnsmasq/packaging changes",
-        "build_identity": "e58d695dbac6",
-        "observed": "基準main `e58d695` + 本変更、通常build `e58d695dbac6`で、独立BusyBoxクライアントのDHCPv6割当/実Renew、配布DNS、割当アドレスからのTCP/UDP、worker SIGKILL/全daemon再起動後の同一割当とDUID保持を確認した。captureの実Advertise/Replyのserver identifierも保存DUIDと一致。既存Information-requestの実通信、共通engine起動処理を使うDHCPv4の7手順も終了0。`make check`（Race Detector/vet/Python36件）・通常static3実行物・設定例検証が通過。",
-        "distribution": "通常署名bundleを実publisherで生成し、receiverのstage/verifyが終了0。25 worker roles、6 engine bindings、15 artifactsで、DHCPv4/v6は同一dnsmasq engine/sourceを参照し二重収録しない。初回のbundle実行はローカルのPPPoE source archive不足で未生成となり、既存Makefileのengine準備後に最終確認を通した。",
-        "remaining": "今回のアドレス配布は隔離Linux kernelと独立クライアントでの受入。保存homertはstatelessのままで、そこへpoolは新設していない。stateful leaseのDNS連携/同期、prefix変更と期限、HA、全構成Internet/署名起動・更新、ONU/NIC/性能、全34 packageは残る。"
+        "status": "automatic dual-stack configuration, DHCP DNS publication, name update, renew and restart passed; package remains in progress",
+        "source": "e1d2b91 plus DHCPv6 lease and dual-stack DNS changes",
+        "build_identity": "e1d2b91a96b5",
+        "observed": "基準main `e1d2b91` + DHCPv6/DNS変更、通常Makefile build `e1d2b91a96b5`で、独立dhcpcd端末が製品RA・DHCPv4/v6から両familyのaddress/routeを自動設定した。実配布された両DNSへUDP/TCPで同名A/AAAA・IPv4/v6 PTRを照会し、実割当と一致。hostname変更後の更新と旧名撤去、実Renew/Reply、割当からのTCP/UDP、worker SIGKILL/全daemon再起動後の割当・DUID・DNS復旧も通過した。Information-requestと既存DHCPv4の7手順も終了0。",
+        "distribution": "前のe58d695ベースのアドレス配布変更で通常署名bundleを実publisherで生成し、receiverのstage/verifyが終了0。今回のDNS変更後のbundle試験ではない。25 worker roles、6 engine bindings、15 artifactsで、DHCPv4/v6は同一dnsmasq engine/sourceを参照し二重収録しない。初回のbundle実行はローカルのPPPoE source archive不足で未生成となり、既存Makefileのengine準備後に最終確認を通した。",
+        "remaining": "隔離Linuxの実product process/kernelと独立端末での受入。保存homertのstateless構成にはpoolを追加していない。stateful lease同期、prefix変更/自然失効、HA、全構成Internet/署名起動・更新、ONU/NIC/性能と全34 packageは継続中。",
+        "dns_implementation": "One typed DHCPv4/v6 receive view, actual dnsmasq lease input, original per-address lease/source lifetimes; same-name A/AAAA merge without another lease database."
       }
     }
   },

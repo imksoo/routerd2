@@ -5,7 +5,6 @@ package dhcp6server
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +17,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -31,7 +31,7 @@ import (
 // dnsmasq owns DHCPv6 exchanges and leases, as in routerd's LAN renderer.
 // RA remains owned by the configured RA service; this engine never sends RA.
 func statefulConfig(c dhcp6serverconfig.Config, in dhcp6serverconfig.Input, clock boottime.Clock) ([]byte, time.Duration) {
-	lines := []string{"port=0", "no-resolv", "no-hosts", "bind-dynamic", "user=root", "group=root", "log-facility=-", "interface=" + c.Interface, "pid-file=/state/" + filepath.Base(c.StatePath) + ".pid", "dhcp-leasefile=/state/" + filepath.Base(c.StatePath) + ".leases"}
+	lines := []string{"port=0", "no-resolv", "no-hosts", "bind-dynamic", "user=root", "group=root", "log-facility=-", "dhcp-lease-max=" + strconv.Itoa(dhcp6serverconfig.MaxLeases), "interface=" + c.Interface, "pid-file=/state/" + filepath.Base(c.StatePath) + ".pid", "dhcp-leasefile=/state/" + filepath.Base(c.StatePath) + ".leases"}
 	if c.LogDHCP {
 		lines = append(lines, "log-dhcp")
 	}
@@ -177,15 +177,21 @@ func runStateful(ctx context.Context, c dhcp6serverconfig.Config, server []byte,
 			return errors.New("DHCPv6 engine did not stop")
 		}
 	}
-	defer func() {
-		if err := stop(); err != nil {
-			result = errors.Join(result, err)
-		}
-	}()
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	var current []byte
-	announced := false
+	var grants atomic.Pointer[leaseGrant]
+	var observerDone chan struct{}
+	observeCtx, stopObserver := context.WithCancel(ctx)
+	defer func() {
+		stopObserver()
+		if err := stop(); err != nil {
+			result = errors.Join(result, err)
+		}
+		if observerDone != nil {
+			<-observerDone
+		}
+	}()
 	for {
 		clock, err := boottime.Read()
 		if err != nil {
@@ -251,15 +257,12 @@ func runStateful(ctx context.Context, c dhcp6serverconfig.Config, server []byte,
 				startup.Stop()
 			}
 		}
-		if !announced {
-			if err := report(ctx, dhcp6serverconfig.Snapshot{Resource: c.Resource, Interface: c.Interface, ServerDUID: hex.EncodeToString(server)}); err != nil {
-				return err
-			}
-			if ready != nil {
-				ready()
-			}
-			announced = true
+		grants.Store(&leaseGrant{active: child != nil, until: in.Authority})
+		if observerDone == nil {
+			observerDone = make(chan struct{})
+			go func() { defer close(observerDone); observeLeases(observeCtx, c, server, &grants, report, ready) }()
 		}
+
 		select {
 		case <-ctx.Done():
 			return nil

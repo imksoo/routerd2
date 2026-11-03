@@ -127,9 +127,9 @@ func (d *daemon) populateNativeZones(table *zoneTable, clock boottime.Clock) {
 			record.IPv6 = append(record.IPv6, address.Address.String())
 		}
 		if record.AddressLifetimes == nil {
-			record.AddressLifetimes = make(map[string]lifetime.Deadline)
+			record.AddressLifetimes = make(map[string]addressLifetime)
 		}
-		record.AddressLifetimes[address.Address.String()] = address.ValidUntil
+		record.AddressLifetimes[address.Address.String()] = addressLifetime{owner: address.ValidUntil}
 		zone.mergeRecord(record)
 	}
 	for _, set := range d.nativeInput.Sets {
@@ -148,7 +148,23 @@ func (d *daemon) populateNativeZones(table *zoneTable, clock boottime.Clock) {
 				if !clock.WallTime.Before(lease.ExpiresAt) {
 					continue
 				}
-				record := zoneRecord{Hostname: zone.recordName(lease.Hostname), IPv4: []string{lease.Address}, TTL: ttl, Source: zoneRecordSourceTypedLease, ExpiresAt: lease.ExpiresAt, BootID: set.BootID, ExpiresNanos: set.ExpiresNanos}
+				name := zone.recordName(lease.Hostname)
+				record, found := zone.Records[name]
+				if found && record.Source > zoneRecordSourceTypedLease {
+					continue
+				}
+				if !found {
+					record = zoneRecord{Hostname: name, TTL: ttl, Source: zoneRecordSourceTypedLease, AddressLifetimes: make(map[string]addressLifetime)}
+				}
+				address := lease.Address.String()
+				if lease.Address.Is4() {
+					if !slices.Contains(record.IPv4, address) {
+						record.IPv4 = append(record.IPv4, address)
+					}
+				} else if !slices.Contains(record.IPv6, address) {
+					record.IPv6 = append(record.IPv6, address)
+				}
+				record.AddressLifetimes[address] = addressLifetime{owner: lifetime.Deadline{BootID: set.BootID, Nanos: set.ExpiresNanos}, lease: lease.ExpiresAt}
 				// Static aliases and PTR ownership have higher precedence.
 				zone.mergeRecord(record)
 			}
