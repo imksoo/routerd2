@@ -60,7 +60,9 @@ WAN/tailnet captureは各最大8MB、PD captureはudp546と実行時間で限定
 
 ## 実HGWへ接続した二台profileの統合
 
-次の実行対象は`examples/homert02-native.yaml`と`examples/homert03-native.yaml`の全機能二台profile。各48 resourcesへ二段DNSを接続し、下記の初期通信・両方向の切替/再加入を実行済み。従来の14-resource例やHA基盤gateの合格を転用しない。既存のDS-Lite群120→別DS-Lite80→LAN静的gateway60をそのまま用い、PPPoEやens20を新設しない。
+次の実行対象は`examples/homert02-native.yaml`と`examples/homert03-native.yaml`の全機能二台profile。各54 resourcesへ二段DNSを接続し、下記の初期通信・両方向の切替/再加入を実行済み。従来の14-resource例やHA基盤gateの合格を転用しない。既存のDS-Lite群120→別DS-Lite80→LAN静的gateway60をそのまま用い、PPPoEやens20を新設しない。
+
+二台の非公開DNS設定を使う場合は`UPLINK_HA_CONFIG_A=/private/node-a.json UPLINK_HA_CONFIG_B=/private/node-b.json`を指定する。直接runnerを実行する場合は`--config-a`・`--config-b`を使う。設定は既存の隔離interface/benchmarkアドレスを維持し、private suffix・upstream・NextDNSのURLだけを保存設定から接続する。試験は設定内のlocal zoneと全HTTPS上流を読み、DHCP検索domain・PTR・管理照会・新規端末の名前解決と各DoHのHealthyを確認する。
 
 `make check-uplink-ha DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18`で通常buildと設定検証後に実行する。まず実HGWのRA/PD、共有WAN/LAN IPv6 identity、VRRPの準備完了後公開、実DHCP端末の両IP HTTPS・UDP/TCP DNS、現用daemon停止後の引継ぎを通す。FRR2台、DNS、chronyd、Headscale、syslog/Collectorを独立peerとして配置する。独立peerの配置だけでは各経路の受入としない。
 
@@ -164,6 +166,7 @@ DoH確認は固定provider名ではなく、実configに設定されたHTTPS上�
 通常巡回のlive ownerへ、`make check-site-dns SITE_DNS_OWNER=<pid> SITE_DNS_STAGE=<stage> SITE_DNS_CLIENT=<client namespace> SITE_DNS_CASES=<private cases.json>`を実行する。
 設定は変更せず、実listenerを読み、両IP UDP/TCPのSOA/negative応答とcore履歴の実sourceを照合する。
 同時にWANのUDP53を短時間captureし、質問・peer応答を確認する。未知の回答IPやSOA serialを固定値にしない。
+二台では`SITE_DNS_STAGE`を現用nodeの`<HA stage>/a`または`/b`、clientを共通LAN namespaceへ向け、初期状態と両方向引継ぎ後に同じ照会を行う。ケース件数は質問数であり、一つのsourceが複数質問を持つ場合もsource数へ重複計上しない。
 事前の無応答を以後の固定SERVFAIL期待にしない。応答が変動するpeerは同時点のpacketと実応答を照合し、安定した相互接続の成功と区別する。新規WAN/NICやhost経路は追加しない。
 
 ## LocalServiceRedirectと部分DNS失敗
@@ -206,7 +209,7 @@ blackholeは実clientからTCP/UDPを送り、timeout、kernel blackhole route�
 
 ## 二台構成への単体受入機能の接続
 
-`make check-uplink-ha DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18`を使う。各52-resourceの二台例には、通常/機器用LANの二つの/16、保存NAT除外、管理/WAN内SNAT、個別静的経路、WAN共有BGP、公開DNS/NTP転送を接続する。専用BGP NICや追加WANは使わない。上流の既存順位120→80→60と60秒hysteresisは変更しない。
+`make check-uplink-ha DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18`を使う。各54-resourceの二台例には、通常/機器用LANの二つの/16、保存NAT除外、管理/WAN内SNAT、個別静的経路、WAN共有BGP、公開DNS/NTP転送を接続する。専用BGP NICや追加WANは使わない。上流の既存順位120→80→60と60秒hysteresisは変更しない。
 独立FRR2台の4私設prefixをwan0の具体的なnext hopで転送し、peer観測sourceとTCP/UDPを照合する。管理peerはLAN clientと別namespaceへ置き、製品を迂回した自己通信でNATを判定しない。公開DNS/NTPは実membershipの宛先でローカル回答を確認する。
 現用daemon停止/再加入を両方向に行い、上記通信、両LANのDHCP mask/gateway/DNS・Renew/Release/再取得、共有PD identity、管理/Tailscale/運用記録を確認する。継続TCPは1.1.1.1:443、UDPは転送集合外の9.9.9.10:53を用い、同一socketとNAT tuple/mark、TCP SYN、応答間隔を照合する。UDP宛先が実membership外であることを確認し、ローカルDNS転送を上流UDP継続と数えない。build済み同一版で確認側を修正した場合は`python3 scripts/uplink-ha.py --uplink ens18`で再実行できる。
 

@@ -55,7 +55,7 @@ def main():
                 raise RuntimeError("DNS history did not identify the configured source for case " + str(index))
             time.sleep(.2)
         print("PASS DNS case", index + 1, "rcode", case["rcode"], "IPv4/IPv6 UDP/TCP and configured source history", flush=True)
-    print("PASS actual peer DNS results:", len(cases), "sources,", exchanges, "client exchanges", flush=True)
+    print("PASS actual peer DNS results:", len(cases), "questions,", exchanges, "client exchanges", flush=True)
 
 
 if __name__ == "__main__":

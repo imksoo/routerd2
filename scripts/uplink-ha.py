@@ -140,9 +140,15 @@ def owner(stage, uplink, retention_check):
         nat.write_text('table ip gateway {\n chain nat {\n type nat hook postrouting priority srcnat;\n ip saddr { 198.18.0.0/16, 198.19.0.0/16 } oifname "wan0" masquerade\n }\n}\n')
         run(inside("gateway", ["nft", "-f", str(nat)]))
         for key, address, port, answer in (("gateway", "198.19.0.253", 53, None), ("client", "198.18.0.254", 5353, "192.0.2.77"), ("client", "198.18.0.254", 5354, "192.0.2.78")):
-            command = ["dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null", "--no-hosts", "--no-resolv", "--bind-interfaces", "--listen-address=" + address, "--port=" + str(port)]
+            command = ["dnsmasq", "--keep-in-foreground", "--pid-file=", "--conf-file=/dev/null", "--no-hosts", "--no-resolv", "--bind-interfaces", "--listen-address=" + address, "--port=" + str(port)]
             command += ["--address=/#/" + answer] if answer else ["--server=1.1.1.1"]
-            start(key, command, "dns-" + str(port))
+            peer = start(key, command, "dns-" + str(port))
+            def dns_ready():
+                if peer.poll() is not None:
+                    raise RuntimeError((stage / ("dns-" + str(port) + ".log")).read_text())
+                response = subprocess.run(inside(key, ["dig", "@" + address, "-p", str(port), "example.net", "A", "+short", "+time=1", "+tries=1"]), capture_output=True, text=True)
+                return response.returncode == 0 and (response.stdout.strip() == answer if answer else bool(response.stdout.strip()))
+            wait(dns_ready)
         start("gateway", ["tcpdump", "-n", "-l", "-e", "-i", "lan0", "-c", "100", "arp or udp port 53"], "gateway-wire")
         echo = runpy.run_path(str(stage / "peer-fixture.py"))
         addresses = json.loads(run(inside("gateway", ["ip", "-j", "-4", "address", "show", "dev", "wan0"])))
@@ -267,6 +273,11 @@ def owner(stage, uplink, retention_check):
             return active[0] if active else None
         wait(elected, 180)
         print("PASS admitted native HA owner", elected(), flush=True)
+        dns_core = {}
+        for node in daemons:
+            configured = api(node, "control.sock", "/v1/config")["config"]
+            dns_core[node] = next(r["service"]["dns"] for r in configured["resources"] if r["id"] == "service/dns-core")
+        lan_domain = dns_core[elected()]["zones"][0]["spec"]["zone"].rstrip(".")
         lease = stage / "client.lease"
         hook = stage / "client.sh"
         hook.write_text('#!/bin/sh\ncase "$1" in deconfig) ip -4 address flush dev "$interface"; ip -4 route flush dev "$interface";; bound|renew) ip address replace "$ip/$subnet" dev "$interface"; ip route replace default via "$router" dev "$interface" src "$ip"; printf "%s %s %s\\n" "$ip" "$router" "$dns" > "' + str(lease) + '";; esac\n')
@@ -295,7 +306,7 @@ def owner(stage, uplink, retention_check):
                 for transport in ("+notcp", "+tcp"):
                     for target, hostname in (("198.18.0.1", "router"), (address, "ha-client")):
                         answer = run(inside("client", ["dig", "@" + server, "-x", target, "+short", "+time=3", "+tries=1", transport]))
-                        assert answer.strip().rstrip(".").lower() == hostname + ".home.arpa", (target, answer)
+                        assert answer.strip().rstrip(".").lower() == (hostname + "." + lan_domain).lower(), (target, answer)
             print("PASS HA static and real DHCP-derived PTR over IPv4/IPv6 UDP/TCP", flush=True)
             run(inside("client", chrony + ["-Q", "-t", "8", "-u", "root", "-f", str(ntp_client)]), 12)
             print("PASS HA client NTP response", flush=True)
@@ -306,9 +317,11 @@ def owner(stage, uplink, retention_check):
                     assert answer in expected, (query_name, answer)
             for server in (dns, dns6):
                 assert run(inside("client", ["dig", "@"+server, "www.cloudflare.com", "A", "+short", "+time=4", "+tries=1"])).strip()
+            endpoints = [url.strip() for source in dns_core[node]["spec"]["sources"] for url in source.get("upstreams", []) if url.strip().startswith("https://")]
+            assert endpoints, "native DNS profile has no DoH upstream to exercise"
             def doh_ready():
                 upstreams = api(node, "services/dns-core.dns.sock", "/v1/status")["resources"][0]["observed"]["upstreams"]
-                return all(endpoint+":Healthy" in upstreams for endpoint in ("https://cloudflare-dns.com/dns-query", "https://dns.google/dns-query"))
+                return all(endpoint+":Healthy" in upstreams for endpoint in endpoints)
             wait(doh_ready)
             def bgp_ready():
                 peers = api(node, "control.sock", "/v1/services/service.routing").get("snapshot", {}).get("peers", [])
@@ -348,7 +361,7 @@ def owner(stage, uplink, retention_check):
             for family in (4, 6):
                 destination = str(next(a for a in dns_members if a.version == family))
                 for transport in ("+notcp", "+tcp"):
-                    assert run(inside("client", ["dig", "@"+destination, "router.home.arpa", "A", "+short", "+time=3", "+tries=1", transport])).strip() == "198.18.0.1"
+                    assert run(inside("client", ["dig", "@"+destination, "router." + lan_domain, "A", "+short", "+time=3", "+tries=1", transport])).strip() == "198.18.0.1"
             ntp_destination = next(a for a in membership["public-ntp"]["addresses"] if ipaddress.ip_address(a).version == 4)
             redirected_ntp = stage / "redirected-ntp.conf"
             redirected_ntp.write_text("server " + ntp_destination + " iburst maxsamples 1\nport 0\ncmdport 0\n")
@@ -466,7 +479,7 @@ def owner(stage, uplink, retention_check):
             node = elected()
             address = "10.255.255.2" if node == "a" else "10.255.255.3"
             for target, server in ((node, "127.0.0.1"), ("admin", address)):
-                assert run(inside(target, ["dig", "@"+server, "router.home.arpa", "A", "+short", "+time=3", "+tries=1"])).strip() == "198.18.0.1"
+                assert run(inside(target, ["dig", "@"+server, "router." + lan_domain, "A", "+short", "+time=3", "+tries=1"])).strip() == "198.18.0.1"
             answer = run(inside("admin", ["dig", "@"+address, "available.split.test", "A", "+short", "+time=3", "+tries=1"]))
             assert answer.strip() in ("192.0.2.77", "192.0.2.78"), "management DNS omitted the conditional answer"
             wait(lambda: api(node, "control.sock", "/v1/services/service.dns-core/dns-history?name=available.split.test.&limit=20").get("queries"))
@@ -639,14 +652,14 @@ def owner(stage, uplink, retention_check):
             information = run(inside(key, ["busybox", "udhcpc6", "-l", "-f", "-n", "-q", "-i", "client0", "-s", str(info_hook), "-t", "3", "-T", "1"]))
             options = dict(line.split("=", 1) for line in information.splitlines() if line.startswith(("dns=", "search=")))
             dns6 = options.get("dns", "").split()
-            assert dns6 and "home.arpa" in options.get("search", "").split(), options
+            assert dns6 and lan_domain in options.get("search", "").split(), options
             print("New HA client acquired DHCPv4/SLAAC and DHCPv6 DNS/search via", node, "address", address, flush=True)
             published_at = time.monotonic()
-            wait(lambda: run(inside(key, ["dig", "@" + dns, key + ".home.arpa", "A", "+short", "+time=3", "+tries=1"])).strip() == address)
+            wait(lambda: run(inside(key, ["dig", "@" + dns, key + "." + lan_domain, "A", "+short", "+time=3", "+tries=1"])).strip() == address)
             print("PASS new DHCP name publication after", round(time.monotonic() - published_at, 2), "seconds", flush=True)
             for server in [dns, *dns6]:
                 for transport in ("+notcp", "+tcp"):
-                    answer = run(inside(key, ["dig", "@" + server, key + ".home.arpa", "A", "+short", "+time=3", "+tries=1", transport])).strip()
+                    answer = run(inside(key, ["dig", "@" + server, key + "." + lan_domain, "A", "+short", "+time=3", "+tries=1", transport])).strip()
                     assert ipaddress.ip_address(answer) == ipaddress.ip_address(address), (server, answer, address)
                     assert run(inside(key, ["dig", "@" + server, "example.net", "A", "+short", "+time=3", "+tries=1", transport])).strip()
             for family, host in (("-4", "1.1.1.1"), ("-6", "[2606:4700:4700::1111]")):
@@ -735,7 +748,7 @@ def owner(stage, uplink, retention_check):
             assert run(inside("tail", ["dig", family, "@"+server.strip("[]"), "example.net", "A", "+short", "+time=3", "+tries=1"])).strip()
         print("PASS independent tailnet client used the elected node for IPv4/IPv6 exit HTTPS and UDP DNS", flush=True)
     except BaseException:
-        for name in ("gateway-dhcp", "gateway-wire", "dns-53", "special0", "special1", "special2", "tail-flow-a", "tail-flow-b", "tail-flow-peer", "tail-peer"):
+        for name in ("gateway-dhcp", "gateway-wire", "dns-53", "dns-5353", "dns-5354", "special0", "special1", "special2", "tail-flow-a", "tail-flow-b", "tail-flow-peer", "tail-peer"):
             path = stage / (name+".log")
             if path.exists():
                 print("HA peer failure", name, path.read_text(errors="replace")[-10000:], flush=True)
@@ -795,6 +808,8 @@ def owner(stage, uplink, retention_check):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--uplink",required=True)
+    p.add_argument("--config-a", type=Path, default=Path("examples/homert02-native.yaml"))
+    p.add_argument("--config-b", type=Path, default=Path("examples/homert03-native.yaml"))
     p.add_argument("--inside",type=Path)
     p.add_argument("--retention-check",action="store_true")
     a=p.parse_args()
@@ -809,7 +824,7 @@ def main():
         files += [(Path("dist/bin")/n,n) for n in ("routerd","routerd-modules","routerd-logging")]
         files += [(Path("dist")/n,n) for n in ("dnsmasq-engine.tar","conntrack-engine.tar","chrony-engine.tar","tailscale-engine.tar")]
         files += [(Path("dist/peer-env/tailscale")/n,n) for n in ("headscale","tailscale","tailscaled")]
-        files += [(Path("examples/homert0"+str(i+2)+"-native.yaml"),"node-"+node+".yaml") for i,node in enumerate(("a","b"))]
+        files += [(a.config_a,"node-a.yaml"), (a.config_b,"node-b.yaml")]
         for source,name in files:
             run(root+["install","-m","500",str(source.resolve()),str(stage/name)])
         print("Full native HA stage",stage,flush=True)

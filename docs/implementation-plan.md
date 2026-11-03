@@ -1,5 +1,7 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
+保存homertのprivate DNS/NextDNSを現行の単体45-resource・二台各54-resourceへ接続し、通常build `092ba33db448`で全daemon再起動と両方向HAを受け入れた。8質問を両IP UDP/TCPで、単体の再起動前後は各32照会、HAの初期/各切替後は計96照会。HA runnerの設定・domain・DoH上流の固定と試験peerの共通PID競合を修正した。private 1先の応答変動は残る。条件・限界・再実行は[引き継ぎ](pve-codex-handoff.md)へ集約する。
+
 main `f60b3d2`・通常build `f60b3d2789cb`の45-resource単体構成で、実HGWとの自然PD Renew/Reply 1組・期限更新と652巡回の両IP Internet/DNS・Tailscale通信が終了0。109回の周期観測で29 workerの世代は同一、全てReady=trueを維持した。PD SIGKILL3.25秒・通常再起動5.20秒、全daemon後の全項目再確認111.86秒も通過した。 111.86秒は全項目の確認時間。既存TCP socket継続、全private DNS、全110-resource意図、対象ONU/NIC・配布先と全34 packageの残作業を継続する。詳細と手順は[引き継ぎ](pve-codex-handoff.md)・[試験計画](test-plan.md)へ集約する。
 
 NET-08のhostname endpointを既存network ownerへ接続し、独立wireguard-tools/dnsmasq/LAN端末でbootstrap・roaming・DNS失敗/復旧・移動先でのTCP/UDP・daemon再起動・撤去を受け入れた。標準のhandshake期限と実kernelを使う。SAM由来peer集合・動的identityと全体の残作業は継続する。実行版と再実行手順は[引き継ぎ](pve-codex-handoff.md)に記載する。
@@ -18,7 +20,7 @@ BGPの受信数・global import policy後の受理数を状態APIへ接続し、
 - `make check`（Race Detector・vet）、通常static build、設定検証を通過。補助検査の成功を製品全体の完成とは扱わない。
 - 別checkpointで生成profileの自然PD T1、nativeのWAN遮断復旧、二WAN Health→PBR、Alpine/PID1の通信/署名更新/rollbackを確認済み。現在の全profileや実機資格への流用はせず、追加PVE/QEMU・PBR調査は行わない。
 - 保存中のhomert02/03設定は各110 resources、kind件数一致、DNSForwarder11件。両方のIPv6 host route table120、WAN /128 DS-Lite source、BGP広告、Tailscaleの運用を参照済み。実設定値・秘密は公開しない。
-- 全homertのprivate DNS peer確認、BGPの残る運用契約、LAN/運用機能と全体の自然更新・継続通信、二台HAが残る。各homert例14 resourcesは全設定の代わりにならない。
+- 変動するprivate DNS 1先の安定性、BGPの残る運用契約、LAN/運用機能と全体の自然更新・継続通信、二台HAが残る。各homert例14 resourcesは全設定の代わりにならない。
 - ens18/ens20はvirtio。NTT ONU直結、対象NIC/実機、arm64、cloud/Kubernetes全体は未受入。利用できる独立環境で実装を続け、必要な最小setupを範囲ごとに明記する。
 
 ## 今回の棚卸しと実行単位（2026-11-03）

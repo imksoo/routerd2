@@ -11422,9 +11422,14 @@
         "scope": "Offline build/sign/stage/verify/selection operations; full-profile signed boot/update/recovery remains open. Shared-host clock must not be modified by appliance chronyd; full-profile appliance execution needs its own kernel/clock domain."
       },
       "private_dns_gate": {
-        "source": "c371753; executed normal build6e0f020bf76c; Go unchanged",
-        "result": "2026-11-03、基準main `c371753`、通常build `6e0f020bf76c`（製品Go不変）で、保存homertの実private DNS/NextDNS設定を接続した単体39-resource実HGW手順が終了0。実NextDNS/Cloudflareの設定済みDoH上流すべてのHealthyを確認。安定した5転送先について独立LAN端末から両IP・UDP/TCPの20照会を行い、3先のSOA、2先のNXDOMAINとcore履歴の選択sourceを照合した。残る1先は事前UDP/TCP無応答から、試験中UDPのSERVFAILと後続NOERRORへ変化し、WAN captureで指定peer自身のNOERROR/NODATA応答を確認した。この先の固定SERVFAIL期待は試験側の誤りで、安定した4方式の受入には数えない。試験用local zoneは実suffixを隠さない名前へ変更し、DHCP/search/照会側も合わせた。新規WAN・host経路は追加していない。",
-        "limit": "同じ実行で通常の両IP Internet/DNS、DHCP scopes/sticky、BGP、NTP（host時計変更なし）、Tailscale/管理/運用記録、confirmed rollbackが通過。11巡回/自然PD更新0回、PD SIGKILL2.01秒・通常再起動4.87秒、停止時RA撤去/上流Releaseなし。全daemon再起動、HAでの実private DNS、全110-resource intent・実機資格は未受入。NextDNSは実endpointのprobe疎通で、全LAN照会がNextDNSを選んだという主張ではない。"
+        "source": "092ba33 plus HA runner configuration/peer-lifetime changes; normal executable build092ba33db448; product Go unchanged",
+        "single": "通常build `092ba33db448`・45-resource単体構成で、保存homertのprivate DNS・NextDNS/Cloudflare・WAN学習参照を接続した実HGW手順が終了0。再起動前後に各32照会（5 private suffix・bootstrap 1種類・学習DNS 2質問、計8質問/7 source）を両IP UDP/TCPで確認し、実peerのSOA/NXDOMAINとcoreの選択sourceを照合した。54巡回・自然PD更新0回、PD SIGKILL3.27秒/通常再起動5.00秒、全daemon後の全項目再確認111.98秒。",
+        "ha": "同じbuildと各54-resource二台構成も終了0。初期a・引継ぎ後b・逆方向引継ぎ後aで各32照会、計96照会が通過し、WAN captureで実peerの質問/回答を確認した。両方向で設定rollback/confirm、共有DUID/IAID/prefix、既存leaseと新規端末、管理・NTP/BGP/Tailscale・運用記録を確認した。",
+        "flows": "公開TCP365応答/最大間隔15.56秒、UDP393応答/16期限超過/最大9.51秒。固定WAN TCP389応答/最大13.63秒、UDP399応答/10期限超過/最大9.51秒。両TCPはSYN1回、同一socket/NAT tupleを維持。全項目の再確認61.63秒/71.44秒にはsampling・新規端末等を含む。",
+        "runner_change": "HA runnerの設定ファイル・local domain・DoH providerの固定を撤去し、指定した二台profileとその宣言を読む。複数の試験用dnsmasqが共通PIDファイルを使う起動競合を、隔離kernelの同時起動で9回目に`File exists`として再現した。親がprocessを所有するため不要なPIDファイルを無効化し、実queryによるpeer準備と起動失敗の表示を追加した。最終版の全二台手順で受け入れた。Go製品codeは変更していない。",
+        "remaining": "残るprivate 1先は直接UDP照会の無応答と、そのpeer自身のNOERROR/NODATAが混在した。実A/AAAA/SOA照会とpacketで変動を確認し、固定SERVFAIL期待や安定成功へ置き換えていない。全保存intent・長時間/自然更新を含む同一private profile・物理ONU/NIC/二台と全34 packageは継続する。",
+        "checks": "make check (Race Detector/vet), Python36, py_compile, fmt-check and three normal statically linked executables passed. Existing communication runners and actual peers were used; no new fixture framework or Go tests.",
+        "cleanup": "Private profiles/cases/NextDNS URL/captures and task logs are removed after committed acceptance. Reuse procedures in docs/test-plan.md."
       },
       "latest_reverse_dns_archive_ha_gate": {
         "status": "passed (exit0)",

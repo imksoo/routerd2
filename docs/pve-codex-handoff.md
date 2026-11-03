@@ -182,13 +182,17 @@ main `986246c`・通常build `986246cb28dc`の45-resource単体例を実HGWで�
 
 再実行: `make check-local-redirect DOCKER='sudo -n docker'`。通常build後に最終fixtureを同じdaemon runnerで再実行した。
 
-## 実private DNSとNextDNSの単体通信
+## 実private DNSとNextDNSの単体・二台通信
 
-2026-11-03、基準main `c371753`、通常build `6e0f020bf76c`（製品Go不変）で、保存homertの実private DNS/NextDNS設定を接続した単体39-resource実HGW手順が終了0。実NextDNS/Cloudflareの設定済みDoH上流すべてのHealthyを確認。安定した5転送先について独立LAN端末から両IP・UDP/TCPの20照会を行い、3先のSOA、2先のNXDOMAINとcore履歴の選択sourceを照合した。残る1先は事前UDP/TCP無応答から、試験中UDPのSERVFAILと後続NOERRORへ変化し、WAN captureで指定peer自身のNOERROR/NODATA応答を確認した。この先の固定SERVFAIL期待は試験側の誤りで、安定した4方式の受入には数えない。試験用local zoneは実suffixを隠さない名前へ変更し、DHCP/search/照会側も合わせた。新規WAN・host経路は追加していない。
+2026-11-03、基準main `092ba33` + runner修正。通常build `092ba33db448`・45-resource単体構成で、保存homertのprivate DNS・NextDNS/Cloudflare・WAN学習参照を接続した実HGW手順が終了0。再起動前後に各32照会（5 private suffix・bootstrap 1種類・学習DNS 2質問、計8質問/7 source）を両IP UDP/TCPで確認し、実peerのSOA/NXDOMAINとcoreの選択sourceを照合した。54巡回・自然PD更新0回、PD SIGKILL3.27秒/通常再起動5.00秒、全daemon後の全項目再確認111.98秒。 111.98秒は全項目の確認時間。
 
-同じ実行で通常の両IP Internet/DNS、DHCP scopes/sticky、BGP、NTP（host時計変更なし）、Tailscale/管理/運用記録、confirmed rollbackが通過。11巡回/自然PD更新0回、PD SIGKILL2.01秒・通常再起動4.87秒、停止時RA撤去/上流Releaseなし。全daemon再起動、HAでの実private DNS、全110-resource intent・実機資格は未受入。NextDNSは実endpointのprobe疎通で、全LAN照会がNextDNSを選んだという主張ではない。
+同じbuildと各54-resource二台構成も終了0。初期a・引継ぎ後b・逆方向引継ぎ後aで各32照会、計96照会が通過し、WAN captureで実peerの質問/回答を確認した。両方向で設定rollback/confirm、共有DUID/IAID/prefix、既存leaseと新規端末、管理・NTP/BGP/Tailscale・運用記録を確認した。 公開TCP365応答/最大間隔15.56秒、UDP393応答/16期限超過/最大9.51秒。固定WAN TCP389応答/最大13.63秒、UDP399応答/10期限超過/最大9.51秒。両TCPはSYN1回、同一socket/NAT tupleを維持。全項目の再確認61.63秒/71.44秒にはsampling・新規端末等を含む。
 
-再実行手順は[試験計画](test-plan.md)の「実設定のprivate DNS peerとNextDNS」。site intent/case/NextDNS URLは公開しない。通常Makefile build・3実行物のstatic link、Race Detector/vet・Python補助36件とpy_compileが通過。
+HA runnerの設定ファイル・local domain・DoH providerの固定を撤去し、指定した二台profileとその宣言を読む。複数の試験用dnsmasqが共通PIDファイルを使う起動競合を、隔離kernelの同時起動で9回目に`File exists`として再現した。親がprocessを所有するため不要なPIDファイルを無効化し、実queryによるpeer準備と起動失敗の表示を追加した。最終版の全二台手順で受け入れた。Go製品codeは変更していない。 `make check`（Race Detector/vet）・Python36件・構文/format検査、通常3実行物のstatic linkが通過。
+
+残るprivate 1先は直接UDP照会の無応答と、そのpeer自身のNOERROR/NODATAが混在した。実A/AAAA/SOA照会とpacketで変動を確認し、固定SERVFAIL期待や安定成功へ置き換えていない。全保存intent・長時間/自然更新を含む同一private profile・物理ONU/NIC/二台と全34 packageは継続する。
+
+再実行は[試験計画](test-plan.md)のprivate DNSと二台profile手順。`UPLINK_HA_CONFIG_A/B`で非公開の二台設定を選ぶ。private設定・NextDNS URL・case・captureは公開せず、終了後に撤去する。追加WAN/NIC・host経路・PVE/QEMU・追加PBR調査は実行していない。
 
 ## 単体構成のarchive接続と実履歴の期限切れ
 
