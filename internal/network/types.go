@@ -341,7 +341,7 @@ func Validate(d Desired) error {
 	if d.Firewall != nil {
 		seen := map[Forward]bool{}
 		for _, f := range d.Firewall.Forward {
-			if !validName(f.From) || !validName(f.To) || f.From == f.To {
+			if !validName(f.From) || !validName(f.To) {
 				add("firewall: invalid forwarding pair %q -> %q", f.From, f.To)
 			}
 			if seen[f] {

@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 02:18 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 02:49 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 判定と実行原則
 
@@ -15,11 +15,11 @@
 
 ## 現在の実通信と限界
 
-28-resource native profile、基準main `6c16477` + 2-peer設定、build ID `6c1647776767`で実HGW統合gateが終了0。独立FRR8.4.4/Zebra 2台がLAN広告をRIB/kernelへ取り込み、productのbest pathでLAN 2端末の新規TCP/UDPがNATなしで往復した。各bgpdを1台ずつ停止し、停止側のsession状態・残るpeerのkernel経路と両端末の新規通信を0.52/0.82秒で確認した。通常設定で再加入し、両session/RIB/FIB/通信が復旧。全daemon restart後にも両peerと通信が戻った。4 DS-Liteの各TCP/HTTPS・UDP/DNS、DNS複数上流/learnedDNS/両DoH、Tailscale subnet/exitとidentity、管理・履歴、WAN学習NTP stratum 3も通過。PD worker SIGKILL/通常再起動後のLAN復旧3.46/5.74秒、full restartから全確認完了44.31秒（DoH probe待ち・NTP測定込み）。2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。stage/key/CA mount/peer DB/capture/namespaceは撤去済み。
+34-resource native profile、基準main `5da8661` + 上流選択設定と同一LAN forwardの制限撤去、build ID `5da86617fc36`で実HGW統合gateが終了0。Health 5本と既存EgressPolicyを接続し、DS-Lite群120→4本目80→LAN上の静的gateway60→群120の順に両LAN端末の新規UDP/DNS・TCP/HTTPSが往復した。実conntrack markは通常274/273、次候補275、静的276、復帰274/273。kernelの経路とgatewayも一致し、実設定の60秒hysteresisを保持した。全daemon restart後にも通常群と通信が復旧（全確認72.29秒、切戻し抑制・DoH/NTP確認込み）。4 DS-Lite個別疎通、DNS/両DoH、管理、独立BGP 2 peersの各停止/再加入、NTP stratum3、Tailscale subnet/exitも通過。PD worker SIGKILL/通常再起動後のLAN復旧1.98/4.93秒、2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。自然T1と既存socketの無損失継続は今回未確認。
 
-今回の`make check`（Go/Python、Race Detector、vet）、`make test-tools`（36件）、通常Makefile build、設定検証が終了0。製品Goコードは`28cb655`から不変。3実行物は`readelf`でdynamic dependencyなし、nDPI source/license noticesを確認した。補助検査は実通信の代替ではない。
+今回の`make check`（Go/Python、Race Detector、vet）、`make test-tools`（36件）、通常Makefile build、設定検証が終了0。製品Goの変更は同一interface間forwardを拒む不要な制限の撤去。3実行物は`readelf`でdynamic dependencyなし、nDPI source/license noticesを確認した。補助検査は実通信の代替ではない。
 
-homert02/03の保存中の実設定は各110 resources。native単体例は28 resourcesであり、resource数の一致を移植目標にはしないが、全意図の受入は未完了。34 work packageもin_progress22/planned12のまま。ens18/ens20はvirtio NICで、NTT ONU直結、対象NIC/実機、arm64、HA、cloud/Kubernetes全体を資格済みとは扱わない。
+homert02/03の保存中の実設定は各110 resources。native単体例は34 resourcesであり、resource数の一致を移植目標にはしないが、全意図の受入は未完了。34 work packageもin_progress22/planned12のまま。ens18/ens20はvirtio NICで、NTT ONU直結、対象NIC/実機、arm64、HA、cloud/Kubernetes全体を資格済みとは扱わない。
 
 ## 現行単体gateの再実行
 
@@ -54,7 +54,7 @@ WAN captureは最大8MB、tailnet captureも最大8MBへ制限する。PD captur
 
 基準main `ce1589c`から28-resource単体profileへ拡張する。旧routerdの`DSLiteTunnelController`/`ensureDSLiteTunnel`とhost source bypass/route callerを読み、実homertの4 tunnelが同じWANに異なる委譲source（suffix ::21/::22/::13/::23）を使い、AFTR ::100/::101/::102/::100へ接続することを確認した。nativeのWAN /128 delegationと各DS-Lite serviceに明示し、各sourceの既存host-route bypassを設定する。
 
-既定経路はmetric200..203の4 DS-Liteとする。各経路の単体疎通用構成で、実homertのHealth/mark/weight選択policy全体の移植や切替合格ではない。追加PBR調査は行わない。各tunnelの内側IPv4は192.0.0.2/32、直接deviceへのdefault routeを使い、不要なpoint-to-point gateway指定を外す。LANのNAT/MSS1454/DF処理も各tunnelへ設定する。
+router起点の個別疎通用にmetric200..203の4 DS-Lite既定経路を残す。LANの上流選択は後述のHealth/mark/weight policyを接続して受入済み。追加PBR調査は行わない。各tunnelの内側IPv4は192.0.0.2/32、直接deviceへのdefault routeを使い、不要なpoint-to-point gateway指定を外す。LANのNAT/MSS1454/DF処理も各tunnelへ設定する。
 
 4 tunnelへsocketをbindし、実公開peerへのTCP/HTTPSとUDP/DNSが返ることを確認する。4本のsource独立性、通常LAN Internet、DNS/BGP/Tailscale/管理/NTP、全daemon restart後の同じ経路の復旧も確認する。router起点の各経路疎通とLANの既定経路疎通を区別する。既存の最大8MB captureを共用し、終了時にnamespace/key/state/pcapを撤去する。
 
@@ -81,7 +81,17 @@ WAN captureは最大8MB、tailnet captureも最大8MBへ制限する。PD captur
 
 homertと同等の上流選択を先に実装する。保存中のIPv4 priority policyは、委譲PD由来のDS-Lite 3 targetsのgroup（weight120）、別DS-Lite候補（weight80）、既存LAN上の静的gateway（weight60）の順。PPPoESessionの宣言はこの保存設定にはなく、PPPoEの終端を試験hostへ勝手に新設しない。PPPoEを含む構成は既存の終端・候補に沿って同じ優先順位の選択へ接続する。
 
-nativeの既存`EgressPolicy` group/weight/Health/owner契約を使い、既存の独立peer試験も参照する。4 tunnelへ直接bindした疎通やmetric200..203の仮配置は、この選択policyを実装したことにはしない。別NIC/別回線/新規IPを必須の事前条件にせず、LAN上のgateway候補をそのまま表す。ens20で行った別WAN/DHCP試行と追加IP情報の依頼は誤った前提として撤回済み。新しいPBR機構の調査・全面試験やPVE/QEMUを追加せず、実設定の候補選択と必要な通信確認を進める。ログ/観測の追加より、この単体の主経路を先に閉じる。
+nativeの既存`EgressPolicy` group/weight/Health/owner契約を使い、既存の独立peer試験も参照する。4 tunnelへ直接bindした疎通やmetric200..203の仮配置は、この選択policyを実装したことにはしない（現在は後述の選択policyも受入済み）。別NIC/別回線/新規IPを必須の事前条件にせず、LAN上のgateway候補をそのまま表す。ens20で行った別WAN/DHCP試行と追加IP情報の依頼は誤った前提として撤回済み。新しいPBR機構の調査・全面試験やPVE/QEMUを追加せず、実設定の候補選択と必要な通信確認を進める。ログ/観測の追加より、この単体の主経路を先に閉じる。
+
+## 既存LAN gatewayを含む優先順位の実通信
+
+native profileにHealth 5本と既存EgressPolicyを接続し、通常Makefile build済み実行物による実通信が終了0。委譲sourceのDS-Lite 3本をweight120、4本目を80、LAN上のgatewayを60とする。既定のmetric経路はrouter起点の個別疎通用に残し、LANの新規通信はmark/tableで選ぶ。経路の所有とHealthの新規選択を分け、実設定の60秒hysteresisを保持する。Healthの観測だけで切替済みとせず、kernelの選択規則が更新されたことを待って通信する。
+
+独立Linux gatewayは専用namespace内の198.18.0.253で待受し、同じ許可済みens18/HGWへ別MACで接続してDHCPv4を取得、kernelで転送/NATする。追加NIC、site LANの新規address、hostのdefault route変更は不要。同じHGWの経路であり、物理的に独立した二回線の資格ではない。LAN内gatewayへ転送する同一interface間forward/NATも製品設定で所有する。
+
+初回に全Healthの実TCP到達を確認し、DS-Lite 3本の外側sourceを試験専用nft tableで遮断して4本目へ、続いて4本目も遮断してLAN gatewayへ切り替える。各段階でLAN 2端末の新規UDP/DNSとTCP/HTTPS、conntrack markと実kernel next hopを確認し、遮断解除後はweight120へ復帰する。既存socketの無損失継続とは区別する。全daemon restart後も通常優先順位と両端末の通信を確認する。試験専用tableはfinallyで撤去し、peer/process/namespaceは既存ownerが撤去する。
+
+最終確認は、同じMakefile build IDの実行物で`python3 scripts/uplink-smoke.py --uplink ens18 --config examples/single-router-dslite-dhcp-dns.yaml --seconds 20 --wan-mac 02:72:6f:75:74:03 --full-restart --tailnet`を実行した。試行中、試験用nftファイルの書式と、端末のDHCPアドレスを送信元と決めつけたconntrack照合を修正した。ソケットの実送信元を読んで照合し、製品側に迂回・retryは追加していない。終了後はstage/key/state/pcap/namespaceを撤去する。
 
 ## 残作業の実行順と合格条件
 

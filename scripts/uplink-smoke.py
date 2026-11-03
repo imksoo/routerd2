@@ -108,7 +108,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         "dns",
     ]
     if config_path is not None:
-        roles.extend(["ntp", "web_console", "bgp"])
+        roles.extend(["ntp", "web_console", "bgp", "health"])
     boot = dict(
         platform="host",
         config=str(config_path or stage / "config.json"),
@@ -323,6 +323,32 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             run(["ip", "link", "add", "mgmt0", "netns", router, "type", "veth", "peer", "name", "mgmt-peer", "netns", client])
             run(["ip", "-n", client, "address", "add", "198.19.0.2/24", "dev", "mgmt-peer"])
             run(["ip", "-n", client, "link", "set", "mgmt-peer", "up"])
+
+        if config_path is not None:
+            # Independent LAN gateway, sharing the authorized HGW attachment.
+            # Its DHCP hook owns only this namespace's address/default route.
+            gateway = "r2gateway-" + str(os.getpid())
+            run(["ip", "netns", "add", gateway])
+            namespaces.append(gateway)
+            run(["ip", "-n", gateway, "link", "set", "lo", "up"])
+            run(inside(client, ["ip", "link", "add", "link", "client0", "name", "gateway-lan", "netns", gateway, "type", "macvlan", "mode", "bridge"]))
+            run(["ip", "-n", gateway, "address", "add", "198.18.0.253/24", "dev", "gateway-lan"])
+            run(["ip", "-n", gateway, "link", "set", "gateway-lan", "up"])
+            run(["ip", "link", "add", "link", uplink, "name", "gateway-wan", "netns", gateway, "type", "macvlan", "mode", "bridge"])
+            run(["ip", "-n", gateway, "link", "set", "gateway-wan", "address", "02:72:6f:75:74:04", "up"])
+            gateway_hook = stage / "gateway-dhcp-hook.sh"
+            gateway_hook.write_text('#!/bin/sh\ncase "$1" in bound|renew)\n'
+                'ip address replace "$ip/$subnet" dev "$interface" || exit 1\n'
+                'set -- $router; ip route replace default via "$1" dev "$interface" || exit 1\n'
+                'esac\n')
+            gateway_hook.chmod(0o500)
+            start(gateway, ["busybox", "udhcpc", "-f", "-i", "gateway-wan", "-s", str(gateway_hook),
+                "-p", str(stage / "gateway-dhcp.pid"), "-t", "3", "-T", "1", "-A", "1"], "gateway-dhcp")
+            wait(lambda: bool(json.loads(run(["ip", "-n", gateway, "-j", "route", "show", "default"]))))
+            run(inside(gateway, ["sysctl", "-qw", "net.ipv4.ip_forward=1"]))
+            gateway_nat = stage / "gateway-nat.nft"
+            gateway_nat.write_text('table ip independent_gateway {\n chain nat {\n type nat hook postrouting priority srcnat;\n ip saddr 198.18.0.0/24 oifname "gateway-wan" masquerade\n }\n}\n')
+            run(inside(gateway, ["nft", "-f", str(gateway_nat)]))
 
         def start_private_dns(port, answer):
             process = start(
@@ -818,8 +844,64 @@ s.close()
 """, interface]))
                 print("PASS actual TCP/HTTPS and UDP/DNS on", interface, flush=True)
 
+        def check_selected_upstream(marks):
+            def selection_applied():
+                rules = run(inside(router, ["nft", "list", "chain", "inet", "routerd2", "flow_routes"]))
+                if len(marks) > 1:
+                    return "@flow_buckets_0" in rules
+                assigned = {int(value, 0) for value in re.findall(r"meta mark set (0x[0-9a-f]+|[0-9]+)", rules)}
+                return assigned == marks
+            wait(selection_applied)
+            # Observe the mark on a new real UDP exchange; do not reproduce
+            # the product's rendezvous algorithm in the test.
+            for namespace in (client, automatic):
+                address, port = run(inside(namespace, ["python3", "-c", """import socket,struct
+s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(4)
+s.connect(('1.1.1.1',53));s.send(bytes.fromhex('4d2101000001000000000000076578616d706c65036e65740000010001'))
+r=s.recv(4096);ident,flags,questions,answers,_,_=struct.unpack('!6H',r[:12])
+assert ident==0x4d21 and flags&0x800f==0x8000 and answers>0,r.hex()
+print(*s.getsockname())
+"""])).split()
+                connection = run(inside(router, ["conntrack", "-L", "-f", "ipv4", "-p", "udp", "--orig-src", address,
+                    "--orig-dst", "1.1.1.1", "--sport", port, "--dport", "53"]))
+                selected = re.search(r"\bmark=(\d+)", connection)
+                assert selected and int(selected[1]) in marks, (marks, connection)
+                mark = int(selected[1])
+                route = json.loads(run(["ip", "-n", router, "-j", "route", "get", "1.1.1.1", "from", address, "iif", "lan0", "mark", str(mark)]))[0]
+                expected = "lan0" if mark == 276 else "dslite" + str(mark - 272)
+                assert route["dev"] == expected, route
+                if mark == 276:
+                    assert route["gateway"] == "198.18.0.253", route
+                status = run(inside(namespace, ["curl", "-4", "--noproxy", "*", "--max-time", "8", "--resolve",
+                    "one.one.one.one:443:1.1.1.1", "-sS", "-I", "-o", "/dev/null", "-w", "%{http_code}", "https://one.one.one.one/"]))
+                assert status in ("200", "301", "302", "308"), status
+                print("PASS LAN new UDP/DNS and TCP/HTTPS selected", expected, "mark", mark, flush=True)
+
+        def check_upstream_recovery():
+            names = ["dslite0", "dslite1", "dslite2", "dslite3", "static"]
+            def health(name):
+                return query("control.sock", "/v1/services/service.health-" + name).get("snapshot", {}).get("active", False)
+            wait(lambda: all(health(name) for name in names))
+            check_selected_upstream({272, 273, 274})
+            sources = [query("control.sock", "/v1/services/service.internet" + (str(i) if i else ""))["snapshot"]["local"] for i in range(4)]
+            rules = stage / "upstream-outage.nft"
+            rules.write_text('table inet r2_upstream_outage {\n chain output {\n type filter hook output priority -10;\n ip6 saddr { ' + ', '.join(sources[:3]) + ' } meta l4proto 4 drop\n }\n}\n')
+            run(inside(router, ["nft", "-f", str(rules)]))
+            try:
+                wait(lambda: not any(health(name) for name in names[:3]))
+                check_selected_upstream({275})
+                run(inside(router, ["nft", "add", "rule", "inet", "r2_upstream_outage", "output", "ip6", "saddr", sources[3], "meta", "l4proto", "4", "drop"]))
+                wait(lambda: not health("dslite3"))
+                check_selected_upstream({276})
+            finally:
+                run(inside(router, ["nft", "delete", "table", "inet", "r2_upstream_outage"]))
+            wait(lambda: all(health(name) for name in names))
+            check_selected_upstream({272, 273, 274})
+            print("PASS upstream priority 120 -> 80 -> 60 -> 120 with actual Health, kernel marks/routes and both LAN clients", flush=True)
+
         if config_path is not None:
             check_dslite_paths()
+            check_upstream_recovery()
 
         cached_answers = {}
         for server, family in ((lease[3], "-4"), (str(router_dns), "-6")):
@@ -1162,6 +1244,8 @@ s.close()
                 check_management()
                 check_bgp()
                 check_dslite_paths()
+                wait(lambda: all(query("control.sock", "/v1/services/service.health-dslite" + str(i)).get("snapshot", {}).get("active", False) for i in range(3)))
+                check_selected_upstream({272, 273, 274})
                 check_time()
             print("PASS actual HGW full daemon restart retained identity and restored both clients; seconds", round(time.monotonic() - restart_at, 2), flush=True)
             if tailnet:

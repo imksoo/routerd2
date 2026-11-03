@@ -1,7 +1,7 @@
 # Homert's common single-router path for isolated native-profile acceptance.
 # 198.18.0.0/24 is reserved for benchmark networks; never use it on a site LAN.
 # NTT HGWs commonly omit the DHCPv6 AFTR option; this AFTR matches homert's
-# explicit routerd configuration. Replace interfaces, LAN values and DNS peers before deployment.
+# explicit routerd configuration. Replace interfaces, LAN values, the static gateway and DNS peers before deployment.
 # SSH is configured separately in the boot file; use the management address,
 # port 2222 and operator authorized_keys to match this profile's input policy.
 schema_version: 2
@@ -46,6 +46,7 @@ resources:
         - {from: lan0, to: tailscale0}
         - {from: lan0, to: bgp0}
         - {from: bgp0, to: lan0}
+        - {from: lan0, to: lan0}
         - {from: lan0, to: dslite0}
         - {from: lan0, to: dslite1}
         - {from: lan0, to: dslite2}
@@ -69,6 +70,8 @@ resources:
         - {from: lan0, to: dslite0}
   - id: lan-dslite-nat
     nat:
+      - type: masquerade
+        match: {family: 4, source: 198.18.0.0/24, in_interface: lan0, out_interface: lan0}
       - type: masquerade
         match: {family: 4, source: 198.18.0.0/24, out_interface: dslite0}
       - type: masquerade
@@ -355,3 +358,131 @@ resources:
         b4_address: 192.0.0.2/32
         default_route: true
         metric: 203
+  # Keep probe/established-flow routes even when health withdraws new selection.
+  - id: upstream-selection
+    depends_on: [address/lan]
+    egress_policy:
+      in_interface: lan0
+      hysteresis_millis: 60000
+      sources: [198.18.0.0/24]
+      exclude_destinations: [198.18.0.0/24, 198.19.0.0/24, 192.0.2.0/24, 203.0.113.0/24, 100.64.0.0/10]
+      groups:
+        - name: dslite-pd-balanced
+          weight: 120
+          targets:
+            - name: internet
+              interface: dslite0
+              table: 110
+              priority: 1100
+              mark: 272
+              when: {fact: service.health-dslite0.active}
+              owner_when: {fact: service.internet.active}
+            - name: internet1
+              interface: dslite1
+              table: 111
+              priority: 1101
+              mark: 273
+              when: {fact: service.health-dslite1.active}
+              owner_when: {fact: service.internet1.active}
+            - name: internet2
+              interface: dslite2
+              table: 112
+              priority: 1102
+              mark: 274
+              when: {fact: service.health-dslite2.active}
+              owner_when: {fact: service.internet2.active}
+        - name: dslite-secondary
+          weight: 80
+          targets:
+            - name: internet3
+              interface: dslite3
+              table: 113
+              priority: 1103
+              mark: 275
+              when: {fact: service.health-dslite3.active}
+              owner_when: {fact: service.internet3.active}
+        - name: lan-static
+          weight: 60
+          targets:
+            - name: lan-gateway
+              interface: lan0
+              gateway: 198.18.0.253
+              table: 114
+              priority: 1104
+              mark: 276
+              when: {fact: service.health-static.active}
+  - id: service/health-dslite0
+    depends_on: [service/internet]
+    service:
+      name: health-dslite0
+      health:
+        interface: dslite0
+        source_address: 192.0.0.2
+        mark: 272
+        target: 1.1.1.1
+        protocol: tcp
+        port: 443
+        interval_ms: 1000
+        timeout_ms: 700
+        healthy_threshold: 2
+        unhealthy_threshold: 3
+  - id: service/health-dslite1
+    depends_on: [service/internet1]
+    service:
+      name: health-dslite1
+      health:
+        interface: dslite1
+        source_address: 192.0.0.2
+        mark: 273
+        target: 1.1.1.1
+        protocol: tcp
+        port: 443
+        interval_ms: 1000
+        timeout_ms: 700
+        healthy_threshold: 2
+        unhealthy_threshold: 3
+  - id: service/health-dslite2
+    depends_on: [service/internet2]
+    service:
+      name: health-dslite2
+      health:
+        interface: dslite2
+        source_address: 192.0.0.2
+        mark: 274
+        target: 1.1.1.1
+        protocol: tcp
+        port: 443
+        interval_ms: 1000
+        timeout_ms: 700
+        healthy_threshold: 2
+        unhealthy_threshold: 3
+  - id: service/health-dslite3
+    depends_on: [service/internet3]
+    service:
+      name: health-dslite3
+      health:
+        interface: dslite3
+        source_address: 192.0.0.2
+        mark: 275
+        target: 1.1.1.1
+        protocol: tcp
+        port: 443
+        interval_ms: 1000
+        timeout_ms: 700
+        healthy_threshold: 2
+        unhealthy_threshold: 3
+  - id: service/health-static
+    depends_on: [address/lan]
+    service:
+      name: health-static
+      health:
+        interface: lan0
+        source_address: 198.18.0.1
+        mark: 276
+        target: 1.1.1.1
+        protocol: tcp
+        port: 443
+        interval_ms: 1000
+        timeout_ms: 700
+        healthy_threshold: 2
+        unhealthy_threshold: 3
