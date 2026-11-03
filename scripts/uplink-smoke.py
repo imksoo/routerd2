@@ -1007,10 +1007,11 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
             peer_ips = {ipaddress.ip_address(a).version: a for a in peer_status["TailscaleIPs"]}
             nodes = json.loads(run(inside(remote, head + ["nodes", "list", "-o", "json"])))
             node = next(n for n in nodes if n["name"] == "hgw-router")
-            run(inside(remote, head + ["nodes", "approve-routes", "-i", str(node["id"]), "-r", "198.18.0.0/16,0.0.0.0/0,::/0"]))
+            tailnet_config = next(r["service"]["tailscale"] for r in query("control.sock", "/v1/config")["config"]["resources"] if r.get("service", {}).get("name") == "tailnet")
+            advertised_routes = tailnet_config["advertise_routes"]
+            run(inside(remote, head + ["nodes", "approve-routes", "-i", str(node["id"]), "-r", ",".join(advertised_routes + ["0.0.0.0/0", "::/0"])]))
             wait(lambda: any(product_ips[0] in p.get("TailscaleIPs", []) and p.get("ExitNodeOption")
                              for p in json.loads(run(inside(remote, peer_cli + ["status", "--json"]))).get("Peer", {}).values()))
-            run(inside(remote, peer_cli + ["set", "--exit-node=" + product_ips[0], "--exit-node-allow-lan-access=true"]))
             auto4 = next(a["local"] for link in auto_addresses for a in link["addr_info"] if a["family"] == "inet")
             auto6 = next(a["local"] for link in auto_addresses for a in link["addr_info"] if a["family"] == "inet6" and any(ipaddress.IPv6Address(a["local"]) in p for p in delegated))
             for ns, addresses in ((automatic, (auto4,)), (remote, tuple(peer_ips.values()))):
@@ -1021,6 +1022,18 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
 
             def check_tailnet():
                 assert tailnet_observation().get("node_id") == tailnet_identity, "router restart changed tailnet identity"
+                run(inside(remote, peer_cli + ["set", "--exit-node="]))
+                def subnet_routes_ready():
+                    peers = json.loads(run(inside(remote, peer_cli + ["status", "--json"]))).get("Peer", {}).values()
+                    return any(set(advertised_routes).issubset(p.get("PrimaryRoutes", [])) for p in peers)
+                wait(subnet_routes_ready)
+                if config_path is not None:
+                    for destination in ("10.42.0.1", "172.20.1.1", "192.168.64.1", "198.19.0.253", "10.255.255.2"):
+                        route = json.loads(run(inside(remote, ["ip", "-j", "route", "get", destination])))[0]
+                        assert route["dev"] == "tailscale0", (destination, route)
+                        local_route = json.loads(run(inside(router, ["ip", "-j", "route", "get", destination])))[0]
+                        run(inside(remote, ["python3", "-c", echo["ECHO_CLIENT"], destination, local_route["prefsrc"]]))
+                    print("PASS Tailscale advertised private routes reached independent BGP, static, legacy LAN and management devices over TCP/UDP with exit disabled", flush=True)
                 for family, address in ((4, auto4), (6, auto6)):
                     # homert advertises IPv4 LANs only. Exit routes deliberately
                     # exclude unadvertised local LANs in upstream Tailscale.
@@ -1044,6 +1057,7 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
                                 print("Failed tailnet packets", run(["tcpdump", "-nn", "-r", str(path), ("ip6" if family == 6 else "ip") + " and (tcp port 18080 or udp port 18081)"]).splitlines()[-40:], flush=True)
                             print("Failed tailnet peer log", "\n".join((stage / "tailnet-peer.log").read_text().splitlines()[-20:]), flush=True)
                             raise
+                run(inside(remote, peer_cli + ["set", "--exit-node=" + product_ips[0], "--exit-node-allow-lan-access=true"]))
                 for family, address in (("-4", "1.1.1.1"), ("-6", "[2606:4700:4700::1111]")):
                     response = run(inside(remote, ["curl", family, "--noproxy", "*", "--max-time", "8", "--resolve", "one.one.one.one:443:" + address, "-sS", "-I", "-o", "/dev/null", "-w", "%{http_code}", "https://one.one.one.one/"]))
                     assert response in ("200", "301", "302", "308"), (family, response)

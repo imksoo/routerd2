@@ -1,6 +1,8 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
-保存homertのB4 IPv4に合わせ、単体・二台例の4 DS-Liteを192.0.0.2/.3/.4/.5（各/29）と対応するSNAT・health送信元へ修正した。旧routerdのlocalAddressFrom経路と明示的な重複許可を参照した。通常build `cbde1604b383`・変更後の単体45-resource例で、実HGW・独立LAN端末との4本のHTTPS/UDP DNS、両IP Internet/DNS、設定rollback、PD再起動と全daemon再起動を通過した。Linuxの各アドレスと内側TCP往復をcaptureで確認。全daemon後の全項目再確認111.87秒は転送断時間ではない。2巡回、自然PD更新0回。二台例は設定検証のみで、変更後のHA通信は次に確認する。直接ONU・対象NIC資格、同一TCP継続は今回の範囲外。
+保存homertのTailscale私設IPv4広告と転送許可を単体・二台例へ接続した。通常build `3f5c5aced7be`で、exit未選択の独立peerからBGP/静的経路/旧LAN/管理へのTCP/UDP、単体全daemon再起動と両方向HAを通過。初回の二台通信で物理WAN側への許可欠落を検出して修正した。NTP品質立上りの5照会timeoutと自然復旧を含む測定値・残作業は[引き継ぎ](pve-codex-handoff.md)へ記載する。
+
+保存homertのB4 IPv4に合わせ、単体・二台例の4 DS-Liteを192.0.0.2/.3/.4/.5（各/29）と対応するSNAT・health送信元へ修正した。旧routerdのlocalAddressFrom経路と明示的な重複許可を参照した。通常build `cbde1604b383`・変更後の単体45-resource例で、実HGW・独立LAN端末との4本のHTTPS/UDP DNS、両IP Internet/DNS、設定rollback、PD再起動と全daemon再起動を通過した。Linuxの各アドレスと内側TCP往復をcaptureで確認。全daemon後の全項目再確認111.87秒は転送断時間ではない。2巡回、自然PD更新0回。通常build `3f5c5aced7be`の二台例も両方向の引継ぎ・再加入、新規端末と同一TCP/UDP接続を通過した。直接ONU・対象NIC資格、同一TCP継続は今回の範囲外。
 
 2026-11-03のユーザー指示により、IPsec（EXT-01）はhomert02/03の機能実装・受入後へ回す。両方の保存110-resource設定にIPsecConnectionは0件。初回homert受入では、保存設定にある機能と配布・復旧の実装を優先する。
 

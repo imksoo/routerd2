@@ -8,6 +8,24 @@
 
 再実行は試験計画の通常単体手順（`UPLINK_SECONDS=20 UPLINK_FULL_RESTART=1 UPLINK_TAILNET=1`）。`make check`（Race Detector・vet）、3設定検証、通常buildの3実行物の静的リンク確認が通過。製品Go・試験runnerの変更は不要だった。
 
+## B4アドレス修正後の二台引継ぎ
+
+main `3f5c5ac`・通常build `3f5c5aced7be`、各54-resource二台例で`make check-uplink-ha DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18`が終了0。実HGW・独立FRR/chronyd/Headscale・LAN端末で、両方向の停止/再加入、PD/DUID/IAID・lease同期、設定timeout/confirm、DNS/DoH/BGP/NTP/管理/運用、停止中の新規端末と保持identityを確認した。bのkernelにB4 .2/.3/.4/.5（/29）、dslite3の.5と実公開先のTCP往復を確認した。a→b/b→aの全項目再確認61.85/70.75秒には新規端末やsamplingを含む。
+
+公開TCP370応答・最大間隔14.64秒、UDP390応答/17期限超過・最大10.52秒。固定WAN TCP387応答・最大14.02秒、UDP397応答/10期限超過・最大9.51秒。TCPは各SYN1回で同一socket/NAT tupleを維持した。新規端末のDHCP名公開1.43/0.25秒。起動時のNTP準備待ちに8秒照会のtimeoutが2回あり、その後の初期/引継ぎ後照会は成功した。無損失・直接ONU/NIC・物理二台や長時間品質の資格は継続する。owner/namespace/stageは終了時に撤去した。
+
+## homertのTailscale広告範囲と転送先を接続
+
+保存homert02/03のTailscaleは私設IPv4の3範囲を広告していたが、native例は主LANのみだった。旧routerdのcontroller→RenderTailscaleSystemd/CLI引数、同じLinux subnet SNATを使うnative local APIを参照し、3例へ10/8・172.16/12・192.168/16と文書用両LANの198.18/15を接続した。Tailscaleから管理側への許可、二台例ではBGPに使う物理WAN側への転送許可も追加した。初回二台試験は後者の欠落で10.42.0.1へのTCPがtimeoutした。同じ宛先/結果を維持し、設定修正後に通過した。
+
+基準main `3f5c5ac` + 設定/runner修正、通常build `3f5c5aced7be`。単体45-resourceの通常実HGW手順が終了0。独立Headscale/Tailscale peerでexitを解除し、全広告のPrimaryRoutes・kernelのtailscale0経路と、既存のBGP/静的経路/旧LAN/管理5機器へのTCP/UDPを確認した。SNAT送信元は実kernel経路とpeer受信値を照合した。全daemon再起動後も同じ通信、両IP Internet/DNS、4 DS-Liteと全項目を確認。PD SIGKILL2.39秒/通常再起動7.12秒、全daemon後の全項目再確認112.11秒、2巡回/自然PD更新0回。
+
+修正した各54-resource二台例も通常`make check-uplink-ha`が終了0。初期a・引継ぎ先b・逆方向aと再加入後に、exit未選択のまま新しい私設経路と通常LANを確認した。bの物理WANで、実Tailscale peerからBGP機器へのTCP SYN/SYN-ACK・データとSNAT source192.0.2.11をcaptureした。両方向でDHCP/PD identity・既存lease・停止中の新規端末、設定timeout/confirmとDNS/DoH/BGP/NTP/管理/運用も通過。全項目再確認120.76/87.51秒にはNTP品質待ちとsampling/新規端末を含む。公開TCP546応答/maxgap15.10秒、UDP577応答/21期限超過/maxgap11.55秒。固定WAN TCP571/max13.89秒、UDP586/13期限超過/max11.03秒。TCPは各SYN1回・同一socket/NAT tupleを維持した。新規DHCP名公開0.94/1.38秒。
+
+今回のNTP照会timeoutは5回。bの実NTP応答はstratum3・root dispersion53.52秒で、同時点のworkerはskew1000000ppmを報告していた。追加の自然測定後はskew41.82ppm/root dispersion0.00144秒となり、端末照会が成功した。時計・state・試験期限・sourceの優先度は変更していない。共有kernelの時計補正無効条件での品質立上りとして残し、独立kernelでのappliance時計補正と長時間品質は次の受入対象とする。
+
+`make check`（Race Detector・vet/Python）、fmt-check、3設定検証、通常3実行物のstatic linkが通過。製品Goの変更は不要だった。再実行は試験計画の通常単体/二台手順。実サイトcontrol/identity、public bootstrap・物理二台・直接ONU/NICは別に受け入れる。owner/namespace/stageと今回のraw資料は結果集約後に撤去する。
+
 ## 現行単体構成の自然PD更新・再起動
 
 main `f60b3d2`・通常build `f60b3d2789cb`の45-resource単体構成で、実HGWとの自然PD Renew/Reply 1組・期限更新と652巡回の両IP Internet/DNS・Tailscale通信が終了0。109回の周期観測で29 workerの世代は同一、全てReady=trueを維持した。PD SIGKILL3.25秒・通常再起動5.20秒、全daemon後の全項目再確認111.86秒も通過した。 111.86秒には抑制・sampling等を含み、転送断時間を表さない。実行は2026-11-03 19時台〜21:58 UTC。初期の設定rollback後から自然更新後まで同じ世代を保った。実captureのRenew/Replyと再起動時のRebind/Reply、DUID/IAID/prefix保持、正常停止のzero-lifetime RA・kernel撤去・上流Releaseなしをrunnerが照合した。

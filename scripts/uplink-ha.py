@@ -210,7 +210,7 @@ def owner(stage, uplink, retention_check):
         trusted.write_bytes(roots.read_bytes() + cert.read_bytes())
         run(["mount", "--bind", str(trusted), str(roots)])
         policy = stage / "tail-policy.json"
-        policy.write_text(json.dumps({"grants": [{"src": ["*"], "dst": ["*"], "ip": ["*"]}], "autoApprovers": {"routes": {"198.18.0.0/16": ["fixture@"]}, "exitNode": ["fixture@"]}}))
+        policy.write_text(json.dumps({"grants": [{"src": ["*"], "dst": ["*"], "ip": ["*"]}], "autoApprovers": {"routes": {prefix: ["fixture@"] for prefix in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "198.18.0.0/15")}, "exitNode": ["fixture@"]}}))
         hs = stage / "headscale.json"
         hs.write_text(json.dumps({"server_url": "https://198.51.100.1:8443", "listen_addr": "198.51.100.1:8443", "noise": {"private_key_path": str(stage / "noise.key")}, "prefixes": {"v4": "100.64.0.0/10", "v6": "fd7a:115c:a1e0::/48"}, "database": {"type": "sqlite", "sqlite": {"path": str(stage / "control.db")}}, "derp": {"urls": [], "paths": [], "auto_update_enabled": False, "server": {"enabled": True, "region_id": 999, "region_code": "fixture", "region_name": "isolated DERP", "stun_listen_addr": "0.0.0.0:3478", "private_key_path": str(stage / "derp.key"), "automatically_add_embedded_derp_region": True, "ipv4": "198.51.100.1"}}, "dns": {"override_local_dns": False, "magic_dns": True, "base_domain": "test.invalid"}, "unix_socket": str(stage / "headscale.sock"), "tls_cert_path": str(cert), "tls_key_path": str(key), "policy": {"mode": "file", "path": str(policy)}, "disable_check_updates": True, "log": {"level": "warn"}}))
         head = [str(stage / "headscale"), "-c", str(hs)]
@@ -274,9 +274,11 @@ def owner(stage, uplink, retention_check):
         wait(elected, 180)
         print("PASS admitted native HA owner", elected(), flush=True)
         dns_core = {}
+        tailnet_routes = {}
         for node in daemons:
             configured = api(node, "control.sock", "/v1/config")["config"]
             dns_core[node] = next(r["service"]["dns"] for r in configured["resources"] if r["id"] == "service/dns-core")
+            tailnet_routes[node] = next(r["service"]["tailscale"]["advertise_routes"] for r in configured["resources"] if r.get("service", {}).get("name") == "tailnet")
         lan_domain = dns_core[elected()]["zones"][0]["spec"]["zone"].rstrip(".")
         lease = stage / "client.lease"
         hook = stage / "client.sh"
@@ -464,12 +466,16 @@ def owner(stage, uplink, retention_check):
                 source = client_address if family == 4 else router6
                 run(inside("client", ["python3", "-c", echo["ECHO_CLIENT"], peer_ips[family], source]))
             status = json.loads(run(inside("tail", peer_cli + ["status", "--json"])))
-            selected = [p for p in status.get("Peer", {}).values() if "198.18.0.0/16" in p.get("PrimaryRoutes", [])]
+            selected = [p for p in status.get("Peer", {}).values() if set(tailnet_routes[node]).issubset(p.get("PrimaryRoutes", []))]
             assert len(selected) == 1, "independent peer has no selected LAN subnet route"
-            source = {"hgw-router-a": "198.18.0.2", "hgw-router-b": "198.18.0.3"}[selected[0]["HostName"]]
-            run(inside("tail", ["python3", "-c", echo["ECHO_CLIENT"], client_address, source]))
+            for destination in (client_address, "10.42.0.1", "172.20.1.1", "192.168.64.1", "198.19.0.253", "10.255.255.254"):
+                route = json.loads(run(inside("tail", ["ip", "-j", "route", "get", destination])))[0]
+                assert route["dev"] == "tailscale0", (destination, route)
+                local_route = json.loads(run(inside(node, ["ip", "-j", "route", "get", destination])))[0]
+                run(inside("tail", ["python3", "-c", echo["ECHO_CLIENT"], destination, local_route["prefsrc"]]))
+            print("PASS HA Tailscale advertised private routes reached BGP, static, legacy LAN and management devices with exit disabled via", selected[0]["HostName"], flush=True)
             print("PASS HA tailnet LAN-to-peer IPv4/IPv6 and peer-to-LAN IPv4 TCP/UDP; automatic subnet selection", selected[0]["HostName"], flush=True)
-        wait(lambda: any("198.18.0.0/16" in p.get("PrimaryRoutes", []) for p in json.loads(run(inside("tail", peer_cli + ["status", "--json"]))).get("Peer", {}).values()))
+        wait(lambda: any(set(tailnet_routes[elected()]).issubset(p.get("PrimaryRoutes", [])) for p in json.loads(run(inside("tail", peer_cli + ["status", "--json"]))).get("Peer", {}).values()))
         check_tailnet()
         def check_management():
             for node in daemons:

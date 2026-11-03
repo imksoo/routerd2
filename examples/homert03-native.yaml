@@ -118,9 +118,13 @@ resources:
     - from: tailscale0
       to: lan0
     - from: tailscale0
+      to: mgmt0
+    - from: tailscale0
       to: dslite0
     - from: tailscale0
       to: wan-ha
+    - from: tailscale0
+      to: wan0
     - from: lan0
       to: tailscale0
     - from: vip0
@@ -864,7 +868,10 @@ resources:
       hostname: hgw-router-b
       auth_key_file: /run/routerd-ha/tailscale-b.key
       advertise_routes:
-      - 198.18.0.0/16
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 198.18.0.0/15
       advertise_exit_node: true
 - id: service/internet1
   depends_on:
