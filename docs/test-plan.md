@@ -58,7 +58,7 @@ WAN captureは最大8MB、tailnet captureも最大8MBへ制限する。PD captur
 
 4 tunnelへsocketをbindし、実公開peerへのTCP/HTTPSとUDP/DNSが返ることを確認する。4本のsource独立性、通常LAN Internet、DNS/BGP/Tailscale/管理/NTP、全daemon restart後の同じ経路の復旧も確認する。router起点の各経路疎通とLANの既定経路疎通を区別する。既存の最大8MB captureを共用し、終了時にnamespace/key/state/pcapを撤去する。
 
-最初の試行ではbackupをDHCPと誤って設定し、ens20からのDiscoverに応答がなく取得待ちで停止した。homertのDHCPv4Clientは0件でbackupは静的IPv4。既存計画にもens20のRA/DHCP無応答が記録されていた。誤ったDHCP設定・追加runner引数を削除し、4 DS-Liteの確認を独立して進める。backupの最小不足setupは、この試験hostで利用できる静的address/gatewayとその上流。未使用addressを推測して割り当てない。hostのens18/ens20 address/default routeは試験前後で照合する。
+最初の試行ではbackupをDHCPと誤って設定し、ens20からのDiscoverに応答がなく取得待ちで停止した。homertのDHCPv4Clientは0件でbackupは静的IPv4。既存計画にもens20のRA/DHCP無応答が記録されていた。誤ったDHCP設定・追加runner引数を削除し、4 DS-Liteの確認を独立して進める。その後の実設定再照合で、低優先の静的候補は既存LAN上のgatewayであり、別NICのWANではないと確認した。ens20の追加接続や試験host用の新規IPを要求する前提を撤回する。hostのens18/ens20 address/default routeが不変だったことは確認済み。
 
 2回目は既存のDNS復旧確認で、5354の独立dnsmasqを再起動した直後のqueryにconnection refusedが返り停止した。起動関数がprocess生成だけで返っていたため、同じ関数で独立peer自身への実query応答を確認してから返す。固定sleepや製品側retryは追加しない。各portのlogも分ける。DS-Liteの初回確認をDNS障害注入より前へ移し、無関係なfixture起動問題で経路観測が後回しにならないようにする。
 
@@ -76,6 +76,12 @@ WAN captureは最大8MB、tailnet captureも最大8MBへ制限する。PD captur
 - 15-resource native profile、build`8ea44d776dc3`でWAN blackhole時の両IP失敗と解除後0.79秒の復旧を確認。今回の追加機能で同じ遮断試験を繰り返す理由にはしない。
 - 実supervisor/control/network/Healthと独立二WAN/Linux peerのTCP/UDP・packetを使うHealth→PBR gateで、障害復帰、worker/supervisor restart、古い通知、期限切れ、confirmed rollbackを確認した。対象二回線/HAの資格ではない。
 - 既存の通常Alpine/PID1隔離PVE gateで、独立PPPoE/ISC DHCPv6/Linux clientのDHCP/PD/Renew/SLAAC・両IP通信、署名更新、明示/自動rollbackを確認済み。VMは撤去済み。今回は追加実行しない。
+
+## 上流選択の実装方針（ユーザー指摘による修正）
+
+homertと同等の上流選択を先に実装する。保存中のIPv4 priority policyは、委譲PD由来のDS-Lite 3 targetsのgroup（weight120）、別DS-Lite候補（weight80）、既存LAN上の静的gateway（weight60）の順。PPPoESessionの宣言はこの保存設定にはなく、PPPoEの終端を試験hostへ勝手に新設しない。PPPoEを含む構成は既存の終端・候補に沿って同じ優先順位の選択へ接続する。
+
+nativeの既存`EgressPolicy` group/weight/Health/owner契約を使い、既存の独立peer試験も参照する。4 tunnelへ直接bindした疎通やmetric200..203の仮配置は、この選択policyを実装したことにはしない。別NIC/別回線/新規IPを必須の事前条件にせず、LAN上のgateway候補をそのまま表す。ens20で行った別WAN/DHCP試行と追加IP情報の依頼は誤った前提として撤回済み。新しいPBR機構の調査・全面試験やPVE/QEMUを追加せず、実設定の候補選択と必要な通信確認を進める。ログ/観測の追加より、この単体の主経路を先に閉じる。
 
 ## 残作業の実行順と合格条件
 

@@ -31,6 +31,8 @@ mainを取得し、直近の変更を統合した。34 work packageの状態は�
 
 DNSの複数上流/suffix/learnedDNS/両DoHを単体gateで接続した。次は実設定のprivate peer全体の確認、4 DS-Liteの選択policy/backup WANの静的native設定、残るLAN/運用機能の単体経路を埋め、同じprofileで自然更新と継続通信を確認する。追加のPBR調査・PVE/QEMUは行わない。
 
+上流選択の優先作業を修正する。実homertはPD由来DS-Lite群（weight120）→別DS-Lite候補（80）→既存LAN上の静的gateway（60）。ユーザーが示すDS-Lite/PPPoE/静的経路などの順序に、既存の候補と終端を沿わせる。別のens20 WANと試験host用IPを必要とした前提・依頼は撤回する。既存`EgressPolicy`のgroup/weight/Health/ownerをnative設定へ接続し、既存peer試験の構成を再利用する。運用機能追加より先に進める。直接bindによる4 tunnel疎通は上流選択の完成ではない。
+
 ## 仕切り直した実行順
 
 1. **110-resource homert single profileを作る。** 本日再読した両node設定と旧routerdの実装・運用修正を、feature/caller/kernel effect単位で対応づける。まず現行single profileへ欠けている4本のDS-Lite service、Health/PBR、backup WAN、DHCP scopes/identity、複数DNS suffix/upstream/DoH、BGP/NTP/Tailscale/managementの実際に使われる範囲を実装する。実設定の値・秘密を転記しない。全設定を1回で置き換えるconverterは作らず、client通信経路を保ったままsectionごとに実HGWで受け入れる。

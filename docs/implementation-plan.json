@@ -11221,14 +11221,15 @@
         "status": "28-resource real-HGW two-BGP-peer integrated gate passed (exit 0)",
         "observed": "28-resource native profile、基準main 6c16477 + 2-peer設定、build ID 6c1647776767で実HGW統合gateが終了0。独立FRR8.4.4/Zebra 2台がLAN広告をRIB/kernelへ取り込み、productのbest pathでLAN 2端末の新規TCP/UDPがNATなしで往復した。各bgpdを1台ずつ停止し、停止側のsession状態・残るpeerのkernel経路と両端末の新規通信を0.52/0.82秒で確認した。通常設定で再加入し、両session/RIB/FIB/通信が復旧。全daemon restart後にも両peerと通信が戻った。4 DS-Liteの各TCP/HTTPS・UDP/DNS、DNS複数上流/learnedDNS/両DoH、Tailscale subnet/exitとidentity、管理・履歴、WAN学習NTP stratum 3も通過。PD worker SIGKILL/通常再起動後のLAN復旧3.46/5.74秒、full restartから全確認完了44.31秒（DoH probe待ち・NTP測定込み）。2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。stage/key/CA mount/peer DB/capture/namespaceは撤去済み。",
         "limit": "New TCP/UDP after each peer stop/rejoin; not lossless existing sockets, long GR expiry, simultaneous two-peer outage, complete homert/HA/backup/ONU/target NIC qualification."
-      }
+      },
+      "upstream_selection_correction": "The actual lower-priority static candidate uses the existing LAN gateway, not a separate ens20 WAN. No new test-host IP allocation is required as an a priori condition. The current four-default-route fixture is only per-path communication evidence and must be replaced by the operator's ordered candidates. User correction takes priority over the previous mistaken setup request."
     }
   },
   "execution_order": [
     {
       "stage": 1,
       "profile": "homert-single-implementation",
-      "next": "Two BGP peers, each-peer stop/rejoin and whole-daemon recovery are integrated with four DS-Lite paths and the ordinary single-router services. Complete the actual private-site peers, static backup WAN setup/selection intent, remaining LAN and operational functions before full single-router natural renewal/continuous traffic and HA. Read docs/test-plan.md; no additional PBR investigation or PVE/QEMU.",
+      "next": "First implement the existing homert upstream priority using the already implemented EgressPolicy group/weight/Health/owner contract: PD DS-Lite group (120), alternate DS-Lite (80), existing static gateway on the LAN (60). Map PPPoE where actually terminated/configured; do not invent a local PPPoE endpoint or a new WAN NIC. Reuse existing independent-peer setup. The ens20/new-IP prerequisite and input request were incorrect and withdrawn. Direct per-tunnel probes are not priority-selection acceptance. Do this before adding operational services; no new PBR framework investigation or PVE/QEMU.",
       "acceptance": "Cold-start the complete single-router profile with an independent WAN peer and Linux client. Verify WAN/LAN DHCPv4 scopes and reservations, DHCPv6-PD/Information identity and natural renew, RA/DAD/SLAAC, local/conditional/DoH DNS, all DS-Lite paths and IPv6, Health/PBR, NAT/MTU/MSS, BGP/NTP/Tailscale/management where configured, and worker/daemon restart and recovery from actual packets, client results, kernel routes and firewall state. Keep ONU/physical-NIC qualification separate."
     },
     {
