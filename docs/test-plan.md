@@ -218,7 +218,8 @@ blackholeは実clientからTCP/UDPを送り、timeout、kernel blackhole route�
 
 単体例は通常LAN `198.18.0.0/16`、機器用LAN `198.19.0.0/16`を同じ`lan0`へ設定し、管理は`10.255.255.0/24`へ分離する。機器用gateway/DNSは独立peer `198.19.0.253`。peerには通常LANへの戻り経路を明示し、WAN側照会中のhost routeだけを使い終わったら撤去する。
 前項と同じ`make check-uplink ... UPLINK_SECONDS=20 UPLINK_FULL_RESTART=1 UPLINK_TAILNET=1`で、通常/予約/機器用割当、実netmask、MAC/OUI、gateway/DNS、公開DNS/HTTPS、Release/3日sticky、DHCP名のDNS回答を実peerと照合する。fixtureはDHCP ACKのmaskをそのまま設定し、固定/24で補わない。割当範囲も実configから読む。
-保存RFC1918とbenchmark内部宛先にはSNATしない。私設/機器用peerが元の通常LAN sourceを見ることと、管理/WAN内peerが明示した変換後sourceを見ることを、実TCP/UDPで確認する。両LANに広げたBGP/Tailscaleのprefixと管理SSH/Web、通常LANのIPv6/DNS/NTPも再確認する。
+機器用DHCP名の追加照合は、live ownerのmount namespace内で`r2auto-<owner>`から`dig @198.18.0.1 special-0.home.arpa A`と`special-1.home.arpa`を照会し、各`<stage>/specialN-leases`の最新割当IPとparseして比較する。
+保存RFC1918とbenchmark内部宛先にはSNATしない。私設/機器用peerが元の通常LAN sourceを見ることと、管理/WAN内peerが明示した変換後sourceを見ることを、実TCP/UDPで確認する。通常LANの/16へ揃えたBGP/Tailscale広告と管理SSH/Web、通常LANのIPv6/DNS/NTPも再確認する。
 通常機能の実行は健全な現用上流を使い、上流の全段障害注入は明示した`UPLINK_WAN_OUTAGE=1`だけで行う。自然更新を再測定しない短時間確認には正の秒数を指定する。`--seconds 0`は自然PD更新まで待つ指定である。
 
 2026-11-03: 通常build `69ecf22aa39d`、44-resourceの最終20秒/全daemon再起動手順は終了0。両/16の実DHCPと通信、NAT除外、再起動後を確認。全項目再確認111.50秒は転送断時間ではない。自然PD更新0回。詳細と未受入範囲は[引き継ぎ](pve-codex-handoff.md)へ記録した。
