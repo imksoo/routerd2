@@ -31,9 +31,11 @@ NDPI_ARCH ?= $(shell $(GO) env GOARCH)
 NDPI_DIR ?= dist/ndpi-$(NDPI_ARCH)
 UPLINK_INTERFACE ?=
 UPLINK_AFTR ?=
+UPLINK_CONFIG ?=
 UPLINK_SECONDS ?= 7800
 UPLINK_DNS_UPSTREAM ?=
 UPLINK_STATE_DIR ?=
+UPLINK_WAN_MAC ?= 02:72:6f:75:74:02
 UPLINK_WAN_OUTAGE ?= 0
 UPLINK_FULL_RESTART ?= 0
 UPLINK_TAILNET ?= 0
@@ -82,7 +84,7 @@ help:
 	  'make check-ra-client   Verify real RA, source/default-route TCP/UDP and expiry' \
 	  'make check-ra-aftr     Verify learned RA/DNS to DS-Lite LAN forwarding and expiry' \
 	  'make check-ra-route-refresh Verify routed AFTR TCP/UDP during independent RA renewal' \
-	  'make check-uplink UPLINK_INTERFACE=... UPLINK_AFTR=... [UPLINK_SECONDS=0 waits for the live PD renewal]  Use an explicit local uplink with a private MAC/LAN' \
+	  'make check-uplink UPLINK_INTERFACE=... (UPLINK_CONFIG=... or UPLINK_AFTR=...) [UPLINK_SECONDS=0 waits for live PD renewal]  Use an explicit local uplink with a private MAC/LAN' \
 	  'make check-dhcp-relay  Verify DHCP peers, fragmentation and VRF isolation' \
 	  'make licenses          Collect dependency licenses and their manifest' \
 	  'make build             Build the native commands for the current platform' \
@@ -252,8 +254,9 @@ check-ra-aftr: build
 
 .PHONY: check-uplink
 check-uplink: build dnsmasq-engine $(if $(filter 1,$(UPLINK_TAILNET)),tailscale-engine tailscale-peers)
-	@test -n '$(UPLINK_INTERFACE)' -a -n '$(UPLINK_AFTR)' || { printf '%s\n' 'UPLINK_INTERFACE and UPLINK_AFTR must select the authorized local access network'; exit 1; }
-	$(PYTHON) scripts/uplink-smoke.py --uplink '$(UPLINK_INTERFACE)' --aftr '$(UPLINK_AFTR)' --seconds '$(UPLINK_SECONDS)' --dns-upstream '$(UPLINK_DNS_UPSTREAM)' $(if $(UPLINK_STATE_DIR),--state-dir '$(UPLINK_STATE_DIR)') $(if $(filter 1,$(UPLINK_WAN_OUTAGE)),--wan-outage) $(if $(filter 1,$(UPLINK_FULL_RESTART)),--full-restart) $(if $(filter 1,$(UPLINK_TAILNET)),--tailnet)
+	@test -n '$(UPLINK_INTERFACE)' -a \( -n '$(UPLINK_CONFIG)' -o -n '$(UPLINK_AFTR)' \) || { printf '%s\n' 'UPLINK_INTERFACE and either UPLINK_CONFIG or UPLINK_AFTR must select the authorized local access network'; exit 1; }
+	@if test -n '$(UPLINK_CONFIG)'; then test -z '$(UPLINK_AFTR)' -a -z '$(UPLINK_DNS_UPSTREAM)' -a '$(UPLINK_TAILNET)' = 0 || { printf '%s\n' 'UPLINK_CONFIG supplies its own AFTR, DNS and features'; exit 1; }; $(RELEASE_BUILT_DIR)/routerd config validate '$(UPLINK_CONFIG)'; fi
+	$(PYTHON) scripts/uplink-smoke.py --uplink '$(UPLINK_INTERFACE)' $(if $(UPLINK_CONFIG),--config '$(UPLINK_CONFIG)',--aftr '$(UPLINK_AFTR)') --seconds '$(UPLINK_SECONDS)' $(if $(UPLINK_CONFIG),,--dns-upstream '$(UPLINK_DNS_UPSTREAM)') --wan-mac '$(UPLINK_WAN_MAC)' $(if $(UPLINK_STATE_DIR),--state-dir '$(UPLINK_STATE_DIR)') $(if $(filter 1,$(UPLINK_WAN_OUTAGE)),--wan-outage) $(if $(filter 1,$(UPLINK_FULL_RESTART)),--full-restart) $(if $(filter 1,$(UPLINK_TAILNET)),--tailnet)
 
 .PHONY: check-ra-route-refresh
 check-ra-route-refresh: build

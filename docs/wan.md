@@ -18,10 +18,11 @@ the two protocol exchanges. See [wan-dslite-pd.yaml](../examples/wan-dslite-pd.y
 
 The combined [single-router profile](../examples/single-router-dslite-dhcp-dns.yaml)
 puts the common client-facing path in one native program: DHCPv4, stateless
-DHCPv6 information, SLAAC/RA from PD, conditional DNS with DoH fallback,
+DHCPv6 information, SLAAC/RA from PD, conditional DNS and a default DoH upstream,
 DS-Lite/NAT for IPv4 and native IPv6 forwarding. Its example values are generic;
-it is not a conversion of either 109-resource homert file or evidence of a live
-router run.
+it is not a conversion of either 110-resource homert file. The 15-resource
+profile passed the real-HGW and independent Linux-client check described in
+[the acceptance plan](test-plan.md), including WAN outage and process restarts.
 
 | homert intent | routerd2 native declaration | Example |
 | --- | --- | --- |
@@ -35,7 +36,7 @@ router run.
 | VRRP virtual gateway | `service.vrrp` owns election and the virtual address | [vrrp-ipv4.yaml](../examples/vrrp-ipv4.yaml) |
 
 The combined single-router example assembles the client-facing rows above.
-These examples do not convert the complete 109-resource homert configuration
+These examples do not convert the complete 110-resource homert configuration
 or accept its full single/HA profile.
 
 ## RA client

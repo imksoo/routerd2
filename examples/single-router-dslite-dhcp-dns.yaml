@@ -1,19 +1,25 @@
-# Homert's common single-router path expressed as one native ResourceProgram.
-# Replace the example interfaces, delegated prefix consumers, LAN subnet,
-# conditional upstreams and resolver choice with the site's real values.
+# Homert's common single-router path for isolated native-profile acceptance.
+# 198.18.0.0/24 is reserved for benchmark networks; never use it on a site LAN.
+# NTT HGWs commonly omit the DHCPv6 AFTR option; this AFTR matches homert's
+# explicit routerd configuration. Replace interfaces, LAN values and DNS peers before deployment.
 schema_version: 2
 resources:
   - id: interface/wan0
-    interface: {name: wan0}
+    interface: {name: wan0, ipv4_rp_filter: 0}
   - id: interface/lan0
     interface: {name: lan0}
   - id: address/lan
     depends_on: [interface/lan0]
-    address: {interface: lan0, cidr: 192.0.2.1/24}
+    address: {interface: lan0, cidr: 198.18.0.1/24}
   - id: forwarding
-    forwarding: {ipv4: true, ipv6: true}
+    forwarding: {ipv4: true, ipv6: true, ipv4_rp_filter: 0}
   - id: firewall
     firewall:
+      input:
+        policy: accept
+        rules:
+          - {match: {in_interface: wan0, protocol: udp, destination_ports: [{start: 53}]}, action: drop}
+          - {match: {in_interface: wan0, protocol: tcp, destination_ports: [{start: 53}]}, action: drop}
       forward:
         - {from: lan0, to: dslite0}
         - {from: lan0, to: wan0}
@@ -27,7 +33,15 @@ resources:
   - id: lan-dslite-nat
     nat:
       - type: masquerade
-        match: {family: 4, source: 192.0.2.0/24, out_interface: dslite0}
+        match: {family: 4, source: 198.18.0.0/24, out_interface: dslite0}
+  - id: service/wan4
+    depends_on: [interface/wan0]
+    service:
+      name: wan4
+      dhcp4:
+        interface: wan0
+        hostname: routerd2
+        default_route: false
   - id: service/wan-ra
     depends_on: [interface/wan0]
     service:
@@ -50,7 +64,7 @@ resources:
         prefix_length: 60
         delegations:
           - {name: lan, interface: lan0, host_id: 1}
-          - {name: b4-source, interface: lan0, host_id: 33}
+          - {name: b4-source, interface: wan0, host_id: 33, prefix_length: 128}
   - id: service/lan-ra
     depends_on: [service/wan-pd]
     service:
@@ -63,8 +77,8 @@ resources:
         from:
           service: wan-pd
           delegation: lan
-          use_learned_rdnss: true
-          use_learned_dnssl: true
+          rdnss_router: true
+        dnssl: [home.arpa]
   - id: service/lan-info
     depends_on: [service/wan-pd]
     service:
@@ -72,9 +86,7 @@ resources:
       dhcp6_server:
         interface: lan0
         dns_delegation: {service: wan-pd, delegation: lan}
-        dns_from: [wan-pd]
-        sntp_from: [wan-pd]
-        search_from: [wan-pd]
+        domain_search: [home.arpa]
         refresh_seconds: 1800
   - id: service/lan-leases
     depends_on: [interface/lan0, address/lan]
@@ -82,30 +94,30 @@ resources:
       name: lan-leases
       dhcp_server:
         interface: lan0
-        server_address: 192.0.2.1
+        server_address: 198.18.0.1
         primary:
-          prefix: 192.0.2.0/24
-          start: 192.0.2.64
-          end: 192.0.2.191
+          prefix: 198.18.0.0/24
+          start: 198.18.0.64
+          end: 198.18.0.191
           lease_seconds: 43200
-          router: 192.0.2.1
-          dns_servers: [192.0.2.1]
+          router: 198.18.0.1
+          dns_servers: [198.18.0.1]
           domain: home.arpa
         authoritative: true
         max_leases: 200
         scopes:
           - name: special-devices
             match: {ouiPrefixes: ["02:00:00"]}
-            prefix: 192.0.2.0/24
-            start: 192.0.2.32
-            end: 192.0.2.63
+            prefix: 198.18.0.0/24
+            start: 198.18.0.32
+            end: 198.18.0.63
             lease_seconds: 43200
-            router: 192.0.2.1
-            dns_servers: [192.0.2.1]
+            router: 198.18.0.1
+            dns_servers: [198.18.0.1]
             domain: home.arpa
         reservations:
-          - {mac_address: "02:00:00:00:00:01", hostname: printer, ip_address: 192.0.2.10}
-          - {mac_address: "02:00:00:00:00:02", hostname: storage, ip_address: 192.0.2.11}
+          - {mac_address: "02:00:00:00:00:01", hostname: printer, ip_address: 198.18.0.10}
+          - {mac_address: "02:00:00:00:00:02", hostname: storage, ip_address: 198.18.0.11}
   - id: service/internet
     depends_on: [interface/wan0]
     ready_when: {fact: service.internet.active}
@@ -116,23 +128,35 @@ resources:
         tunnel: dslite0
         source_from: wan-pd
         source_delegation: b4-source
-        aftr_from: wan-pd
-        dns_from: [wan-pd, wan-ra]
+        candidates: [2404:8e00::feed:100]
         mtu: 1454
         b4_address: 192.0.0.2/32
         b4_peer: 192.0.0.1/32
         route_gateway: 192.0.0.1
         default_route: true
         metric: 200
-  - id: service/resolver
-    depends_on: [interface/lan0, address/lan]
+  - id: host-wan
+    depends_on: [service/wan-ra]
+    host_route:
+      interface: wan0
+      router_from: service.wan-ra
+      table: 120
+      priority: 10120
+      bypasses:
+        - {service: service.internet, priority: 10100}
+  - id: service/dns
+    depends_on: [interface/lan0, address/lan, host-wan]
     service:
-      name: resolver
+      name: dns
       dns:
         listen_interface: lan0
         spec:
           listen:
-            - {name: lan, addresses: [192.0.2.1], port: 53}
+            - {name: lan-v4, addresses: [198.18.0.1], port: 53}
+            - name: lan-v6
+              addressFrom:
+                - {resource: IPv6DelegatedAddress/wan-pd/lan}
+              port: 53
           sources:
             - name: local
               kind: zone
@@ -140,8 +164,8 @@ resources:
               zoneRef: [home]
             - name: site-forwarder
               kind: forward
-              match: [office.example]
-              upstreams: [udp://192.0.2.53:53]
+              match: [split.test]
+              upstreams: [udp://198.18.0.254:5353]
             - name: encrypted-public
               kind: forward
               match: ["."]
@@ -153,6 +177,8 @@ resources:
             spec:
               zone: home.arpa
               records:
-                - {hostname: router, ipv4: 192.0.2.1}
+                - hostname: router
+                  ipv4: 198.18.0.1
+                  ipv6From: {resource: IPv6DelegatedAddress/wan-pd/lan, field: address}
               dhcpDerived:
                 sources: [DHCPv4Server/lan-leases]

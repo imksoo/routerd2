@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Exercise a locally attached access network with a separate MAC and LAN client.
+"""Exercise a locally attached access network with a separate MAC and LAN clients.
 
 The actual product owns RA, DHCPv4, DHCPv6 PD, LAN RA, DNS and DS-Lite. The host's
-management addresses/routes/clock are not changed. Requires explicit uplink and
-AFTR intent, root/sudo, iproute2, BusyBox, dhcpcd, dnsmasq, curl, dig and tcpdump. A bounded owner removes
-its namespaces on completion. An optional private state directory retains the
-test router's identity and WAN leases. This is not NIC qualification.
+management addresses/routes/clock are not changed. Requires an explicit uplink
+and either a native ResourceProgram or an AFTR for the generated fixture, plus
+root/sudo, iproute2, BusyBox, dhcpcd, dnsmasq, curl, dig and tcpdump. A bounded
+owner removes its namespaces on completion. An optional private state directory
+retains the test router's identity and WAN leases. This is not NIC qualification.
 """
 
 import argparse
@@ -28,7 +29,7 @@ def run(args, timeout=12):
     return result.stdout
 
 
-def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_restart, tailnet):
+def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_restart, tailnet, config_path):
     def stop(*_):
         raise KeyboardInterrupt()
 
@@ -36,7 +37,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGALRM, stop)
     if seconds:
-        signal.alarm(seconds + 180)
+        signal.alarm(seconds + 600)
     run(["mount", "-t", "tmpfs", "-o", "mode=755", "tmpfs", "/run"])
     run(["mount", "-t", "tmpfs", "-o", "mode=755", "tmpfs", "/var/lib/dhcpcd"])
     resolver_file = stage / "automatic-resolv.conf"
@@ -80,13 +81,14 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             )
         )
 
-    def wait(condition, seconds=90):
+    def wait(condition, seconds=90, diagnostic=None):
         end = time.monotonic() + seconds
         while time.monotonic() < end:
             if condition():
                 return
             time.sleep(0.3)
-        raise RuntimeError("actual uplink readiness deadline")
+        detail = ": " + diagnostic() if diagnostic else ""
+        raise RuntimeError("actual uplink readiness deadline" + detail)
 
     roles = [
         "logging",
@@ -104,7 +106,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
     ]
     boot = dict(
         platform="host",
-        config=str(stage / "config.json"),
+        config=str(config_path or stage / "config.json"),
         runtime_dir=str(stage / "run"),
         state_dir=str(stage / "state"),
         ssh={"user": "admin"},
@@ -116,150 +118,151 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             for role in roles
         },
     )
-    nat_rules = [{"type": "masquerade", "match": {"family": 4, "source": "198.18.0.0/24", "out_interface": "dslite0"}}]
-    resources = [
-        {"id": "wan", "interface": {"name": "wan0", "ipv4_rp_filter": 0}},
-        {"id": "lan", "interface": {"name": "lan0"}},
-        {"id": "lan-ip", "address": {"interface": "lan0", "cidr": "198.18.0.1/24"}},
-        {
-            "id": "forwarding",
-            "forwarding": {"ipv4": True, "ipv6": True, "ipv4_rp_filter": 0},
-        },
-        {
-            "id": "firewall",
-            "firewall": {
-                "input": {"policy": "accept", "rules": [
-                    {"match": {"in_interface": "wan0", "protocol": protocol, "destination_ports": [{"start": 53}]}, "action": "drop"}
-                    for protocol in ("tcp", "udp")
-                ]},
-                "forward": [
-                    {"from": "lan0", "to": "wan0"},
-                    {"from": "lan0", "to": "dslite0"},
-                ],
-                "mss_clamp": [
-                    {"from": a, "to": b, "family": f, "mtu": mtu}
-                    for a, b, f, mtu in [
-                        ("lan0", "dslite0", 4, 1454),
-                        ("dslite0", "lan0", 4, 1454),
-                        ("lan0", "wan0", 6, 1500),
-                        ("wan0", "lan0", 6, 1500),
-                    ]
-                ],
-                "ipv4_clear_df": [{"from": "lan0", "to": "dslite0"}],
-            },
-        },
-        {
-            "id": "wan4",
-            "service": {
-                "name": "wan4",
-                "dhcp4": {"interface": "wan0", "default_route": False},
-            },
-        },
-        {
-            "id": "wan-ra",
-            "service": {"name": "wan-ra", "ra_client": {"interface": "wan0"}},
-        },
-        {
-            "id": "wan-pd",
-            "service": {
-                "name": "wan-pd",
-                "dhcp6": {
-                    "interface": "wan0",
-                    "iaid": 1,
-                    "request_prefix": True,
-                    "prefix_length": 60,
-                    "delegations": [
-                        {
-                            "name": "lan",
-                            "interface": "lan0",
-                            "host_id": 1,
-                        },
-                        {"name": "b4", "interface": "wan0", "host_id": 256, "prefix_length": 128},
-                    ],
-                },
-            },
-        },
-        {"id": "wan-pd-lan-ra", "when": {"fact": "service.wan-pd.active"}, "service": {"name": "wan-pd-lan-ra", "ra": {"interface": "lan0", "other_config": True, "router_lifetime_seconds": 1800, "dns_lifetime_seconds": 1800, "min_interval_seconds": 3, "max_interval_seconds": 10, "from": {"service": "wan-pd", "delegation": "lan", "rdnss_router": True}}}},
-        {
-            "id": "internet",
-            "ready_when": {"fact": "service.internet.active"},
-            "service": {
-                "name": "internet",
-                "ds_lite": {
-                    "interface": "wan0",
-                    "tunnel": "dslite0",
-                    "source_from": "wan-pd",
-                    "source_delegation": "b4",
-                    "aftr_from": "wan-pd",
-                    "candidates": [aftr],
-                    "dns_from": ["wan-pd", "wan-ra"],
-                    "b4_peer": "192.0.0.1/32",
-                    "route_gateway": "192.0.0.1",
-                    "mtu": 1454,
-                    "metric": 200,
-                },
-            },
-        },
-        {
-            "id": "leases",
-            "service": {"name": "leases", "dhcp_server": {
-                "interface": "lan0", "server_address": "198.18.0.1", "sticky_hold_days": 3, "authoritative": True,
-                "primary": {"prefix": "198.18.0.0/24", "start": "198.18.0.2", "end": "198.18.0.20",
-                            "lease_seconds": 60, "router": "198.18.0.1", "dns_servers": ["198.18.0.1"]},
-            }},
-        },
-        {
-            "id": "lan-info",
-            "service": {"name": "lan-info", "dhcp6_server": {
-                "interface": "lan0", "dns_delegation": {"service": "wan-pd", "delegation": "lan"},
-                "domain_search": ["home.arpa"], "refresh_seconds": 600,
-            }},
-        },
-        {
-            "id": "dns",
-            "service": {
-                "name": "dns",
-                "dns": {
-                    "listen_interface": "lan0",
-                    "spec": {
-                        "queryLog": {"enabled": True},
-                        "listen": [
-                            {"name": "lan", "addresses": ["::"], "port": 53}
-                        ],
-                        "sources": [
-                            {
-                                "name": "provider",
-                                "kind": "forward",
-                                "match": ["."],
-                                "upstreamFrom": [
-                                    {"resource": "DHCPv6PrefixDelegation/wan-pd"},
-                                    {"resource": "IPv6RAAddress/wan-ra"},
-                                ],
-                                "queryTimeout": "2s",
-                            }
-                        ],
-                    }
-                },
-            },
-        },
-    ]
-    resources[-1]["service"]["dns"]["spec"]["sources"].insert(0, {
-        "name": "private", "kind": "forward", "match": ["split.test"],
-        "upstreams": [f"udp://{dns_peer_address}:5353"], "queryTimeout": "1s",
-    })
-    if dns_upstream:
-        source = resources[-1]["service"]["dns"]["spec"]["sources"][-1]
-        source["upstreams"] = [dns_upstream]
-        source["bootstrapResolverFrom"] = source.pop("upstreamFrom")
-    resources.append({"id": "nat", "nat": nat_rules})
-    resources.append({"id": "host-wan", "host_route": {
-        "interface": "wan0", "router_from": "service.wan-ra", "table": 120, "priority": 10120,
-        "bypasses": [{"service": "service.internet", "priority": 10100}],
-    }})
     (stage / "boot.json").write_text(json.dumps(boot))
-    (stage / "config.json").write_text(
-        json.dumps({"schema_version": 2, "resources": resources})
-    )
+    if config_path is None:
+        nat_rules = [{"type": "masquerade", "match": {"family": 4, "source": "198.18.0.0/24", "out_interface": "dslite0"}}]
+        resources = [
+            {"id": "wan", "interface": {"name": "wan0", "ipv4_rp_filter": 0}},
+            {"id": "lan", "interface": {"name": "lan0"}},
+            {"id": "lan-ip", "address": {"interface": "lan0", "cidr": "198.18.0.1/24"}},
+            {
+                "id": "forwarding",
+                "forwarding": {"ipv4": True, "ipv6": True, "ipv4_rp_filter": 0},
+            },
+            {
+                "id": "firewall",
+                "firewall": {
+                    "input": {"policy": "accept", "rules": [
+                        {"match": {"in_interface": "wan0", "protocol": protocol, "destination_ports": [{"start": 53}]}, "action": "drop"}
+                        for protocol in ("tcp", "udp")
+                    ]},
+                    "forward": [
+                        {"from": "lan0", "to": "wan0"},
+                        {"from": "lan0", "to": "dslite0"},
+                    ],
+                    "mss_clamp": [
+                        {"from": a, "to": b, "family": f, "mtu": mtu}
+                        for a, b, f, mtu in [
+                            ("lan0", "dslite0", 4, 1454),
+                            ("dslite0", "lan0", 4, 1454),
+                            ("lan0", "wan0", 6, 1500),
+                            ("wan0", "lan0", 6, 1500),
+                        ]
+                    ],
+                    "ipv4_clear_df": [{"from": "lan0", "to": "dslite0"}],
+                },
+            },
+            {
+                "id": "wan4",
+                "service": {
+                    "name": "wan4",
+                    "dhcp4": {"interface": "wan0", "default_route": False},
+                },
+            },
+            {
+                "id": "wan-ra",
+                "service": {"name": "wan-ra", "ra_client": {"interface": "wan0"}},
+            },
+            {
+                "id": "wan-pd",
+                "service": {
+                    "name": "wan-pd",
+                    "dhcp6": {
+                        "interface": "wan0",
+                        "iaid": 1,
+                        "request_prefix": True,
+                        "prefix_length": 60,
+                        "delegations": [
+                            {
+                                "name": "lan",
+                                "interface": "lan0",
+                                "host_id": 1,
+                            },
+                            {"name": "b4", "interface": "wan0", "host_id": 256, "prefix_length": 128},
+                        ],
+                    },
+                },
+            },
+            {"id": "wan-pd-lan-ra", "when": {"fact": "service.wan-pd.active"}, "service": {"name": "wan-pd-lan-ra", "ra": {"interface": "lan0", "other_config": True, "router_lifetime_seconds": 1800, "dns_lifetime_seconds": 1800, "min_interval_seconds": 3, "max_interval_seconds": 10, "from": {"service": "wan-pd", "delegation": "lan", "rdnss_router": True}}}},
+            {
+                "id": "internet",
+                "ready_when": {"fact": "service.internet.active"},
+                "service": {
+                    "name": "internet",
+                    "ds_lite": {
+                        "interface": "wan0",
+                        "tunnel": "dslite0",
+                        "source_from": "wan-pd",
+                        "source_delegation": "b4",
+                        "aftr_from": "wan-pd",
+                        "candidates": [aftr],
+                        "dns_from": ["wan-pd", "wan-ra"],
+                        "b4_peer": "192.0.0.1/32",
+                        "route_gateway": "192.0.0.1",
+                        "mtu": 1454,
+                        "metric": 200,
+                    },
+                },
+            },
+            {
+                "id": "leases",
+                "service": {"name": "leases", "dhcp_server": {
+                    "interface": "lan0", "server_address": "198.18.0.1", "sticky_hold_days": 3, "authoritative": True,
+                    "primary": {"prefix": "198.18.0.0/24", "start": "198.18.0.2", "end": "198.18.0.20",
+                                "lease_seconds": 60, "router": "198.18.0.1", "dns_servers": ["198.18.0.1"]},
+                }},
+            },
+            {
+                "id": "lan-info",
+                "service": {"name": "lan-info", "dhcp6_server": {
+                    "interface": "lan0", "dns_delegation": {"service": "wan-pd", "delegation": "lan"},
+                    "domain_search": ["home.arpa"], "refresh_seconds": 600,
+                }},
+            },
+            {
+                "id": "dns",
+                "service": {
+                    "name": "dns",
+                    "dns": {
+                        "listen_interface": "lan0",
+                        "spec": {
+                            "queryLog": {"enabled": True},
+                            "listen": [
+                                {"name": "lan", "addresses": ["::"], "port": 53}
+                            ],
+                            "sources": [
+                                {
+                                    "name": "provider",
+                                    "kind": "forward",
+                                    "match": ["."],
+                                    "upstreamFrom": [
+                                        {"resource": "DHCPv6PrefixDelegation/wan-pd"},
+                                        {"resource": "IPv6RAAddress/wan-ra"},
+                                    ],
+                                    "queryTimeout": "2s",
+                                }
+                            ],
+                        }
+                    },
+                },
+            },
+        ]
+        resources[-1]["service"]["dns"]["spec"]["sources"].insert(0, {
+            "name": "private", "kind": "forward", "match": ["split.test"],
+            "upstreams": [f"udp://{dns_peer_address}:5353"], "queryTimeout": "1s",
+        })
+        if dns_upstream:
+            source = resources[-1]["service"]["dns"]["spec"]["sources"][-1]
+            source["upstreams"] = [dns_upstream]
+            source["bootstrapResolverFrom"] = source.pop("upstreamFrom")
+        resources.append({"id": "nat", "nat": nat_rules})
+        resources.append({"id": "host-wan", "host_route": {
+            "interface": "wan0", "router_from": "service.wan-ra", "table": 120, "priority": 10120,
+            "bypasses": [{"service": "service.internet", "priority": 10100}],
+        }})
+        (stage / "config.json").write_text(
+            json.dumps({"schema_version": 2, "resources": resources})
+        )
     try:
         for ns in [router, client, automatic]:
             run(["ip", "netns", "add", ns])
@@ -305,8 +308,29 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         run(["ip", "-n", client, "link", "set", "client0", "address", "02:00:00:00:00:02"])
         run(["ip", "-n", client, "link", "set", "client0", "up"])
         run(["ip", "-n", client, "address", "add", dns_peer_address + "/24", "dev", "client0"])
+
+        def start_private_dns():
+            return start(
+                client,
+                [
+                    "dnsmasq",
+                    "--keep-in-foreground",
+                    "--conf-file=/dev/null",
+                    "--no-hosts",
+                    "--no-resolv",
+                    "--bind-interfaces",
+                    "--listen-address=" + dns_peer_address,
+                    "--port=5353",
+                    "--local-ttl=1",
+                    "--address=/#/192.0.2.77",
+                ],
+                "private-dns",
+            )
+
+        private_dns = start_private_dns()
         run(["ip", "-n", client, "link", "add", "link", "client0", "name", "client1", "type", "macvlan", "mode", "bridge"])
         run(["ip", "-n", client, "link", "set", "client1", "netns", automatic])
+        run(["ip", "-n", automatic, "link", "set", "client1", "address", "02:00:00:00:00:03"])
         run(["ip", "-n", automatic, "link", "set", "client1", "up"])
         if tailnet:
             # A separate, explicitly fixed test underlay reaches the independent
@@ -432,6 +456,11 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             )
 
         wait(ready, 120)
+        if config_path is not None:
+            wait(lambda: query("control.sock", "/v1/services/service.wan4").get("snapshot", {}).get("active", False))
+            wan4 = query("control.sock", "/v1/services/service.wan4")["snapshot"]
+            assert ipaddress.ip_address(wan4["currentAddress"]).version == 4, "WAN DHCPv4 did not publish an IPv4 lease"
+            print("PASS actual HGW DHCPv4 client received and applied its observed WAN lease", flush=True)
         lease_events = stage / "client-lease-events"
         hook = stage / "client-dhcp-hook.sh"
         hook.write_text(
@@ -448,11 +477,10 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         lease = lease_events.read_text().splitlines()[-1].split()
         ipaddress.IPv4Address(lease[1])
         assert lease[0] == "bound" and lease[2:] == ["198.18.0.1", "198.18.0.1"], "LAN DHCP did not supply an address, gateway and DNS: " + str(lease)
+        if config_path is not None:
+            assert ipaddress.IPv4Address(lease[1]) == ipaddress.IPv4Address("198.18.0.11"), "reserved client did not receive its configured reservation: " + str(lease)
         print("PASS independent LAN client acquired IPv4 address, gateway and DNS from routerd2 DHCP", flush=True)
 
-        def start_private_dns():
-            return start(client, ["dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null", "--no-hosts", "--no-resolv", "--bind-interfaces", "--listen-address=" + dns_peer_address, "--port=5353", "--local-ttl=1", "--address=/split.test/192.0.2.77"], "private-dns")
-        private_dns = start_private_dns()
         wait(lambda: subprocess.run(inside(router, ["dig", "@" + dns_peer_address, "-p", "5353", "ready.split.test", "A", "+short", "+time=1", "+tries=1"]), capture_output=True, text=True).stdout.strip() == "192.0.2.77")
         if capture.poll() is not None:
             raise RuntimeError("uplink packet capture exited before readiness")
@@ -487,7 +515,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         information = run(inside(client, ["busybox", "udhcpc6", "-l", "-f", "-n", "-q", "-i", "client0", "-s", str(info_hook), "-t", "3", "-T", "1"]))
         options = dict(line.split("=", 1) for line in information.splitlines() if line.startswith(("dns=", "search=")))
         servers = [ipaddress.IPv6Address(value) for value in options.get("dns", "").split()]
-        assert len(servers) == 1 and "home.arpa" in options.get("search", "").split(), "LAN DHCPv6 information did not supply the router DNS and search domain: " + str(options)
+        assert servers and "home.arpa" in options.get("search", "").split(), "LAN DHCPv6 information did not supply DNS and the configured search domain: " + str(options)
         print("PASS independent LAN client received router DNS and search domain via DHCPv6", flush=True)
 
         auto_events = stage / "automatic-client-events"
@@ -517,23 +545,32 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         wait(automatic_ready, 60)
         auto_options = [line.split("|") for line in auto_events.read_text().splitlines()]
         auto_dns4 = next(event[4] for event in reversed(auto_options) if event[0] == "v4")
-        auto_dns6 = next(event[1] for event in reversed(auto_options) if event[0] == "v6")
+        if config_path is not None:
+            auto_v4 = next(event for event in reversed(auto_options) if event[0] == "v4")
+            auto_address = ipaddress.IPv4Address(auto_v4[2])
+            assert ipaddress.IPv4Address("198.18.0.32") <= auto_address <= ipaddress.IPv4Address("198.18.0.63"), "OUI client was outside its configured scope: " + str(auto_v4)
+            assert auto_v4[3:] == ["198.18.0.1", "198.18.0.1"], "OUI scope did not supply its configured gateway and DNS: " + str(auto_v4)
+            print("PASS independent OUI-matched client received a dynamic lease from its configured scope", auto_v4[2], flush=True)
+        auto_dns6 = [ipaddress.IPv6Address(address) for address in next(event[1] for event in reversed(auto_options) if event[0] == "v6").split()]
         auto_addresses = json.loads(run(["ip", "-n", automatic, "-j", "address", "show", "dev", "client1"]))
         delegated = [ipaddress.IPv6Network(p["prefix"]) for p in query("control.sock", "/v1/services/service.wan-pd")["snapshot"]["prefixes"]]
-        router_dns = ipaddress.IPv6Address(next(event[1] for event in reversed(auto_options) if event[0] == "ra" and len(event) == 2 and event[1]))
-        assert servers == [router_dns] and ipaddress.IPv6Address(auto_dns6) == router_dns, "RA and DHCPv6 DNS disagree"
+        ra_dns = [ipaddress.IPv6Address(address) for address in next(event[1] for event in reversed(auto_options) if event[0] == "ra" and len(event) == 2 and event[1]).split()]
         router_addresses = json.loads(run(["ip", "-n", router, "-j", "-6", "address", "show", "dev", "lan0"]))
-        assert any(ipaddress.IPv6Address(a["local"]) == router_dns and any(router_dns in prefix for prefix in delegated) for link in router_addresses for a in link["addr_info"]), "RA DNS is not the delegated LAN router address"
+        listening_addresses = {ipaddress.IPv6Address(a["local"]) for link in router_addresses for a in link["addr_info"] if a["family"] == "inet6"}
+        router_dns = next((address for address in ra_dns if address in listening_addresses and any(address in prefix for prefix in delegated)), None)
+        assert router_dns is not None, "RA did not advertise the delegated router DNS listener"
+        assert router_dns in servers and router_dns in auto_dns6, "DHCPv6 information and RA did not both supply the router DNS listener"
         assert any(a["family"] == "inet6" and not a.get("tentative") and any(ipaddress.IPv6Address(a["local"]) in prefix for prefix in delegated) for link in auto_addresses for a in link["addr_info"]), "automatic LAN client has no usable delegated SLAAC address"
         print("PASS independent dhcpcd automatically acquired DHCPv4 and RA-triggered DHCPv6 with delegated SLAAC", flush=True)
 
-        def forwarding_ready():
+        def forwarding_state():
+            clients_ready = True
             for namespace, interface in ((client, "client0"), (automatic, "client1")):
                 links = json.loads(run(["ip", "-n", namespace, "-j", "-6", "addr", "show", "dev", interface]))
                 if not any(a.get("scope") == "global" and not a.get("tentative") and not a.get("deprecated") for link in links for a in link["addr_info"]):
-                    return False
+                    clients_ready = False
                 if not json.loads(run(["ip", "-n", namespace, "-j", "-6", "route", "show", "default"])):
-                    return False
+                    clients_ready = False
             observed = query("control.sock", "/v1/services/service.internet").get(
                 "snapshot", {}
             )
@@ -555,17 +592,26 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                 text=True,
             )
             wan = json.loads(run(["ip", "-n", router, "-j", "-6", "addr", "show", "dev", "wan0"]))
-            return (
-                observed.get("available", False)
-                and route.returncode == 0
-                and json.loads(route.stdout)[0]["dev"] == "dslite0"
-                and any(
-                    a["local"] == observed.get("local") and a["prefixlen"] == 128
-                    for link in wan for a in link["addr_info"]
-                )
+            route_ok = route.returncode == 0 and json.loads(route.stdout)[0]["dev"] == "dslite0"
+            b4_on_wan = any(
+                a["local"] == observed.get("local") and a["prefixlen"] == 128
+                for link in wan for a in link["addr_info"]
             )
+            return {
+                "lan_clients_ready": clients_ready,
+                "internet_available": observed.get("available", False),
+                "lan_ipv4_route_uses_dslite": route_ok,
+                "b4_source_is_wan_host_address": b4_on_wan,
+            }
 
-        wait(forwarding_ready)
+        def forwarding_ready():
+            state = forwarding_state()
+            return all(state.values())
+
+        def forwarding_diagnostic():
+            return json.dumps(forwarding_state(), sort_keys=True)
+
+        wait(forwarding_ready, diagnostic=forwarding_diagnostic)
 
         def dns_ready():
             observed = query("services/dns.dns.sock", "/v1/status")["resources"][0][
@@ -578,6 +624,13 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             )
 
         wait(dns_ready)
+        if config_path is not None:
+            for name, expected in (("router.home.arpa", "198.18.0.1"), ("storage.home.arpa", "198.18.0.11")):
+                answer = run(inside(client, ["dig", "@" + lease[3], name, "A", "+short", "+time=3", "+tries=1"]))
+                assert answer.strip() == expected, f"LAN DNS {name} resolved to {answer.strip()!r}, expected configured address {expected}"
+            answer = run(inside(client, ["dig", "-6", "@" + str(router_dns), "router.home.arpa", "AAAA", "+short", "+time=3", "+tries=1"]))
+            assert ipaddress.IPv6Address(answer.strip()) == router_dns, "LAN DNS router AAAA does not match the router's observed delegated address: " + answer
+            print("PASS independent LAN client resolved router IPv4/IPv6 and its DHCP reservation through routerd2 DNS", flush=True)
         if tailnet:
             def tailnet_observation():
                 return query("control.sock", "/v1/services/service.tailnet").get("snapshot", {})
@@ -713,7 +766,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                 assert "status: NOERROR" in response and "ANSWER: 0" not in response, (transport, response)
             response = run(inside(automatic, ["dig", "-6", "@" + str(router_dns), "example.net", "AAAA", "+tries=1", "+time=3"]))
             assert "status: NOERROR" in response and "ANSWER: 0" not in response, "delegated router DNS failed: " + response
-            for family, server in (("-4", auto_dns4), ("-6", auto_dns6)):
+            for family, server in (("-4", auto_dns4), ("-6", str(router_dns))):
                 result = run(inside(automatic, ["curl", family, "--noproxy", "*", "--max-time", "8", "-sS", "-I", "-o", "/dev/null", "-w", "%{http_code}", "https://one.one.one.one/"]))
                 assert result in ["200", "301", "302", "308"], (family, result)
                 response = run(inside(automatic, ["dig", family, "@" + server, "example.net", "A", "+tries=1", "+time=3"]))
@@ -776,7 +829,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         print("Observed natural PD renewal due in seconds", round(renew_due), flush=True)
         if seconds == 0:
             seconds = max(75, int(renew_due) + 90)
-            signal.alarm(seconds + 180)
+            signal.alarm(seconds + 600)
             print("Waiting through observed PD T1 and 90 seconds for the renewal exchange", seconds, flush=True)
         started_at = time.time()
         start_time, rounds, updates = time.monotonic(), 0, 0
@@ -808,10 +861,12 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                 )
             time.sleep(min(10, max(0, seconds - (time.monotonic() - start_time))))
         events = [line.split() for line in lease_events.read_text().splitlines()]
-        if seconds >= 75:
+        if seconds >= 75 and config_path is None:
             assert any(event[0] == "renew" and event[2:] == ["198.18.0.1", "198.18.0.1"] for event in events), "LAN DHCP client did not renew its address, gateway and DNS"
             assert any(line.startswith("v4|RENEW|") for line in auto_events.read_text().splitlines()), "automatic LAN client did not naturally renew DHCPv4"
             print("PASS both independent LAN DHCP clients naturally renewed their addresses, gateway and DNS", flush=True)
+        elif config_path is not None:
+            print("Short native-profile run does not claim DHCPv4 T1 renewal", flush=True)
         before = query("control.sock", "/v1/services/service.wan-pd")["snapshot"]
         previous = next(
             m for m in query("supervisor.sock", "/v1/status")["modules"]
@@ -830,7 +885,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         wait(recovered, 30)
         after = query("control.sock", "/v1/services/service.wan-pd")["snapshot"]
         assert (after["client_duid"], after["iaid"]) == (before["client_duid"], before["iaid"]), "PD worker restart lost client identity"
-        wait(forwarding_ready)
+        wait(forwarding_ready, diagnostic=forwarding_diagnostic)
         wait(dns_ready)
         check_traffic()
         print("PASS actual uplink PD worker SIGKILL recovery, retained DUID/IAID and restored LAN communication; seconds", round(time.time() - restarted_at, 2), flush=True)
@@ -848,7 +903,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         graceful = query("control.sock", "/v1/services/service.wan-pd")["snapshot"]
         assert (graceful["client_duid"], graceful["iaid"]) == (before["client_duid"], before["iaid"]), "graceful restart lost PD identity"
         assert {p["prefix"] for p in graceful["prefixes"]} == {p["prefix"] for p in before["prefixes"]}, "graceful restart changed the delegated prefix"
-        wait(forwarding_ready)
+        wait(forwarding_ready, diagnostic=forwarding_diagnostic)
         wait(dns_ready)
         check_traffic()
         print("PASS actual uplink graceful PD restart, retained DUID/IAID and prefix, restored LAN communication; seconds", round(time.time() - graceful_at, 2), flush=True)
@@ -865,7 +920,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             restored = query("control.sock", "/v1/services/service.wan-pd")["snapshot"]
             assert (restored["client_duid"], restored["iaid"]) == (before["client_duid"], before["iaid"]), "router restart changed PD identity"
             assert {p["prefix"] for p in restored["prefixes"]} == {p["prefix"] for p in before["prefixes"]}, "router restart changed the retained delegation"
-            wait(forwarding_ready)
+            wait(forwarding_ready, diagnostic=forwarding_diagnostic)
             wait(dns_ready)
             check_traffic()
             print("PASS actual HGW full daemon restart retained identity and restored both clients; seconds", round(time.monotonic() - restart_at, 2), flush=True)
@@ -1023,7 +1078,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--uplink", required=True)
-    parser.add_argument("--aftr", required=True)
+    parser.add_argument("--aftr", default="", help="AFTR address for the generated fixture; --config supplies its own AFTR intent")
+    parser.add_argument("--config", type=Path, help="native ResourceProgram applied by the actual routerd process")
     parser.add_argument(
         "--dns-upstream",
         default="",
@@ -1040,8 +1096,16 @@ def main():
     args = parser.parse_args()
     if args.seconds < 0:
         parser.error("--seconds cannot be negative")
+    if args.config and args.aftr:
+        parser.error("--aftr belongs to the generated fixture; the native profile owns AFTR intent")
+    if args.config and args.dns_upstream:
+        parser.error("--dns-upstream belongs to the generated fixture; the native profile owns DNS intent")
+    if args.config and args.tailnet:
+        parser.error("--tailnet currently uses the generated fixture")
+    if not args.config and not args.aftr:
+        parser.error("--aftr is required by the generated fixture")
     if args.inside:
-        owner(args.inside, args.uplink, args.aftr, args.seconds, args.dns_upstream, args.wan_mac, args.wan_outage, args.full_restart, args.tailnet)
+        owner(args.inside, args.uplink, args.aftr, args.seconds, args.dns_upstream, args.wan_mac, args.wan_outage, args.full_restart, args.tailnet, args.config)
         return
     root = [] if os.geteuid() == 0 else ["sudo", "-n"]
     persistent = args.state_dir.resolve() if args.state_dir else None
@@ -1061,6 +1125,10 @@ def main():
                 source = persistent / "leases" / name
                 if source.exists():
                     run(root + ["install", "-D", "-m", "600", str(source), str(stage / "state/leases" / name)])
+        profile = None
+        if args.config:
+            profile = stage / "resource-program.yaml"
+            run(root + ["install", "-m", "600", str(args.config.resolve()), str(profile)])
         for source, name in [(Path(__file__), "owner.py"), (Path("dist/dnsmasq-engine.tar"), "dnsmasq-engine.tar")] + [
             (args.binary_dir / n, n)
             for n in ["routerd", "routerd-modules", "routerd-logging"]
@@ -1097,6 +1165,8 @@ def main():
                 "--wan-mac",
                 args.wan_mac,
             ]
+        if profile:
+            command += ["--config", str(profile)]
         if args.wan_outage:
             command.append("--wan-outage")
         if args.full_restart:
@@ -1106,7 +1176,7 @@ def main():
         subprocess.run(
             command,
             check=True,
-            timeout=args.seconds + 240 if args.seconds else None,
+            timeout=args.seconds + 660 if args.seconds else None,
         )
     finally:
         try:

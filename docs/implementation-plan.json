@@ -10943,35 +10943,34 @@
   "first_changes": [
     {
       "order": 1,
-      "work_package": "CORE-01",
-      "deliverable": "field/default/status/event fixturesと旧実行環境のmanifest。新native機能を作る前に互換判定を再現する。"
+      "work_package": "CORE-01/NET-05/NET-06",
+      "deliverable": "実homert02/03の現在の110-resource intentをrouterd実装・caller・運用修正と照合し、全機能を表すnative single-router profileへ実装する。15-resource実HGW gateは終了0。"
     },
     {
       "order": 2,
-      "work_package": "CORE-02",
-      "deliverable": "ResourceProgramと新schema/journal transaction、confirmed rollback、startup-config選択を実装する。未公開native v1 adapterや旧record読取互換は作らず、既存fixtureを新形式に更新する。"
+      "work_package": "NET/SYS/EXT/OPS homert requirements",
+      "deliverable": "DHCP/DNS/PD/RA/DS-Liteの端末経路を維持し、BGP/NTP/Tailscale/管理・ログの不足を既存routerdから取り込む。"
     },
     {
       "order": 3,
-      "work_package": "CORE-03",
-      "deliverable": "三値条件・依存・ownerの最小coordinator。既存Interface/address/routeでstart/update/remove/recoveryを通す。 CORE-04のprotocol fact/freshnessと再起動時失効の最小契約を並行して定義し、次のHealth workerへ渡す。"
+      "work_package": "QUAL-01",
+      "deliverable": "現在の実HGWと独立Linux clientでfull single profileのcold start、実通信、自然更新、障害、restartを受け入れる。PVE/QEMUと追加PBR調査は行わない。"
     },
     {
       "order": 4,
-      "work_package": "NET-01",
-      "deliverable": "Health workerとscoped Netlink route lookup。二つの独立pathのprobeを実packetで識別する。",
-      "prerequisite_slice": "CORE-04のprotocol fact/freshness契約。durable federation全体の完成待ちにはしない。"
+      "work_package": "HA-01..03",
+      "deliverable": "同じnative profileを二台の実daemon/kernelで双方向handoff/recovery・TCP/UDP継続まで検証する。"
     },
     {
       "order": 5,
-      "work_package": "NET-02",
-      "deliverable": "NET-03/05の必要なprimitiveを接続し、priority/PBRの障害→fallback→復旧を実daemonで通す。"
+      "work_package": "all remaining work packages",
+      "deliverable": "依存と実peerに沿って残りを完了し、未実装/未対応/explicit replacementを別集計する。"
     }
   ],
   "required_inputs": [
     {
       "stage": "CORE-01 / QUAL-01",
-      "item": "homert02/03の保存設定はユーザー指定の ~/homert02/hosts/{homert02,homert03}/router.yaml 作業コピーから読取専用で確認済み。両方109 resourceで、主要機能は共通し、node固有のaddress/interface、BGP router ID、VRRP priority/peer、DHCP lease同期先、Tailscale node名などが異なる。remote worktreeのrouter.yamlは未commitのためimmutableなcommit baselineではない。保存設定はintentであり、live status・外部engine版・実WAN通信の証拠ではない。引き続き必要なのは使用中engine版と対象機での通信受入。旧設定の自動変換を入口にせず、native設定例へ機能を写す。"
+      "item": "2026-11-02の読取では両方109 resources。2026-11-03に同じ未commit作業コピーを再読し、両方110 resourcesで全kind countが一致、DNSForwarderは各11件だった。両方にIPv6 host-traffic policy route（table 120）がある。resource数の変更を含む作業コピーでimmutableなcommit baselineではない。保存設定はintentであり、live status・実WAN通信の証拠ではない。値・秘密は保存しない。"
     },
     {
       "stage": "CORE-06",
@@ -11184,299 +11183,128 @@
     "evidence_required": true,
     "do_not_complete_at_partial_checkpoint": true,
     "physical_target_profile": "homert02/03 are identified PVE guests with4vCPU/4GiB, three VirtIO NICs and VirtIO/SCSI disks. Matching isolated PVE product boot/recovery was exercised; actual WAN/LAN attachment, clean installation from a preconverted native configuration, measured load and any additional hardware/architecture qualification remain open.",
-    "validation_reporting": "Record current behavior, executed checks and untested scope concisely. Discard historical checkpoint ledgers as acceptance authority; no compatibility obligation to their code, APIs or formats.",
+    "validation_reporting": "Use docs/test-plan.md for the concise current gate state. Detailed historical checkpoint ledgers are not acceptance authority; keep only current result, limits and repeatable procedure. Never claim unrun gates or partial homert profiles complete.",
     "current_acceptance": {
-      "implementation_head": "c9d7055d2ed3afc168ebf5096ebd9de3088a1af7",
-      "single_node_full_input_runtime": "full-homert-loopback-native92 / 8cc420d / native92 / network27",
-      "normal_alpine_runtime": "Alpine3.24.3 Linux6.18.59-0-lts; isolated PVE KVM4CPU4096MiB; normal Make/APK image",
-      "original_input_resources_per_node": 109,
-      "explicit_appliance_input_resources_per_node": 110,
-      "native_resources_per_node": 57,
-      "single_node": "Cold boot and actual reboot passed independent clients, acquired IPv4/IPv6 DNS transports UDP/TCP, both-IP TCP/UDP, conditional DNS/DoH, BGP/IX, NTP and Tailscale. Not physical NIC/ONU qualification.",
-      "natural_original_dhcp_lease_seconds": 43200,
-      "natural_dhcp_t1_seconds": 21600,
-      "natural_renewal": "native120 completed real original 43200-second DHCPv4 T1 renewal: ordinary/special unicast REQUEST to the VIP received same-XID ACK with option54 and extended expiry at 2026-10-31T13:37:31.917617Z and 2026-10-31T13:37:32.409511Z. Neither REBINDed. Acquired DNS and both-family communication then passed. The whole job exited1 on one later Tailscale TCP timeout after six hours idle; this DHCP result is not Tailscale long-term acceptance.",
-      "two_node_normal": "2026-10-31 16:56 JST: 20ea125 / ops-management-integrated-native123 integrates published07c55c9 and six management paths320f475. Normal APK/BIOS disks, full57 derived configuration, two isolated PVE guests, both actual power cuts/rejoins and fresh automatic clients exit0. Original TCP/NAT mapping retained; longest TCP reply7.204s, UDP233/1763 lost, DNS17/1017 failed. Both-IP acquired DNS/TCP/UDP, BGP/DS-Lite/NTP/Tailscale restored. Same selected exit after restart6.790/3.791s. No physical NIC/ONU qualification or natural T1 acceptance.",
-      "two_node_configuration_changes": [
-        "Explicit shared WAN IPv4 next hop for static BGP advertisements",
-        "Shared VirtualAddress assigned to existing WAN VMAC instead of physical WAN"
+      "as_of_utc": "2026-11-03T00:21:44Z",
+      "product_code_checkpoint": "c9d7055d2ed3afc168ebf5096ebd9de3088a1af7",
+      "homert_source": "User-provided read-only working copies at chatty.lain.local:~/homert02; the current homert02 and homert03 files each contain 110 resources with matching kind counts. Do not publish configuration values or secrets.",
+      "completed_gates": [
+        "The product code checkpoint passed make check including Go/Python checks, race detector and vet.",
+        "The isolated Alpine/PID1 PVE single-node networking and signed update/rollback gates recorded in docs/test-plan.md passed.",
+        "The actual supervisor/control/network/Health two-WAN PBR failover/recovery gate with independent peers, TCP/UDP and packet capture recorded in docs/test-plan.md passed."
       ],
-      "two_node_limits": "Same TCP/SYN/NAT retained. TCP max7.712826s; UDP1690/1495/195 expired, max gap5.047210s; DNS16/933 failed. Explicit shared WAN BGP next hop and WAN VMAC relocation. Not zero loss, long-term stability, unchanged original input or physical/performance qualification.",
-      "normal_alpine_copy_assertions": 0,
-      "normal_alpine_effects_timeouts": 0,
-      "hgw_normal": "Historical native95 / standard7800-second actual-HGW result is recorded separately in the handoff. It is not a current126 execution or target-WAN qualification.",
-      "remaining": "Native120 original43200-second LAN DHCPv4 T1 renewal and an earlier separate actual-HGW natural PD Renew/Reply passed. Current main PVE PID1 update, explicit rollback and failed-Health auto rollback also passed with independent traffic and retained DUID/SSH identity. The actual-HGW natural PD T1 run using product release 7c1cb3619acb remains active; worker generations are stable at the latest observation. The isolated-peer reconnect case did not reproduce the separate six-hour-idle Tailscale first-connection condition, which remains unaccepted. Unknown never-received DHCP bindings and target-load qualification remain limited. Direct NTT ONU, target NIC/appliance qualification, full 109-resource homert profile, current-main two-node full-profile acceptance, remaining deployment/cloud work, and all34 work packages remain incomplete.",
-      "current_main_update_test": "2026-11-02 UTC, source main c9d7055 / release identity c9d7055d2ed3: make qemu-pppoe QEMU_PROFILE=update passed on an isolated PVE 4-vCPU/4096-MiB VM with the normal Alpine image, routerd PID 1, private stream NICs, independent RP-PPPoE AC, ISC DHCPv6 server and Linux LAN client. Dynamic DHCPv4/gateway/DNS, CHAP, IPv4/IPv6 TCP/UDP, PD Renew, RA/SLAAC, reboot Rebind with unchanged DUID/IAID/prefix, persistent ext4 config/SSH identity, interrupted and signed SSH upload, runtime confirmation, explicit rollback, and automatic failed-Health-trial rollback were observed. Automatic recovery took 113.06 seconds; explicit rollback took 17.9 seconds; PVE VM 151 was removed. Base/next/damaged bundles used same-source binaries with distinct release identities; damaged exercised Health failure, not artifact corruption. The first attempt stopped before product boot because the Make target omitted routerd-bundle; qemu-pppoe now builds the publisher when update binaries are selected, and the rerun passed. This is not homert full-profile or physical ONU/NIC acceptance.",
-      "tailscale_long_idle": "Current main has no Tailscale implementation changes after the b971ea6 independent Headscale/official-peer check, which covered worker/PID1 restart, peer stop/recovery, service removal/reapply and measured 6.344-second exit recovery. The separate six-hour idle case timed out at the test's fixed two-second first TCP wait and measured no retry, so product failure or recovery is unknown. The existing peer runner has no six-hour idle path; do not repeat the short check as a substitute.",
-      "full_profile_signed_update": {
-        "base": "8cc420d / full-homert-loopback-native92",
-        "candidate": "00969ca / full-homert-operations-native92",
-        "environment": "Same normal Alpine/KVM4CPU4096MiB; private4GiB ext4 state; full57 resources and all five engines plus corresponding sources and nDPI sources in signed504MiB catalog",
-        "readiness": "Explicit PD active and VRRP elected ready_when; unchanged90s trial and2s stability",
-        "upload_seconds": 17.077,
-        "prepare_seconds": 3.072,
-        "updated_all_path_recovery_seconds": 36.5358917,
-        "rollback_prepare_seconds": 4.968,
-        "explicit_rollback_all_path_recovery_seconds": 35.7232328,
-        "result": "Exited0. Real SSH update stage/prepare/reboot and update rollback/reboot; normal confirmation, actual acquired DNS both transports, IPv4/IPv6 TCPUDP, special client, NTP, Tailscale, retained configuration/DUID/NodeID and pinned SSH identity. Revisions1->2->3; actual guest releases and all required worker release IDs checked. Automatic failed-trial recovery also passed as a separate trial; timing and fault are recorded separately.",
-        "automatic_recovery": {
-          "seconds": 136.3388759,
-          "trial_seconds": 90,
-          "stable_seconds": 2,
-          "result": "Full57 candidate actually executed and forwarded; stopping independent Health listener withheld confirmation. Failure persisted at2026-10-30T15:18:41.511483291Z, automatic reboot selected the known-good8cc420d release. Acquired DNS/IPv4IPv6 TCPUDP/special client/NTP/Tailscale/management and original configuration/DUID/NodeID/SSH identity recovered. Exit0."
-        }
+      "active_actual_hgw_run": {
+        "build_identity": "7c1cb3619acb",
+        "path": "ens18 virtio uplink through the real home gateway, isolated macvlan router namespace and independent Linux LAN clients",
+        "status": "completed; command exited 0 and owned namespace, capture, lease state and stage were removed",
+        "observed_so_far": "On main-derived build 7c1cb3619acb with the generated test profile, the real HGW returned PD Advertise/Reply from UDP source port 49153 to client port 546. One natural T1 Renew/Reply was captured; initial Solicit and Renew had the same DUID, configured IAID 1 and delegated prefix, and the lease deadline advanced. DAD was enabled on WAN/LAN; all observed global addresses were non-tentative with no DAD failures. PD worker SIGKILL, graceful worker restart and full daemon restart restored both clients in 1.32s, 3.61s and 3.99s. Zero-lifetime RA withdrew the kernel prefix without releasing the upstream grant; both independent clients naturally renewed DHCPv4 and completed 676 rounds of IPv4/IPv6 HTTPS and learned-DNS UDP/TCP.",
+        "limit": "not direct ONU, target physical NIC, full homert profile or two-node HA qualification"
       },
-      "operations_integration": "bb38c6e integrated actual-SSH release pruning, read-only update/recovery page and actual Tailscale routing/exit/peer observations. Independent standard WSL product f93be4c / wsl-operations-f93be4c passed existing checks; not the source executed in the8cc420d->00969ca full-profile update trial.",
-      "dhcp_state_publication_fix": {
-        "commit": "bc3d2a7",
-        "runtime": "aftr-observation-unlock-source-native92",
-        "cause": "Full-host timing observed1.004s runtime mutex wait versus authentication1ms/projection1ms. AFTRInput held that mutex while awaiting network.SourceAddress. Unlock during RPC and recheck config/source after wait. Separately keep dnsmasq lifetime with configuration/supervisor rather than state-publication success, matching old routerd. Existing2s publication/5s observation deadlines and cadence unchanged.",
-        "independent_acceptance": "Exact three normal-build binary hashes matched in independent WSL. During separate3.25s network-worker and control-worker pauses, same DHCP/DNS/control PIDs persisted; BusyBox reacquired its actual lease and used learned DNS over UDP/TCP before resume and after recovery. Original observation expiry and lease/restart checks passed. Root existing5 DHCP/DNS fixtures and AFTR resolution/expiry passed; related Race36.785s, vet, both-arch static sixELF and signed catalog/publisher passed.",
-        "remaining": "Full-host combined57 profile still exhibited BGP/VRRP effects deadlines and interrupted Tailscale traffic; investigate independently. Current long Alpine original-lease cohort still executes8cc420d. New normal-image/real-HGW acceptance of this fix remains."
+      "latest_native_profile_attempt": {
+        "status": "six attempts; latest 15-resource real-HGW profile gate passed with independent clients (exit 0)",
+        "observed": "On build 8ea44d776dc3, the 15-resource profile passed observed WAN DHCPv4, LAN reservation/OUI scope DHCPv4, DHCPv6 information, RA/SLAAC and delegated router DNS; local and conditional DNS including failure isolation/recovery; router DoH default lookup; independent client IPv4/IPv6 HTTPS and A/AAAA DNS over UDP/TCP; WAN blackhole/recovery in 0.79 s; PD worker SIGKILL/graceful restart in 1.57/3.53 s; and whole-daemon restart in 3.78 s. DUID/IAID/prefix stayed stable. Shutdown sent zero-lifetime RA and removed delegated LAN addresses without DHCPv6 Release. Twelve communication rounds; natural DHCPv6 T1 was 7,176 s away, so no natural Renew/Reply or DHCPv4 T1 was claimed.",
+        "change": "The sixth run completed the short native single-router gate after correcting B4 to WAN /128 and adding the IPv6 host-traffic route from the current homert intent. The stage, namespaces and captures were removed. This accepts only the 15-resource profile; implement and test the remaining 110-resource single-router behavior before HA."
       },
-      "network_apply_batch": {
-        "commit": "9a57c8a",
-        "change": "Persist all pending address lifetime intents once before kernel lifetime updates across interfaces. Persist firewall ownership immediately only when that ownership changes; still verify ownership, atomically replace rules and save final Apply result. No deadline changes.",
-        "normal_host": "network-ownership-batch-native92: full57 cold boot and whole-daemon restart passed independent acquired DNS, both-IP TCP/UDP, BGP/IX, NTP, Tailscale and retained identities.",
-        "diagnosis": "Separate instrumented build,600s/20 rounds: maximum Apply0.827881289s, transport1.795225037s, no effects deadline failures. Earlier addresses-only run failed with3.385518612s Apply; not counted as acceptance.",
-        "checks": "Network Race32.815s; vet; real isolated-kernel boot-lifetime and forwarding/NAT/DS-Lite tests with Race; amd64/arm64 static artifacts and signed catalog/publisher passed.",
-        "normal_alpine": "Addresses-only predecessor passed cold boot and actual whole-guest reboot (two kernel boots, one reboot marker), full57 client paths and identities. Final9a57c8a normal image and two-guest acceptance next."
-      },
-      "operations_peer_acceptance": "f470989 /7fc1e1d integrate independent official-Tailscale management SSH during control pause and whole restart, and all-upstream NTP communication loss/recovery. Actual normal binaries independent-a0b091b; same SSH connection survived3.035s control pause. NTP30.041s outage/27 drops, fresh upstream sample and LAN adoption recovered57.905s after restore; same chronyd. Not clock-adjustment/physical-link qualification.",
-      "supplementary_dhcp6_information": {
-        "commit": "551c00c",
-        "result": "Restores old routerd supplementary Information-request after PD Reply even when DNS is already present. Partial PD updates retain omitted live information only through its original deadline. Parent normal dhcp6-information-original-expiry-native92 passed independent ISC split response, LAN DNS/dual-IP TCPUDP, renewal/restart/original expiry67.22s; related Race/vet passed. Root combined build/acceptance in progress.",
-        "limit": "This particular split is an independent ISC condition, not reproduced on physical HGW.",
-        "root_acceptance": "combined-information-native92: split ISC PD/information actual communication passed. Related Race/vet, normal build, both-arch static sixELF/catalog/publisher passed. Conditional LAN control expiry/role/PD withdrawal and recovery passed76.22s with actual VIP readiness; precursor runs failed DNS or10s VIP readiness. Same readiness check on normal9a57c8a baseline passed72.37s. One pass does not resolve the intermittent combined readiness failures."
-      },
-      "current_runs": {
-        "hgw": "Current main20bc21c passed a 90-second real-HGW run through an isolated macvlan with two independent LAN clients: automatic DHCPv4/DHCPv6 information/SLAAC, delegated RDNSS/search domain, IPv4 DS-Lite/IPv6 HTTPS, learned UDP/TCP DNS, conditional-forwarder outage/recovery, WAN blackhole recovery, PD worker SIGKILL/graceful restart and whole-daemon restart. Natural PD Renew was about7177 seconds away, so this is not long-renewal, direct-ONU, target-NIC or load acceptance.",
-        "original_lan": "native120: original 43200-second DHCPv4 lease T1 completed for ordinary and special clients with unicast same-XID ACK, option54, extended expiry and no REBIND. Immediate learned-DNS/both-family communication passed. The enclosing job exited1 on a later post-idle Tailscale TCP timeout; it does not accept Tailscale continuity.",
-        "hgw_short_main_20bc21c": {
-          "source_commit": "20bc21c6f81838da167aca21ec604acf1a532f06",
-          "environment": "Actual HGW, isolated macvlan and router network namespace, independent BusyBox and dhcpcd LAN clients; host management network untouched.",
-          "result": "WAN blackhole IPv4/IPv6 recovery took0.84 seconds. PD SIGKILL and graceful restart restored client communication in1.75 and3.49 seconds; whole-daemon restart restored both clients in4.04 seconds. Periodic IPv4/IPv6 HTTPS and learned DNS UDP/TCP passed.",
-          "limit": "The 90-second run could not include the approximately7177-second natural PD Renew. Temporary namespaces, stage and packet capture were removed; private lease identity remains outside the repository for an explicitly selected later renewal run."
-        },
-        "sam_wireguard": {
-          "release_id": "sam-wireguard-final-release",
-          "environment": "isolated Linux netns; real routerd2 supervisor/control/network/SAM workers; independent legacy routerd RR; independent FRR; separate LAN client and RR terminal",
-          "result": "WireGuard handshake, dynamic peer/AllowedIPs and endpoint route, IPIP/BGP, NAT-free bidirectional TCP/UDP and packet capture passed. Explicit revoke and original admission expiry each removed IPIP/FIB and stopped forwarding.",
-          "failure_found_and_fixed": "Repeated SAM projection appended inherited forward rules into the source Firewall slice, eventually exceeding the local API body limit and stopping BGP on expiry. Projection now copies the firewall and forward chain before modifying them.",
-          "checks": "make check passed (Go packages, 34 Python checks, full Race Detector, go vet); after the final Firewall.Forward projection change, runtimeplan Race and go vet passed. Final static amd64 three-artifact build passed; real encrypted normal/revoke and original-expiry tests passed with this exact release ID.",
-          "remaining": "FOU, /32 mobility/provider actions, planned leaf/drain, partition recovery, PVE/physical hardware/cloud live acceptance."
-        },
-        "dynamic_dhcp_dslite_mtu_e0ea27e": {
-          "product_head": "e0ea27e4ee8c8b2d542cccfb373d390a0279b168",
-          "command": "sudo -n make check-uplink UPLINK_INTERFACE=ens18 UPLINK_AFTR=2404:8e00::feed:100 UPLINK_SECONDS=60",
-          "exit_status": 0,
-          "environment": "Real HGW uplink on ens18, actual routerd2 daemon and Linux kernel in isolated namespaces, independent BusyBox and dhcpcd LAN clients. No production homert or host routes changed.",
-          "dhcp": "Removed the fixed lease reservation and fixed-address assertion. Clients acquired 198.18.0.2 and 198.18.0.7 dynamically. The conditional DNS peer uses static 198.18.0.254 outside the DHCP pool.",
-          "path": "The active DSLite tunnel MTU was 1454. Kernel route lookup for the dynamic client lease selected dslite0. The 1426-byte DF payload (1454-byte IPv4 packet) sent from the independent LAN peer produced three replies (4.67–5.26 ms). The router any-interface capture matched ICMP id 17207 sequences 1–3 at LAN ifindex 8 and dslite0 ifindex 9 in both directions; outbound inner packets were NATed to 192.0.0.2. The return at dslite0 was decapsulated from AFTR 2404:8e00::feed:100.",
-          "other_result": "DHCPv4/v6, SLAAC, DNS conditional forwarding, IPv4/IPv6 HTTPS, and PD worker SIGKILL/graceful-restart recovery passed. Recovery was 1.31/3.26 seconds. The 60-second run captured zero natural PD Renew/Reply; T1 was about 7184 seconds away.",
-          "previous_failure": "The earlier 2/3 DF response result with one router-originated Destination Net Unreachable was not reproduced. Cause remains unknown; this run does not establish that the earlier event was fixed.",
-          "limits": "The temporary capture was removed with the stage and the exact outer-WAN ICMP sequence is not retained. No WAN outage, whole-daemon restart, direct ONU, target NIC, or physical-appliance qualification in this run."
-        }
-      },
-      "warming_backup": "Current full57 native93 fresh-client pair passed additional cut before BGP-ready; full37.401/25.390s. Prior NTP frequency persistence fix remains included; original60s and TCP15s limits unchanged.",
-      "two_node_recovery_seconds": [
-        37.4008207321167,
-        25.389928579330444
+      "current_changes": "The single-router native example has 15 resources; homert02/03 examples each have 14. The sixth real-HGW run passed its short gate with independent clients: WAN/LAN DHCPv4, DHCPv6/RA/SLAAC, DNS/DoH, DS-Lite IPv4/IPv6, WAN outage, PD worker restarts and whole-daemon restart. Recovery was 0.79/1.57/3.53/3.78 s. Native-profile natural DHCPv6 T1, DHCPv4 T1 and continuous TCP remain unobserved. The complete 110-resource homert profile, direct ONU and target NIC remain unqualified.",
+      "open_work_packages": 34,
+      "unqualified_profiles": [
+        "homert-single full input",
+        "homert-ha",
+        "direct ONU/target hardware",
+        "cloud images",
+        "Kubernetes",
+        "SAM/federation full path"
       ],
-      "two_node_max_tcp_reply_seconds": 14.945046945475042,
-      "two_node_udp": {
-        "sent": 1103,
-        "received": 935,
-        "expired": 168,
-        "pending": 0,
-        "maximum_no_reply_seconds": 13.215941091068089
-      },
-      "two_node_dns": {
-        "queries": 659,
-        "failed": 45
-      },
-      "dns_probe_deadlines": "28aaf16: query1s and probe3s retain independent deadlines and original source expiry, including DoH bootstrap/dial. Independent dnsmasq delayed1.5s: old code never healthy; corrected probe healthy, ordinary query1.033s timeout, restored UDP/TCP. Root integrated-ntp-native92 actual check-dns-upstream passed; related Race8.921s and vet passed.",
-      "control_operation_telemetry": "1d96d87: actual Engine.apply start/end/result -> existing logging path -> independent OTLP Collector metrics/traces. Root integrated-ntp-native92 passed Collector outage/recovery, config application and legacy nonduplicate delivery, concurrent UDP1246 replies/0 failures. Related control Race82.698s and vet passed. Not all historical instrument sources.",
-      "integrated_checks": "integrated-ntp-native92: DNS/control/OTLP/legacy related Race passed, vet passed, normal build and actual DNS/Collector paths passed; both-arch static sixELF/catalog/publisher passed (publisher38.579s).",
-      "dhcp_serving_candidate": {
-        "runtime": "b9fe727 / dhcp-reconcile-native93; normal Make/APK image",
-        "result": "Root check-ha-state and check-ha-dhcp-initial exited0; independent same-binary rejoin passed both client renewals/forwarding. Full57 normal Alpine/KVM fresh-client, both power cuts/rejoins also exited0.",
-        "allocation": "Original configured pool retained; no implicit split or separate owner ledger. VRRP selects serving; sync failure does not block new clients.",
-        "limit": "A valid offline-client lease never received from the failed former member was reassigned in the sync-partition test. The old asynchronous15s file copy also provided no guarantee for this unseen fact. This is not qualified as protected.",
-        "checks": "make check including full Race Detector and vet passed after correcting the coalesced-BFD test to use a valid slower remote transmitter; expiry regression retains original packet deadline. Normal build/image, amd64+arm64 static sixELF and signed catalog/publisher passed.",
-        "full_profile": "b9fe727 / dhcp-reconcile-native93 normal Alpine/KVM4CPU4096MiB full57: both actual power cuts/rejoins and fresh automatic DHCP/SLAAC client passed. Fresh client used acquired DNS UDP/TCP and both-IP TCP/UDP with former owner absent, then renewed unchanged address after each rejoin. Additional cut preceded backup BGP readiness. All paths37.401/25.390s within original60s. Same TCP/SYN/NAT retained. TCP max14.945s near original15s; UDP1103/935/168 expired, max gap13.216s; DNS45/659 failed. Explicit shared WAN BGP next hop and WAN VMAC relocation. Not zero loss, long-term stability, original-input-without-change or physical/performance qualification."
-      },
-      "host_route_ack_recovery": {
-        "commit": "27fbad2",
-        "cause": "Apply acknowledgement loss clears the completed projection cache; deriving source candidates from that cache then removed a live IPv6 host route. Candidates now come from current intent and are checked by the existing network owner for kernel presence/ownership/DAD; observation batch errors do not replace prior observations. No timeout extension/retry/second owner.",
-        "before": "Native93 real HGW:22s fsync delay reproduced table120 deletion;11 missing among473 observations. The7800s cohort was improperly repurposed for injection and interrupted; this is not a natural failure or natural-renewal acceptance.",
-        "after": "Native94 dedicated180s fixture, same22s delay:706 observations/38s,0 missing routes. Acquired DNS/both-IP traffic and PD SIGKILL2.07s, graceful restart4.63s, whole daemon4.33s recovery completed0;0 natural PD Renew in the short window.",
-        "checks": "Runtimeplan normal30.217s/Race35.158s; webconsole Race1.065s; three existing real host-route daemon fixtures passed; full make check Race/vet and integrated95 normal build/both-arch static sixELF/catalog/publisher passed.",
-        "remaining": "Original100min run cause of prolonged apply I/O is unmeasured. Complete no-injection long renewal and normal Alpine integrated two-node acceptance."
-      },
-      "integrated_normal95_failure": "Both-direction DHCP/SLAAC/DNS/TCP/UDP recovered, but rebooted NTP adoption took58.366s and total original60s handoff failed. Reboot read0ppm +/-1000000ppm; packet root dispersion53s fell to0.0036s after next reference. Cold calibration/persistence timing not yet resolved; keep client quality and60s.",
-      "integrated_normal96_checks": "DNS UDP-size and query/probe daemon communication, management/SSH/restart, related DNS/webconsole/release/releasecli race, vet, both-arch static sixELF and signed publisher all exit0. Natural trials remain native95/native93 unchanged.",
-      "ntp_clock_update_persistence": {
-        "commit": "61840d9",
-        "before": "Native97 cut-before skew55.94ppm, reboot read0ppm +/-1000000ppm; NTP adoption130.537s, original60s full handoff failed.",
-        "change": "chrony4.8 driftfile interval0 writes only on clock updates; no second writer, timer, source polling change or relaxed client quality.",
-        "after": "Native99 full57 two-node pass30.107/18.288s. Stopped-disk copy journal replay recovered saved skew291.392793/306.475167ppm, exact values read on real guest reboots. Original60s and client15s retained.",
-        "checks": "Normal Make build/image, related runtimeplan race, vet and actual PVE KVM two-node all exit0. Both-arch static sixELF, signed catalog and publisher exit0 (publisher22.856s). Artifact batch includes e5b14d4 alias TTL fix; full-profile image99 predates it."
-      },
-      "management_main_integration": {
-        "release_id": "main-management-sam-126",
-        "source_heads": [
-          "204c994",
-          "4fcdb89"
-        ],
-        "local_communication": "Normal static three-binary build passed; two management daemon checks and four SAM transport checks with independent legacy routerd RR/FRR passed. The preceding main-management-sam-125 passed all six management feature checks.",
-        "sam_preparation": "Fixed claim-owned /32 paths are built once with the immutable protocol plan using the existing enrollment address parser; observation projection no longer decodes the unchanged claim or parses its fixed addresses.",
-        "pve_restore": {
-          "source_commit": "4fcdb89",
-          "release_id": "ops-management-integrated-native125",
-          "fix": "30eaa27",
-          "result": "All 57 settings. DNS record change and snapshot restoration retained the same PD PID, generation, config digest, prefix and original preferred/valid deadlines. Acquired DNS, both-IP TCP/UDP, BGP, special client and Tailscale passed in 3.298831553198397 seconds after restoration. Whole-appliance reboot then recovered all paths and identities. Exit 0; dedicated VM removed."
-        },
-        "checks": "make check passed with full Race Detector, go vet and 36 Python checks. Normal amd64/arm64 builds and static linking of all six artifacts passed. Actual signed catalog and publisher/runtime bundle acceptance passed for both architectures; arm64 execution is not implied. The initial large-config Race attempt expired the original confirmation interval during concurrent builds; the unchanged interval passed on rerun. One UTC-address readiness attempt had no initial-grant trace; its diagnostic now asserts an installed finite grant while keeping the original 500 ms cutoff, and targeted/full Race checks passed.",
-        "remaining": "Original LAN natural renewals and target WAN/LAN/load acceptance; then k8s/pve differences and remaining Cloud SAM/provider implementation and acceptance. Full goal remains active.",
-        "pve_main126": {
-          "release_id": "main-management-sam-126",
-          "bootstrap_image_release": "ops-management-integrated-native125",
-          "artifact_match": "All three deployed product artifact SHA256 digests match the current root normal-build outputs. Source contains 204c994, 4fcdb89 and SAM immutable ownership-path preparation.",
-          "result": "All 57 settings: PD worker PID/generation/config digest, prefix and original preferred/valid deadlines remained identical across DNS-only edit and selected-snapshot restore. Original configuration restored; acquired DNS, both-IP TCP/UDP, BGP, special client and Tailscale passed in 4.305407498963177 seconds. Whole-product reboot recovered DNS, both-IP paths, BGP/IX/NTP/Tailscale and identities. Exit 0 at 2026-10-31T09:03:22Z; dedicated VM removed.",
-          "limit": "Uses normal125 kernel/initramfs plus normal126 product overlay, not a newly rebuilt complete126 image. Natural renewal, physical access peers and load qualification remain separate."
-        },
-        "source_commit": "25e7cf931644e77822c320cba275e07ab10902e5",
-        "published_source_match": "All 29 frozen changed product-source files and the embedded HTML match published25e7cf9; all three tested126 artifact hashes were directly checked against the root normal-build outputs before cleanup.",
-        "cleanup": "Removed823.2MiB of completed local task binaries, archives, notices, logs and unused fixture output plus dedicated Docker image tags. Original AGENTS.md changes and concurrent worktrees/live cohorts were preserved.",
-        "pve_two_node126": {
-          "source_commit": "25e7cf931644e77822c320cba275e07ab10902e5",
-          "release_id": "main-management-sam-126",
-          "finished_at": "2026-10-31T09:37:46.418909Z",
-          "environment": "New normal Make/APK126 image, two isolated Alpine KVM appliances,4CPU/4GiB each, BIOS VirtIO/SCSI disks and three VirtIO NICs; independent ISC,FRR,Headscale/official Tailscale, DNS/DoH,NTP and automatic clients. Actual qm stop removes all guest/kernel state.",
-          "result": "Exit0. Both power cuts/rejoins retained the same TCP socket/SYN/NAT mapping and original PD identity and client leases. Fresh DHCP/SLAAC clients used learned DNS UDP/TCP and both-IP TCP/UDP with the former owner absent and after rejoin. DNS/conditional forwarding/DoH, BGP/IX, NTP, Tailscale LAN and each explicitly selected exit passed.",
-          "full_handoff_seconds": [
-            25.881030559539795,
-            16.00969672203064
-          ],
-          "maximum_tcp_reply_seconds": 7.195570915006101,
-          "udp": {
-            "sent": 1675,
-            "received": 1449,
-            "expired": 226,
-            "pending": 0,
-            "maximum_no_reply_seconds": 5.723742445930839
-          },
-          "dns": {
-            "queries": 951,
-            "failed": 20
-          },
-          "tailscale_same_exit_recovery_seconds": [
-            2.7342708567157388,
-            2.0895474636927247
-          ],
-          "deadlines": "Original60s full handoff/selected-exit recovery and15s same-socket TCP budgets retained.",
-          "image_binary_sha256": {
-            "routerd": "2df5f39b6bc3942ab2df401ca2736a4eeed36b30b3f897e16cdc2a758d37c8fb",
-            "routerd-modules": "1f90fe173ad371fa495d48f28cea6b0e7a81a29220aa06b9394b7b367b02acd0",
-            "routerd-logging": "845a00d766205fa31c747f56e2601fbbe076dc6f019f3bcd1982105a23584cb7"
-          },
-          "limits": "This run uses newly built APK image binaries, distinct from the earlier Make build overlay hashes. Not zero loss, natural original renewal, target WAN/LAN/load or Cloud SAM qualification. IX physical SNAT existing flow is outside the declared old sync intent; another exit identity is not automatically selected."
-        },
-        "cleanup_after_two_node126": "Removed the finished612MiB private two-node stage (logs, captures, disposable keys/state and sparse disks). Removed two clean linked worktrees with git worktree remove after confirming both heads are integrated into main and no process referenced their files. Their ignored output totaled about1012MiB. Preserved a third tree referenced by live processes, natural cohorts,126 image/runner needed for next acceptance and original AGENTS.md changes. Filesystem available about38GiB."
-      },
-      "target_replacement_decision": {
-        "decision": "not accepted",
-        "basis": "Target acceptance remains open: clean installation from a preconverted native configuration, target WAN/LAN, HA, existing-flow, NIC and ONU qualification. Importing routerd 1.0 runtime state is not required.",
-        "scope": "No legacy service stop, production cutover or production deployment was performed."
-      },
-      "load_transport_control": {
-        "product_used": false,
-        "vm_used": false,
-        "tcp_streams": 1,
-        "seconds_per_direction": 15,
-        "receiver_mbps": [
-          102.2590302773689,
-          131.06711556549325
-        ],
-        "result": "The same single-SSH Ethernet transport alone reached102.259/131.067Mbps. Earlier candidate130-149Mbps measurements cannot establish a product-specific ceiling. Exact transport/QEMU/scheduling bottleneck remains unisolated. Use a data path that does not carry benchmark packets through SSH for target-load qualification."
-      },
-      "pve_direct_product_load126": {
-        "source_commit": "25e7cf931644e77822c320cba275e07ab10902e5",
-        "release_id": "main-management-sam-126",
-        "finished_at": "2026-11-01T01:29:51Z",
-        "environment": "Fresh normal APK image on one isolated PVE 4CPU/4GiB BIOS VirtIO appliance and two independent PVE network-namespace peers. The product WAN/LAN NICs and both benchmark peers shared private PVE bridges. SSH carried management and result collection only; packet capture on the two separate SSH-forward-capable links observed zero TCP/5201 packets.",
-        "configuration": "Minimal current ResourceProgram with static WAN/LAN IPv4/IPv6, kernel forwarding, IPv4 masquerade and explicit forward pairs. This establishes the direct data-plane measurement only; it is not the full homert WAN/DS-Lite/DHCP/DNS profile.",
-        "tcp_streams": 1,
-        "seconds_per_direction": 15,
-        "measurements": [
-          {
-            "name": "ipv4-nat-send",
-            "receiver_mbps": 1274.7340040490274,
-            "sender_mbps": 1276.093852164814,
-            "retransmits": 28,
-            "server_source": "192.168.1.249"
-          },
-          {
-            "name": "ipv4-nat-receive",
-            "receiver_mbps": 1279.953749623169,
-            "sender_mbps": 1281.8022976172772,
-            "retransmits": 130,
-            "server_source": "192.168.1.249"
-          },
-          {
-            "name": "ipv6-send",
-            "receiver_mbps": 1228.3799388674283,
-            "sender_mbps": 1230.3267351879708,
-            "retransmits": 65,
-            "server_source": "2001:db8:80::100"
-          },
-          {
-            "name": "ipv6-receive",
-            "receiver_mbps": 1243.2482181027206,
-            "sender_mbps": 1245.2665340306025,
-            "retransmits": 97,
-            "server_source": "2001:db8:80::100"
-          }
-        ],
-        "result": "All four real PVE product forwarding directions passed. IPv4 receiver rate was1274.734/1279.954Mbps with the configured NAT source observed; IPv6 was1228.380/1243.248Mbps with the original LAN source observed. This removes the SSH transport as the explanation for the earlier130-149Mbps candidate measurements.",
-        "limits": "Not a DS-Lite, PPPoE, DHCP/SLAAC/DNS, HA, natural-renewal, physical WAN/NIC, or target-production-load qualification. The owned VM and remote stage, including raw captures, temporary disk and test packages, were removed after retaining this concise result."
-      },
-      "tailscale_reconnect_b971ea6": {
-        "source_commit": "b971ea6",
-        "environment": "Current isolated product daemon with independent Headscale and official Tailscale peer; no production node or target state was used.",
-        "result": "Worker SIGKILL, whole PID1 restart, independent peer down/up, and Tailnet service removal/reapply retained the same peer exit selection and restored LAN/exit IPv4/IPv6 TCP/UDP. Removal-to-reapply exit recovery was 6.344 seconds.",
-        "limit": "This is a separate recovery case. It did not reproduce the native120 six-hour idle first-connect timeout and does not accept long-term Tailscale continuity."
+      "tested_source_head": "8ea44d776dc310fcd809467ec01def160a0424b8",
+      "native_examples": {
+        "examples/single-router-dslite-dhcp-dns.yaml": 15,
+        "examples/homert02-native.yaml": 14,
+        "examples/homert03-native.yaml": 14,
+        "full_homert_profile": "not present; the examples do not represent the complete current 110-resource intent"
       }
     }
   },
   "execution_order": [
     {
       "stage": 1,
-      "profile": "homert02/03",
-      "next": "The current-main actual-HGW natural PD T1 run is still observing Renew/Reply and DUID/IAID/prefix persistence. Current-main isolated-PVE PID1 signed update, explicit rollback, and Health-driven failed-trial recovery passed. Close the HGW run, then build and exercise a complete native homert profile from the read-only 109-resource source; existing 57-resource examples are not full-profile acceptance. Use independent WAN peers and Linux clients with normal Alpine/PID1, then exercise the same native profile across two-node HA. The current host has no direct ONU NIC. Finish the remaining deployment and cloud work packages after homert gates; all34 remain open.",
-      "required_focus": [
-        "WAN/LAN IPv4/IPv6, DS-Lite, actual route selection/backup WAN, DHCP/PD/RA, learned DNS resolution/distribution, firewall/NAT/MTU/MSS, BGP and management",
-        "HA-01 current election/track dependencies, HA-02 DHCP/PD synchronization, HA-03 NAT/connection synchronization and EXT-02 Tailscale used by this deployment"
-      ],
-      "acceptance": "Normal renewal, WAN loss/recovery, restart and two-node takeover/failback with independent peers/clients; carry required addresses/delegations/leases/connection state and report existing TCP/UDP continuity separately from new connections. Establish deployment/load/management/update/recovery/rollback conditions without leftover configuration or manual repair. No production cutover is authorized by this ordering."
+      "profile": "homert-single-implementation",
+      "next": "The short 15-resource native real-HGW gate passed. Re-read docs/test-plan.md before each new real communication test, then implement the complete homert02/03 single-router intent (110 resources each) by mapping real routerd behavior, callers, and operating fixes. Keep actual config values/secrets out of the repository and do not create a converter.",
+      "acceptance": "Cold-start the complete single-router profile with an independent WAN peer and Linux client. Verify WAN/LAN DHCPv4 scopes and reservations, DHCPv6-PD/Information identity and natural renew, RA/DAD/SLAAC, local/conditional/DoH DNS, all DS-Lite paths and IPv6, Health/PBR, NAT/MTU/MSS, BGP/NTP/Tailscale/management where configured, and worker/daemon restart and recovery from actual packets, client results, kernel routes and firewall state. Keep ONU/physical-NIC qualification separate."
     },
     {
       "stage": 2,
-      "profile": "k8s-rt/pve-rt",
-      "next": "After homert replacement criteria, inspect actual current configuration, peers, routes, redundancy and deployment; implement only the observed differences. Choose order from real dependencies; infer neither a CNI nor a virtualization topology from the names."
+      "profile": "homert-single-acceptance",
+      "next": "Use the current real HGW and independent Linux clients to accept the complete native single-router profile from cold start through DNS/Internet, natural lease/PD renewal, failures and restarts. Do not run PVE/QEMU or additional PBR investigations in this task.",
+      "required_focus": [
+        "DHCPv4 scopes/reservationsとsticky lease",
+        "DHCPv6-PD/Information・stable DUID/IAID・RA/DAD/SLAAC",
+        "DNS local/conditional/DoH とIPv4/IPv6 UDP/TCP",
+        "DS-Lite 4 paths・NAT・Health/PBR・MTU/MSS・packet capture",
+        "BGP・NTP・Tailscale・管理・restart/update/recovery"
+      ],
+      "acceptance": "cold startから独立clientのname resolutionとIPv4/IPv6 internetまで通し、自然lease/PD update、障害・worker・router restart後の通信/kernel stateの収束も観測する。物理NIC/ONU資格は別判定。"
     },
     {
       "stage": 3,
-      "profile": "Cloud SAM",
-      "next": "Follow existing cloudedge-sam and operations/rearchitecture/redundancy/minimal-topology documents from routerd-labs a0b1b3b, compare against the older implementation baseline, and advance CLOUD-01 through CLOUD-04 along the real communication path.",
-      "required_focus": [
-        "Authenticated participation/revocation and configuration distribution",
-        "RR and node WireGuard/FOU/BGP communication",
-        "Typed /32 ownership decisions, local forwarding and ordered planned handoff",
-        "Cloud observation/actions and bidirectional NAT-free source/destination-preserving communication and recovery across on-premises/AWS/Azure/OCI"
+      "profile": "homert-ha",
+      "next": "単体profileが通ってから、二台のhomert02/03へ広げる。VRRP readiness/VIP、lease/PD/identity同期、conntrack/NAT、独立clientの既存TCP/UDPと新規通信、両方向の停止・復帰を実機kernelとcaptureで確認する。",
+      "required_work_packages": [
+        "HA-01",
+        "HA-02",
+        "HA-03",
+        "NET-01",
+        "NET-02",
+        "NET-03",
+        "NET-06"
       ],
-      "acceptance": "Keep route, owner and actual cloud capture consistent. Normalize once, decide ownership once, apply typed decisions without reinterpreting status or synthetic legacy resources. Verify equal-priority non-preemption, intended priority recovery, planned transfer, revocation and partition/recovery. Report new communication recovery separately from existing TCP continuity. Existing authorization governs paid resources and production changes."
+      "acceptance": "existing-flow continuity、new-flow recovery、UDP loss、DNS reachability、convergence timeを別々に記録し、無損失とは推定しない。production cutover is not implied."
+    },
+    {
+      "stage": 4,
+      "profile": "remaining-work-packages",
+      "next": "implementation-plan.jsonの依存関係に従い、CORE/SYS/NET/OPS/EXTのhomert必須分、次にBGP/BFD/WireGuard・management・recoveryを実peerで閉じる。実作業は独立して進め、単一の未完了HGW観測で無関係な実装を停止しない。",
+      "required_work_packages": [
+        "CORE-01",
+        "CORE-02",
+        "CORE-03",
+        "CORE-04",
+        "CORE-05",
+        "CORE-06",
+        "SYS-01",
+        "SYS-02",
+        "SYS-03",
+        "NET-01",
+        "NET-02",
+        "NET-03",
+        "NET-04",
+        "NET-05",
+        "NET-06",
+        "NET-07",
+        "NET-08",
+        "OPS-01",
+        "OPS-02",
+        "OPS-03",
+        "EXT-01",
+        "EXT-02",
+        "DIST-01"
+      ],
+      "acceptance": "各work packageのcurrent_limitが要求している実機能とpeer gateを満たすまでstatusをcompleteにしない。"
+    },
+    {
+      "stage": 5,
+      "profile": "platform-qualification",
+      "next": "Keep target NIC/direct-ONU, arm64, cloud/provider and Kubernetes qualification open until each actual environment is available and its gate passes. Current work uses the real HGW and isolated Linux; do not execute PVE/QEMU in this task.",
+      "required_work_packages": [
+        "CLOUD-01",
+        "CLOUD-02",
+        "CLOUD-03",
+        "CLOUD-04",
+        "DIST-02",
+        "DIST-03",
+        "DIST-04",
+        "QUAL-01"
+      ],
+      "acceptance": "各deployment profile固有のboot、traffic、restart、upgrade、rollback、cleanupを実環境で確認する。"
     }
   ]
 }

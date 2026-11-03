@@ -1,459 +1,95 @@
-# routerd2 実通信・製品受入試験計画
-
-更新: 2026-11-02。対象は [実装計画](implementation-plan.md) と同 JSON の全34 work package。
-目的は、端末を接続しただけで必要な通信ができ、障害から復旧し、運用・更新できる最初の製品を完成させること。
-旧 routerd と homert02/03 の実設定・実装を先に読み、必要な機能と実際の制約を特定する。
-旧 routerd2 の試作 API・形式・過去のテストに互換性を設けない。
+# routerd2 実通信・製品受入計画
 
-## 進め方
+更新: 2026-11-03 00:21 UTC。対象は implementation-plan.md と同JSONの34 work package。
+目的は、独立端末を接続しただけで家庭用ルーターの通信が成立し、障害・再起動・更新から復旧する最初の製品を完成させること。
 
-1. homert02/03 の実設定から、それぞれの WAN、LAN、DNS、DHCP、RA、NAT、経路と管理の構成を確定する。
-   まず一台で、初期設定後の独立端末の接続からインターネットまでを通す。DHCP と DNS を別々に動かしただけでは合格にしない。
-2. 同じ単体構成で、通常の更新、停止、再起動、障害と復旧を実施する。短時間の疎通と、自然更新を含む長時間の継続を別々に記録する。
-3. その単体構成を二台にした上で、実際の利用者の既存接続と新規接続を分け、切替・分断・復旧を検証する。
-4. homert と独立して進められる routing、管理、更新、他 engine の実装と試験を並行して進める。単一の不具合に全体を止めない。
-5. 対象機器と cloud/Kubernetes の実環境をそれぞれ受け入れる。VM の合格を実機や別 provider の合格に置き換えない。
+## 判定原則
 
-DHCP clientの経路確認では、固定予約を試すケースを除き、実際のACKで取得したアドレスを使う。試験fixtureの都合で割当値を固定しない。
+- 旧 routerd の対応実装・運用上の修正と homert02/03 の実設定を、機能に着手する前に読む。実設定の値や秘密は公開しない。
+- 実際の routerd2 process、Linux kernel、独立 client/peer を使う。受信アドレス、prefix、経路、DNS、識別子は実観測値を使う。固定予約を確認する場合だけ設定した予約値と照合する。
+- DHCPv4/DHCPv6、RA、DNS、NAT、IPv4/IPv6 forwarding を個別に動かしただけでは合格にしない。設定適用から端末の名前解決・インターネット通信までを通す。
+- packet capture、kernel FIB/firewall、端末の実通信、worker状態を必要な範囲で照合する。テストコード同士の一致、coverage、CI成功は相互接続の証拠にしない。
+- namespace/PVEはそのLinux kernelと構成の証拠であり、ONU、対象NIC、対象機器、別cloudのqualificationではない。実機固有の動作は実機で確認する。
+- 失敗時は製品・設定・試験peer・環境の原因を特定して直し、影響した実通信を再確認する。deadline超過だけで製品障害と断定しない。未確認は未確認と記録する。
+- 試験開始直前にこの計画全体を読み直す。該当条件、既知の失敗、peer、実行版、観測点、隔離・復旧手順を確認し、計画が現状とずれていたら先に直す。
+- 試験完了後は条件・結果・限界・再実行手順だけを残し、不要になったraw log、pcap、VM、stage、build outputを削除する。秘密や実設定をcommitしない。
 
-初回導入は新しい状態ディスクへ、schema 2 の native ResourceProgram を作成して `routerd config validate` を通し、実際の端末・回線へ適用して行う。homert02/03 の設定は提供機能と依存関係の確認に使い、旧 routerd 設定ファイルの自動変換は行わない。routerd 1.0 の実行状態（Tailscale identity、SSH host key、DHCP lease/sticky 履歴など）の移送や旧デーモンからのアップグレードは受入条件に含めない。routerd2 の初回リリース後に行う通常の更新・復旧試験は別に実施する。
+## 現在の棚卸し
 
-各試験は実装済み・実行済み・不合格・未実施を区別する。失敗時は、どの版・peer・設定で何が起きたかを特定し、
-製品、試験、環境のどこに原因があるか判明するまで不明として扱う。原因を修正して影響する試験を再実行する。
-時間を測らず同じ切替を反復しない。必要な独立作業は続ける。生 packet capture や一時実行環境は診断後に削除し、
-版・条件・結果・残る限界だけを簡潔に残す。テスト件数、coverage、過去の成功は製品完成の根拠ではない。
+2026-11-03時点で、work packageは in_progress 22件、planned 12件で、製品全体を完了と判定した項目はない。過去の部分合格を全体完成に読み替えない。
 
-## 実通信を判定する基準
+- 最新の基準mainは 8ea44d7。ここでの差分は計画、Makefile、試験用ResourceProgram例、実HGW runnerであり、routerd2のGo製品コードは変更していない。
+- 現在の作業ツリー（基準HEAD `8ea44d7`、製品Goコードは`c9d7055`から不変）で `make check` はGo/Python checks、Race Detector、vetを含め終了0。`make build DOCKER='sudo -n docker'`も終了0、`readelf`で3実行物にdynamic dependencyがないことを確認し、nDPI source/license noticesも存在する。
+- 実supervisor/control/network/Health worker、独立二WAN/Linux peer、TCP/UDP、packet captureによる make check-health-pbr は障害切替・復旧、worker/supervisor再起動、古い通知・期限切れ、confirmed rollbackを通過済み。実対象回線や二台homertの受入ではない。
+- 通常Alpine/PID 1 applianceの隔離PVE試験では、独立PPPoE AC/ISC DHCPv6/Linux clientを使うDHCPv4、PD/Renew、SLAAC、両IP通信、署名更新、明示・自動rollbackを通過済み。対象ONU/NICではない。
+- 実HGWのmacvlanと独立Linux clientで、過去の短時間試験および7,800秒試験がある。今回のmain由来product build `7c1cb3619acb` による自然PD T1観測は、試験用の生成profileで完了した。自然Renew/ReplyをWAN captureで各1回確認し、Renewはclient UDP/546→server/547、対応ReplyはHGW source port 49153→client/546だった。期限が更新され、初回SolicitとRenewのDUID、IAID=1、委譲prefixは同一。旧routerdの受信実装もsender address/portで制限していない。実LinuxではWAN/LANとも`accept_dad=1`、観測したglobal IPv6 addressはnon-tentative、DAD failureなし。PD worker SIGKILL後1.32秒、graceful restart後3.61秒、全daemon restart後3.99秒で両clientの通信が復旧した。upstream grantをReleaseせずzero-lifetime RAとkernel withdrawalを確認。独立する両clientの自然DHCPv4更新と、IPv4/IPv6 HTTPSおよび学習DNSのUDP/TCPを676観測roundで確認した。raw capture/state/stageは削除済み。生成profileの試験であり、native homert設定・連続TCP・ONU直結・対象物理NICのqualificationではない。
+- 2026-11-03に読み直したhomert02/03設定は各110 resourcesで、kind件数は一致する。両方にIPv6 host-traffic policy route（table 120）がある。`homert02-native.yaml` / `homert03-native.yaml` は各14 resources。main上の `single-router-dslite-dhcp-dns.yaml` は13 resources、working native HGW profileは15 resourcesで、いずれも全設定ではない。過去の一時57-resource入力を現行profileや完成証拠に流用しない。第6回native gateは終了0。DHCPv4/PD/RA/DHCPv6/SLAAC、DNS/DoH、DS-Lite IPv4/IPv6通信、WAN遮断復旧、PD workerとdaemon再起動を独立端末で確認した。15-resource profileの合格を110-resource homert受入に読み替えない。
+- ens18/ens20はvirtio NICで、NTT ONU直結と対象物理NICのqualificationは未実施。HGW経由の結果はONU直結の証拠ではない。homert実機、arm64実行、PVE/Kubernetes/Cloud全体も未受入。
 
-実通信試験の開始直前にこの計画書全体を読み直し、該当する受入項目・既知の失敗や未解決点・peer・実行版・環境・観測条件を確認する。
-計画が現在のコードや実機制約とずれていれば、試験を始める前に計画を直す。実機依存の動作は実機で受け入れ、実機が使えない間もその制約を記録して独立して進められる実装を続ける。
-
-合否は独立 client/peer から見た通信と、必要な packet・kernel 状態で決める。DHCPv4 の端末アドレスは取得した
-lease値を使う。fixture が明示設定した gateway、DNS、固定予約などは、その設定どおりかを確認する。
-IPv6 は文字列表記でなく値として比較する。短時間疎通は観測した範囲の証拠であり、自然更新を含む確認では実際の
-lease/renewal/expiry 時刻を使う。条件待ちの deadline はハーネスを停止可能にする上限であり、固定時間だけ待つ
-手順ではない。期限までに条件を観測できなければ、その事実と peer/設定/ログの範囲を記録し、未知の所要時間を
-製品不具合と断定しない。期限は試す動作と相手側の時間条件に合わせる。
-
-名前空間や仮想機械で製品プロセスと Linux kernel を通した証拠は、その構成で観測した動作の根拠になるが、
-対象 NIC・ONU・HGW 固有の資格にはならない。物理機器固有の挙動が対象のときだけ実機試験をその機能の合格条件にする。
-隔離、管理経路、復旧方法、試験資源の所有権は安全条件として守る。SSH 経路の分離は性能測定に限る。
-過去の PVE/QEMU 結果は補助証拠であり、今回の実行要件でも実機合格の代替でもない。
-
-失敗時は、その時点の端末・packet・worker・kernel の状態を必要な範囲で採り、原因に応じて製品・試験・環境を直す。
-新しい観測も修正もない反復は避ける。実行版、peer、設定、結果、未検証の範囲だけを簡潔に記録し、
-診断に不要になった raw log・capture・一時環境は削除する。関連変更は実通信と必要な補助検査を行い、
-Race Detector・vet・build・秘密情報検査後にまとまりごとに commit/push する。
-
-既存のゴールは全34 work package と対象環境の受入を含む最初の製品完成である。ゴール開始は2026-10-24 11:28:25 UTC。
-一部機能の成功だけで完了にせず、未実装・未検証の機能を並行して進める。
-
-直近は実HGWと独立端末での単体ルーターの利用経路を基準に、homertで必要な未完成機能を優先して組み込む。
-実通信の失敗や実装に必要な不明点だけを切り分け、細かな試験項目や試験コードを増やすことを進捗としない。
-自然更新を含む長時間試験の進行中も、単体の残機能、二WAN・HA、更新・対象実機、cloud等を進める。
-20秒や90秒の合格を長時間・対象実機の合格に置き換えない。直近の単体試験の所要時間は起動・復旧処理を除き
-20秒/90秒、以前の実HGW自然更新試験は7800秒だった。未実装機能・対象機器・cloudの受入工数と環境が確定して
-いないため、全体の完成日時はまだ見積もれない。各機能の実装と実環境での所要時間を測り、見積り可能な単位で更新する。
-
-## 経過の振り返りと、停滞を繰り返さないための対策
-
-時刻はUTC。以下はcommitと引き継ぎに残った事実であり、commit数を成果や作業時間の正確な内訳とはみなさない。
-
-- **10月24日11:28開始〜25日**: 状態期限、条件評価、event journal、BFD/VRRP、更新基盤などを細かい単位で
-  実装・検査した。独立peerや実packetを使った試験も一部あるが、homert一台に端末を接続し、DHCP/DNSから
-  IPv4/IPv6インターネットまでを一構成で受け入れることは優先されなかった。開始〜25日末の348件のcommitのうち、
-  191件の件名はtest/reproduce/exercise/require/cover/specify/record/document/assertで始まる。
-  件名だけでは実際の中身や所要時間を判定できないが、細分化した検査・記録への偏りを確認できる。
-- **10月26日**: DHCPv6・DS-Lite等の実装を進め、14:24の `3fe9318` では実上流で判明したDHCPv6と
-  通常のlink-local DAD起動の相互接続問題を修正した。旧 routerd の知見と実peerを早く突き合わせていれば
-  発見を早められた。実通信は進んだが、単体の全LAN機能を組み合わせた受入は残った。
-- **10月27日**: 実HGWでの長時間通信・自然更新の確認に加え、PPPoE、DNS、PD保存、HA同期、stateless DHCPv6、
-  Tailscale等を進めた。個別機能とpeerの成功を積み上げた一方、端末接続からの単体全体の確認を完了しなかった。
-- **10月28日**: HAのPD・VMAC・ARP・NAT・連続障害へ長く集中した。実packetから問題を発見・修正したが、
-  15秒の既存TCP失敗は残った。15:11の `f260875` で初めて、今回の実HGW単体試験にLAN DHCPv4/DHCPv6、
-  DNS、DoH、条件付き転送とIPv4/IPv6を同時に組み込んだ。短期成功はしたが、委譲IPv6のDNS、自動OS resolver、
-  長時間と対象機器の受入は残る。commit履歴だけでは各作業に費やした正確な時間は分からない。
-
-**私の判断の問題**: 試験や内部契約を細かく増やすことと、実際の端末が必要な機能を使えることを取り違え、
-最初に完成すべき単体ルーターを縦に通さなかった。旧 routerd のコード・実設定の参照も各機能の着手時に徹底せず、
-実環境の制限を確認した後の代替実環境への移行と、失敗時の原因観測が遅れた。ユーザーが `AGENTS.md` で示した
-実相手優先の意図に従った進め方になっていなかった。さらに、HAの一つの失敗に長く集中し、単体の基本機能や
-全体の残作業を同時に見なかった。最近の固定DHCP値、IPv6文字列表記、DNS設定順などは私自身が試験へ持ち込んだ
-初歩的な誤りであり、製品の難しさのせいではない。
-
-**具体的な改善**: 端末の利用経路から着手し、旧実装・現実のpeer・実設定に照らして必要な修正を行う。
-調査の回数や時間に人工的な上限を置かず、観測から次の有効な手を選ぶ。自然更新など時間経過が機能要件に
-含まれる試験はその実時刻まで継続し、独立した実装・検証を並行する。成果は試験数・commit数でなく、
-端末が必要な動作をし、実障害から復旧することと、未検証範囲で判断する。
-
-## 現在の状況
-
-2026-11-02に 提供された homert02/03 設定を読み直した。両方109 resourcesで、WANのDHCPv6-PD `/60` とDHCPv6 Information、委譲LANのRA（M=0/O=1）・stateless DHCPv6、動的DHCPv4 poolとOUI/MAC scope、条件付きDNSとNextDNS/Cloudflare DoH、MTU 1454の4本のDS-Lite、Health付きIPv4出口選択、VRRP/貸出・接続状態同期を使う。二台差分は主に物理interface、node address、VRRP priority/peerである。現在の `scripts/uplink-smoke.py` は実HGWへ接続するが、単一DS-Liteと試験用LAN値を生成する別profileであり、この109-resource構成の受入ではない。次は互換converterを復活させず、この実設定の通信経路をnative ResourceProgramで表現して端末から通す。
-
-DHCPv6 clientの現行受信経路はUDP送信元を読まず、transaction/Client ID等で応答を処理する。比較した旧routerd `cmd/routerd-dhcpv6-client` も `ReadFromUDP` の送信元を捨てており、送信元ポート547固定の条件はない。実HGW runnerのclient addressもACKから読み、固定値とは比較しない。fixture自身が設定したgateway/DNSとの一致だけを確認する。なお、commit `5a652cc` でrunnerの3時間上限を除去し、観測時間を自然更新に合わせて指定できるようにした。長時間の再実行はまだ行っていない。
-
-- `native-single-lan-peer`（2026-11-02、worktree base `5033cbc`）: `make check`、static-linked 3-binary `make build`、`make check-dhcp-dns` の7項目が終了0。さらに `TestDaemonConditionalLAN` で実supervisor/control/network/VRRP/RA/DHCPv6/DNS worker、独立 ISC DHCPv6 4.4.3、Keepalived 2.2.8、Linux client を使い、DHCPv6-PD、SLAAC、DNS UDP/TCP、実上流のDNS往復、VRRP切替・復帰、PD期限切れと再取得を確認した。実peerの既定checksumと試験側DNS宛先を設定から合わせた。namespace内の実通信であり、homert設定全体・物理ONU/NICの受入ではない。raw capture/logはrunnerが終了時に削除した。
-
-- `health-ready-native105`: `make check-health-pbr` は独立二 WAN namespace peer と実 supervisor/control/network/Health worker で、Health→PBR の障害切替・復旧、worker/supervisor 再起動、古い通知・期限切れ、confirmed rollback、TCP/UDP と packet capture を確認した。対象回線・対象機器は未受入。
-
-- `pve-worker-recovery-main-10c2dd0`（2026-11-03 JST）: `make qemu-pppoe` がmain `10c2dd0f7f0e` から作ったapplianceを隔離PVE（4 CPU/4 GiB、PID 1）で実起動し、独立PPPoE AC・ISC DHCPv6 server・Linux LAN clientと接続した。起動10.64秒、DHCPv4実割当と標準resolver hook、PD/Renew、SLAAC、IPv4/IPv6 TCP/UDP、PPP worker再起動後5.83秒で復旧、control再起動後のDNS/両family通信と20秒安定、ISC再起動後のDUID/設定/DNS worker維持とPD復旧、正常停止時のRA withdrawal/PADT（Releaseなし）を確認し終了0。前回のworker再起動時のshutdown順序誤判定を修正したrunnerの再現可能なMakefile経路も確認した。VMとraw log/capture/stageは要約後に削除した。109-resource homert設定、自然lease期限、実ONU/HGW/NICは対象外。
-
-- `connection-marked-egress`（2026-11-02）: flow-map keyをnative byte orderで生成していた一方、nftables setの`KeyByteOrder`が未指定だったため、実daemonのTCP/UDPがfallback `E` へ流れる不具合を修正した。最新 `dist/bin` から `make check-health-pbr DOCKER='sudo -n docker'` を実行し、`TestDaemonConnectionMarkedEgressPolicy`、`TestDaemonHealthPBRFailoverAndRecovery`、`TestDaemonEgressRouteHealthyMultipath` の3本すべてが終了0。実supervisor/control/network/Health/VRRP worker、独立WAN Linux peer、kernel route/nftables、pcapで120→80→60の出口選択、即時障害切替、1 MiB TCP、WAN全断時の新規通信停止、既存TCP/UDP維持、60秒復旧保留、confirmed rollback、worker停止・再起動と期限切れ後のgateway/通信復旧を確認した。再開後の復旧待ちは、実際に観測したworker再起動・Health再通知と設定済み5秒graceful activationを含む15秒にした。隔離Linux namespace上の実kernel/実daemon試験であり、homert実機・ONU・NICの受入ではない。raw packet capture・ログ・試験バイナリは記録更新後に削除する。
-
-- `ntp-dhcp6-peer`（2026-11-02）: 作業ツリー `5033cbca7ee4` を基点とする変更から `make check-ntp-dhcp6 DHCP6_SERVER=/usr/sbin/dhcpd DOCKER='sudo -n docker'` を exit 0 で完了した。実 supervisor/control/network/NTP/DHCPv6/VRRP worker、ISC DHCPv6、Keepalived、chronyd 4.8、独立LAN chronydとdnsmasqを使った。homert設定にある `ntp.jst.mfeed.ad.jp` / `ntp.nict.jp` のDNS照会とNTP応答、実NTP UDP drop後の同一chronyd復旧、DHCPv6 SNTP期限切れ時の静的source fallbackと再取得、VRRP backup/master、supervisor/control停止中の期限切れと再開後の新しい同期・LAN NTP応答をpcapと実クライアントで確認した。今回の実測では1個のNTP packet drop後、11.172秒で再同期。DHCPv6 fixtureのleaseは18秒であり、通常PD lifetimeやhomertのDoH/条件付きDNS実装そのもの、実ONU/NIC、全homert設定の受入には流用しない。raw log/captureはcommit後に削除する。
-
-- `hgw-short-main-20bc21c`: 実HGWへ隔離 macvlan で接続した current main の実daemonと、独立 BusyBox/dhcpcd LAN端末二台で、DHCPv4、DHCPv6 information、SLAAC、委譲RDNSS/search domain、IPv4 DS-Lite/IPv6 HTTPS、学習DNSのUDP/TCP、条件付きforwarderの停止/復帰を確認した。WAN blackhole復帰は0.84秒、続く7,800秒観測では自然PD Renew/Reply 1回、二台の自然DHCP更新、PD worker SIGKILL/正常再起動後の端末通信1.36/3.88秒、DUID/IAID/prefix保持、zero-lifetime RA withdrawal、726周回のIPv4/IPv6 HTTPSと学習DNS UDP/TCPが終了0だった。ONU直結、対象NIC、継続TCP、Tailscale長時間条件、HA、対象構成全体は未受入である。namespace、一時stage、captureは終了時に撤去した。
-- `dhcp-dynamic-dslite-mtu-main-e0ea27e`: 実HGW・current product build・独立Linux namespace clientsで`make check-uplink UPLINK_SECONDS=60`を終了0にした。固定予約を除いたDHCPv4 clientは`.2`、自動clientは`.7`を取得し、動的値から経路を確認した。DS-Lite MTU 1454で1426-byte DF payloadが3/3応答し、router captureの同じICMP id/sequenceをLANと`dslite0`の往復で確認した。前回の1/3 Unreachableは再現しなかったが、原因は未確定。自然PD renewal、outer WANの同一ICMP sequence保存、WAN outage、全daemon restart、実ONU/NIC受入ではない。raw stage/captureは終了時に削除した。
-
-- `previous-main-44620b8-update-checkpoint`: この過去checkpointでは更新・切戻しの再受入を実施していなかった。実行時の開発hostはvirtio_netのみで、実NIC/ONUは接続されていなかった。旧`ops-management-integrated-native125`/`4fcdb89`のPVE結果は別候補のため、現mainの受入へ流用しない。
-- `current-main-signed-update-rollback`（2026-11-02、release identity `7c1cb3619acb`）: `make check-update-rollback DOCKER='sudo -n docker'` が128.701秒で終了0。ビルドした実行物を使うSSH管理・独立HTTP観測、署名済み更新stage、古いrevision/generation拒否、cancel後のwatermark維持、途中停止したpruneのSSH再起動後回復、trial/recovery状態と再stageを確認した。再起動や自動boot確認はこの試験で実行していない。初回は試験全体の90秒contextが有効な`update prepare`中にfixture SSHを停止したため失敗し、全体期限をGo test管理のcontextへ置き換えて再実行した。
-- `homert-single-dhcp-scope-config`（2026-11-02、source c9d7055）: 旧routerdのDHCPv4 rendererとOUI/MAC scope loweringを確認し、文書用値で書いた単体profileへ通常pool、OUI別pool、2件の予約、DS-Lite MTU 1454/MSS clamp/IPv4 DF処理を反映した。`routerd config validate examples/single-router-dslite-dhcp-dns.yaml` は受理。`make check-dhcp-dns DOCKER='sudo -n docker'` では実supervisor/network/DHCPv4/DNS workerと独立BusyBox clientでDHCP/DNS、scope、owner expiry、fingerprint、unmanaged LAN、DHCP logの各通信試験が通った。実clientによるscope配布は検証されたが、この実行のselectorはMAC指定であり、追加したOUI selectorとprofile全体は実peer受入前である。raw captureは試験終了時に削除された。
-- `current-main-appliance-update-pve`（2026-11-02、release identity `c9d7055d2ed3`）: `make qemu-pppoe DOCKER='sudo -n docker' QEMU_PROFILE=update QEMU_POWER_ACTION=reboot QEMU_UPDATE_BINARIES=...` が終了0。隔離PVEの4 vCPU/4 GiB VM、独立RP-PPPoE AC、ISC DHCPv6、Linux LAN client、通常Alpine imageとPID 1を使用した。動的DHCPv4/gateway/DNS、CHAP、両family TCP/UDP、PD/Renew/RA/SLAAC、再起動後のRebindと同一DUID/IAID/prefix、ext4設定・SSH identity保持、通信中の中断・署名upload、7.68秒後の再起動Ready、確認済み更新、17.9秒の明示rollback、Healthを失わせた候補の自動rollback（113.06秒）とDHCP/DNS/両family通信の復旧を確認した。更新用base/next/damagedは同一sourceからrelease identityだけ変え、damagedはHealth失敗である。初回はrunnerにpublisher実行物がなく、VMをbootする前に止まった。`qemu-pppoe`はupdate binaries指定時に`build-publisher`を依存させるよう修正し、再実行で通過した。VM 151は撤去済み。homertの全native profile、ONU直結、対象NIC/実機は含まない。再実行条件は[更新・rollback試験手順](releases.md#health-and-failure-boundaries)にある。
-
-- Tailscale長時間条件: `b971ea6`の独立Headscale/公式peer試験はworker/PID 1再起動、停止peer復帰、service撤去/再適用後の実通信を確認し、exit通信の再適用復帰は6.344秒だった。6時間無通信後の初回TCPは別の`native120`試験で2秒待ちの後にtimeoutしたが、その後の再試行通信は観測されていないため、製品障害とも復旧成功とも判定しない。current mainにTailscale実装変更はない。`uplink-smoke.py` は長時間動作を指定できるようになったが、観測ループで周期的にWAN通信とtailnet通信を行うため6時間idleの代用にはならない。同じ短時間試験は繰り返さず、実製品と独立peer間を試験前後だけ通信させる実経路が必要である。
-
-- `dhcp-ingress-native105`: 隔離 PVE（4 CPU/4 GiB）の実 appliance で、ハッシュ・release ID を照合した三実行物と20 Ready moduleを使い、cold boot/reboot 後の DNS UDP/TCP（IPv4/IPv6）、TCP/UDP、BGP、NTP、Tailscale、および通常・特殊端末それぞれの120秒 DHCPv4自然T1 unicast/同一XID ACK/option 54=`172.18.0.1` を確認した。PVE kernel 試験であり、12時間の元lease、ONU/HGW・対象機器、全34 package は引き続き未受入。
-
-- `persistent-sysctl-ba46e40`: homert両機の永続conntrack設定を実CLIで取り込み、隔離Linux名前空間の実製品で設定確定・通信適用プロセス再起動・製品全体再起動からの再適用・撤去時の元値復元が成功。空の初期設定より保存済み設定が優先されたことを確認。カーネル初期値への戻しは隔離試験内の明示操作であり、物理再起動やHA通信の受入ではない。証跡は `dist/sysctl-acceptance/`。
-
-- `local-redirect-native78`: 実製品内DNSでA/AAAA宛先集合を更新し、両IP/TCPUDPの該当・非該当、集合変更、全daemon再起動、撤去復帰が終了0。
-  製品health成功後に通信を開始した静的端末の局所試験。起動直後の集合未解決中のWAN流出を修正済みとは扱わず、起動前からの自動取得・最初のDNSを次に確認する。
-  全make check/Race/vet/両architecture build/署名六ELFは終了0。全homert通信・運用の代替とHA timeoutは未受入。
-- `blackhole-native77`: 実homertのIPv4破棄経路を単一network writerへ追加。
-  `make check-blackhole`で実daemon・独立LAN/WAN端末のTCP/UDP破棄、対象外通信、全プロセス再起動後の保持、
-  LAN受信/WAN流出0、具体経路の到達、設定撤去後復帰・管理外経路保持が終了0。関連Race/vet/両architecture build/署名六ELFも終了0。
-  全homert取込・IPv6破棄・実機資格と、未解決のHA timeoutの解消には数えない。
-- `dns-input-native76`: 状態報告待ちからDNS入力を分離し、元期限を維持する。旧候補の08:12 TCP DNS SERVFAILとの因果は未断定。
-  実Alpine/18秒PDの署名更新準備99.57秒・正常再起動92.94秒・確定・取得DNS/両IP通信が通過した。
-  完全な次候補の設定取り込み後にHealth先だけを止め、90秒の判定で旧版/旧設定へ自動復旧した。
-  管理・失敗記録・DUID/SSH保持・端末DNS/両IPを照合し、異常候補の起動から復旧253.49秒、全体終了0。
-  全make checkは終了0。併行中の同候補の二台切替/再参加はVRRP適用要求timeoutで失敗し、原因未特定。関連Race/vet/両architecture build/署名六ELFは終了0。
-  `sourceCIDRs`正規化は実daemonでTCP/UDPの許可・拒否とcaptureが通過。全homert取込は91件で拒否し、全体成立ではない。
-  07:07:11開始の別診断版HGW観測は130分/724巡で終了0。09:07:18の自然Renew/Reply一組と全daemon再起動後10.23秒の両端末復帰を確認。全設定/対象機器・全34項目は未受入。
-- `pd-authority-native74` はPD元期限と監視照会の1秒期限を分離した。実APKでcontrol交換後に端末のIPv6既定経路が戻り、
-  18秒のISCリース一周期を越える20秒以上の両IP TCP/UDP/DNSと、RA再撤回なしが終了0。段階全体66.37秒は継続観測を含む。
-  実HGW長期は02:18 JST頃のLAN IPv6 UDP DNS timeoutで終了1。自然更新前に停止し、LAN返信経路の修正後に再開する。
-- `admission-native73` は、旧homertの公開準備を実network ACK・元期限内PD・現在のRA送信世代へ接続した。
-  ISC/Keepalived/dhcpcdの条件付きLAN、実VIPをgatewayに使う独立5 WAN、署名PID 1二台の双方向PD/DHCPと
-  同じTCP/UDPの引継ぎ・元期限・自然失効・保持・障害復旧が終了0。自己DNS失効時は空Replyを要求せず、
-  実BusyBoxの取得timeoutと旧DNS停止・別prefixでの復帰を確認した。全homert取込は119 issueで拒否される。
-  同じ最終版の実HGW+準備条件/VIPは90秒/9巡とPD交換・全体再起動後の両端末通信も終了0。当時の候補では単一出口の確認に留まり、全34項目・全設定・対象実機・自然PD更新は未受入だった。後続のcurrent main独立basic-router 7,800秒観測の自然PD更新完走とは別記録である。
-- `bgp-frr-e2364af` は隔離Linux上の独立FRRと、homertのLANプレフィックス広告に相当するIPv4 BGP交換を実施した。
-  FRRの経路をLinux FIBに反映し、LAN端末のTCP/UDP転送、daemon停止時の広告撤回、再起動後の広告と通信復旧を
-  確認し、BGP・端末通信のpacketを採取した。FRR側はzebraを使わず、端末への戻り経路を試験用に静的設定した。
-  homert実対向、IPv6 BGP、性能と全BGP機能の受入ではない。
-- `lan-dns-dad-native55` は、隔離Linux上の独立ISC DHCPv6と端末で、委譲LANアドレスをRA・DHCPv6情報で
-  配布し、端末からUDP/TCPでDNSを利用できた。委譲期限切れで旧アドレスとDHCPv6のDNSが撤去され、
-  異なるプレフィックスの再取得後に新アドレスで配布と名前解決が復旧した。変更直後にアドレスが
-  重複検出中のまま配布され通信できなかった問題は、kernelの利用可能状態を観測してから配布するよう修正した。
-  再取得後のRAを即時判定した試験は、直前の送信から約1.75秒で、変更通知の最短3秒より前だった。
-  再試験では実際の新RA受信を待って確認した。追加IPv4端末が同じ名前空間で作った重複IPv6経路も試験側で除いた。
-  同じ隔離構成ではWAN側からアドレスへのpingが届く一方、LAN限定DNSのIPv6 UDP/TCPは届かなかった。
-  `hgwdns-e2364af` の実HGW試験では、同じ機能に加えて二つの端末の自動取得、IPv4/IPv6通信と
-  条件付きDNSが初回通過し、7800秒試験は自然PD更新を越えたが、最終通常PD交換後の端末の名前解決失敗で終了1。完走ではなく、最新版の長時間・ONU直結は未検証。
-- `nat-direction-native54` では、送信元NATの条件を `0.0.0.0/0` とした場合、修正前に独立端末へのTCP応答が
-  LANではなくDS-Lite側へ再送出されることをpacketで確認した。接続追跡の往路だけに経路固定を適用する修正後、
-  同じ構成で端末のTCP/UDP、主・予備WANの切替と、同一回線を引き継ぐ二台間の同じTCP/UDPの継続を確認し、
-  二台構成の試験が完了した。外部アドレスが変わる回線間で既存TCPが継続することは意味しない。
-- `delegated-dns-native54` の実HGW・隔離Linux端末による20秒試験では、RAが委譲LANのルーターIPv6アドレスを
-  DNSとして配布し、端末からそのアドレスへの名前解決、IPv4/IPv6 HTTPS、PD workerの再起動後の通信を確認した。
-  DNSはワイルドカードで待ち受け、試験構成のWAN入力を遮断した。この版のDHCPv6情報のDNSは固定ULAだった。
-  続く7800秒試験はHGWが新たなPD要求に
-  `NoPrefixAvail` を返し起動待ちで失敗した。短時間試験で取得したリースと別の識別子を使った影響が候補だが、
-  確定していない。直前の成功時DUIDは残っていないが、以前PD取得できた試験機のDUID-LL・IAID 1に一致する
-  有効な貸出をHGWの読取専用一覧で確認し、その識別子を再利用して最新版の長時間試験を開始した。
-  試験用DUID、MACとWANリースの現在のcheckpointを非公開ディレクトリに保存し、次回は `UPLINK_STATE_DIR` で
-  読み戻せるようにした。存在しないuplinkでの起動失敗後も保存内容が変わらないことを確認したが、
-  別の保存済み識別子では、実HGWとの別実行間でもDUID・IAIDと委譲prefixが維持された。
-- 同版の別の実HGW試験で、隔離routerのWAN通信を遮断して復旧後、両端末のIPv4/IPv6通信が復帰した。
-  daemon全体の停止・再起動後も同じPD識別子とprefixで両端末の通信が復旧した。物理リンク断や機器の再起動ではない。
-  dhcpcdは隔離されたresolverファイルに標準hookでDNSを反映した。systemd-resolvedとの統合は未検証。
-- 稼働中の実HGW構成では、独立dhcpcd端末からIPv4/IPv6それぞれ1 MiBのHTTPSダウンロードも完了した。
-  `homert-dns-reference` は、homertが使う委譲アドレスの `address` 参照を変換し、独立ISCとLinux端末で
-  RA/DHCPv6の同じDNSアドレスとUDP/TCP名前解決を確認した。旧設定の条件付きHA全体は未受入。
-- `0f27e29` / `pd-prep-native53` は、独立 ISC DHCP、Linux AFTR、二台の実 daemon、LAN端末と二WANで通常の切替・復旧を完走した。
-  同じTCPの最長応答待ちは一試行で約6.8秒、UDP損失0件。連続した切替では15秒のTCPタイムアウトを再現しており未解決。
-- 同版を実 HGW に接続した90秒の単体試験は、独立 BusyBox 端末の DHCPv4取得・自然更新、DHCPv6情報応答、
-  SLAAC、IPv4 NAT/IPv6 HTTPS、IPv4/IPv6 DNS、実Cloudflare DoH、独立dnsmasqへの条件付き転送・
-  上流障害時の分離・復旧とPD worker再起動を一構成で通した。DHCPv6クライアントは明示起動した。
-- 同版の90秒実HGW試験では独立dhcpcd端末がRAを受け、自動的にDHCPv4・DHCPv6情報・SLAACを取得した。
-  取得したDNSを端末の隔離resolverに反映し、名前を手動指定せずIPv4/IPv6 HTTPSに接続した。
-  BusyBox端末とdhcpcd端末の両方でDHCPv4自然更新を確認し、管理hostのresolver設定は不変だった。
-  使用したresolver hookは試験用であり、対象端末のOS標準resolverとの統合は未検証。
-- 初回は試験側のIPv6表記比較、固定IPv6アドレスの撤去判定、条件付きDNSの設定順、動的DHCP poolの固定値前提、
-  dhcpcdのオプション要求不足が誤って失敗した。試験を修正して再実行した。長時間安定性は未検証。
-- 以前の版で実 HGW の7800秒試験と自然 DHCPv6 Renew を確認している。最新版での長時間安定性には数えない。
-  旧版のIPv6 DNS試験は固定ULAを使用していた。
-- ONU直結、対象物理NIC・対象機器、arm64実行、homert全体、本番置換、各cloudは未受入。
-  DHCPv6のstatefulアドレス配布は現在のstateless情報提供とは別機能で、未実装・未検証。
-
-`lan-dnsmasq-history` は旧routerdを再利用したDHCPv4で、実HGW・自動取得する独立二端末の
-DNS利用とIPv4/IPv6通信、自然DHCPv4更新、PD通常/強制交換と製品全体再起動後の復旧を確認した（通信75秒）。
-同版の署名付き二台・独立端末では、同期断と解放・通常停止の重なり、元の3日保持期限、重複防止と再取得、
-同じTCP/UDPを確認した。先行版の自然貸出失効・古い所有者の試験と区別する。200ms広告、最新版の長時間、
-全体の二台実回線・物理NIC・後続環境の資格は残る。旧7800秒試験は自然PD更新後の最終復旧で終了1だった。
-
-`lan-reuse`は独立Headscale/公式Tailscaleとの署名PID 1試験も完走した。さらに実HGWの同一製品で
-自動WAN/PD・LAN配布・DNS/DS-LiteとTailscaleを同時に75秒使い、PD通常/強制交換と全体再起動後の
-通信とidentityを確認した。専用対向underlayは固定値、LAN発IPv6には明示NATを追加したため、
-現行homert設定と同一とはしない。広告IPv4 LAN着信・LAN発両family・両familyの出口が対象である。
-19:44 UTC開始の7800秒版は21:31:52 UTCのDNS SERVFAILで終了1。自然PD更新・完走を合格に数えない。
-
-直近候補`dynamic-dns-native79`は実HGWの起動前端末接続から90秒/9巡、初回両IP DNS/HTTPS、VIP/PD動的名、LAN更新と全daemon再起動を通過。動的記録のみの入力購読漏れも修正し、既存PD/kernel/dig試験で変更・失効・再取得を確認した。自然PD更新と二段DNSを含む全homert同時受入は残る。詳細・実行版差は[引き継ぎ](pve-codex-handoff.md)。
-
-## 1. 単体の基本ルーター: homert02/03
-
-**環境**: 実HGWまたはNTT ONUと隔離された実routerd2、独立した有線端末またはLinux/BusyBox端末。
-同じ試験をhomert02/03の実intentに対応する構成で実施する。管理経路と復旧手段を先に確認し、hostの管理設定を変えない。
-実ONUの直結試験には、その回線と対象NICが必要。実HGW経由の結果はONU直結として扱わない。
-
-2026-11-02時点の開発hostには仮想NICしかなく、対象ONU/HGWへつながる専用物理経路がない。対象機受入の次の接続条件は、対象router/NICと独立clientを専用switch port/VLAN経由でONU/HGWへ接続し、WAN/LAN capture点を用意すること。共有本番経路を使う場合は計画停止と復旧手順が必要。`保存設定の hosts/{homert02,homert03}/router.yaml`の作業コピーは両方109 resourceで、node固有のaddress、interface、VRRP role/priority/peer、lease同期先が異なる。共通intentとしてDHCPv4のstart/end poolと2件の予約、DHCPv6 stateless、PD /60、RA O=1/M=0、条件付きDNS/DoH、DS-Lite、60秒の優先選択を確認した。設定ファイルはremote worktreeで未commitのためcommit baselineは固定しておらず、これは実機の適用状態やWAN/LAN通信の確認ではない。
-
-2026-11-02の読み取り専用NIC確認では、開発hostに`virtio_net`のみを確認した。ここはONU/HGW試験端点ではない。`examples/single-router-dslite-dhcp-dns.yaml` は実設定で使うDHCPv4特殊pool/予約、DS-Lite MTU 1454とMSS/DF処理を文書用値で表し、`routerd config validate` で受理された。実daemonと独立クライアントによるこのnative profile全体の通信受入はまだ行っていない。
-
-`ops-management-combined-native120` は通常・特殊端末の実際の43,200秒DHCPv4 leaseで、T1のunicast REQUEST、同一XIDのACK、option 54、期限延長、REBINDなしを確認した。全jobは、その後6時間休止していたTailscale経路の最初の新規TCPが固定2秒でtimeoutして終了1だった。snapshotにRunning/online・承認経路・転送規則は残っていたが、復帰時刻の実通信を採らなかったため、DHCP自然更新だけを成功としTailscale継続は未合格とする。次のTailscale試験は起点からの通信成功時刻を測り、固定の接続待機だけで継続性を判断しない。
-
-現mainの別の隔離実daemon試験では、独立Headscale/公式peerを使い、worker/PID 1再起動、peer停止/復帰、service撤去/再適用後のLAN/exit IPv4/IPv6 TCP/UDPを確認した。撤去から再適用後のexit復帰は6.344秒だった。これは休止後の再接続を時間計測したものではないので、native120のtimeoutを解消済みとは扱わない。
-
-- 端末を初期状態で接続し、DHCPv4のDiscover/Offer/Request/ACK、アドレス、prefix、gateway、DNS、domain、leaseを受信し、
-  人手による端末側アドレス・経路・DNS設定なしにIPv4へ到達する。複数端末・予約・アドレス競合・pool枯渇も確認する。
-- WANのRA・DHCPv6 PDの取得と、LANへのprefix/RA、通常のDAD、SLAAC、default route、RDNSS、O/Mフラグを実packetと端末状態で確認する。
-  DHCPv6 Information-request/ReplyのDNS/searchとSLAACを併用する。実設定で必要なstateful DHCPv6は実装し独立端末で取得・更新・撤去を確認する。
-- 端末が配布されたDNSを使い、IPv4/IPv6、UDP/TCPで公開名とLAN内の必要な名前を引く。
-  静的record、DHCP由来の名前・PTR、条件付き転送、設定順、上流障害時の問い合わせ先分離と復帰を確認する。
-  実DoHのTLS検証・bootstrap・応答、設定に存在する他の転送方式を独立の上流で確認する。WANからの不要なDNS公開を確認する。
-- IPv4 NAT/DS-Lite、IPv6 native forwardingをそれぞれ実TCP・UDP・HTTPSで確認する。NAT前後の送信元、実WANと戻りpacket、
-  IPv6のsource/route、DNS結果とFIBを照合する。MSS、MTU、DF/PTBとfragmentを実packetで確認する。
-- 端末の自然DHCPv4更新、DHCPv6情報更新、WAN DHCPv4/PDの自然T1/T2更新、RA/DNS期限を待つ。
-  worker・control・daemonの個別再起動とrouter全体再起動を別々に行い、識別子、配布内容、端末通信と必要な永続状態を確認する。
-- 端末を切断・再接続し、更新・再取得・期限切れ後に別端末へ重複配布しないことを確認する。
-  WAN停止・復帰、PD変更、DNS上流停止・復帰、RA撤去時の新旧アドレスと通信も確認する。
-- 長時間安定性を判定する場合は、複数端末のIPv4/IPv6通信とDNSを続け、対象構成で必要な自然 lease/PD 更新を
-  実際の期限に沿って観測する。任意の更新回数や最低経過時間は固定せず、追加周期は具体的な障害条件が必要とするときに限る。
-  開始直後の90秒を長時間合格にせず、実行時間・途中停止・部分成功・実行版を明記する。
-
-## 2. 二WAN、firewall、経路と相互接続
-
-- 独立二WANと端末で、HealthのTCP/ICMP/DNS/HTTP probeの実送信先・source・interface・mark、閾値と鮮度を確認する。
-  障害、連続失敗、復帰、worker再起動、古い通知と元期限失効でPBR/FIBと実packetが一致する。
-- 対象WANへ固定された既存NAT接続、新規TCP、UDPを分け、主・予備・両断・復帰を試す。
-  元WANのNATアドレスを異なるWANへ流さない。時間を測り、繰り返した障害による実際の通信停止を記録する。
-- IPv4/IPv6のfilter入力・転送・出力、管理アクセス、DNS公開範囲、許可/拒否、foreign nft/rule/route保護を実packetで確認する。
-  MTU/MSS、fragment、PMTU、ECMP、VRF、回線別policyを必要な構成で確認する。
-- 独立PPPoE ACでPAP/CHAP、IPCP/IPv6CP、DHCPv6 PD、NAT、切断・再認証とDS-Lite/PPPoE間の切替を実通信で確認する。
-  実回線が要求する接続方式を対象回線でも検証し、仮想ACの結果を実回線の合格としない。
-
-## 3. HA: 単体の機能が動く構成を二台にする
-
-2026-10-31 12:53 JST: 基点コミット `a58f894`、実行版 `ops-dhcp-long-native108` の通常起動イメージで、
-独立した Alpine/KVM 二台（各4 CPU・4 GiB）による全設定の通信試験が終了0で完走した。
-採取済みの各109資源を最新CLIで変換し、通信分類も有効にした。試験ではNICの対応付け、明示した管理アドレス、
-共有WANアドレスとBGP次ホップ、独立通信相手の認証設定を使用した。対象実機へは配備していない。
-自動DHCP・SLAAC・取得DNSによる両IP通信、特殊端末のIX経路、PDと4系統AFTR、BGP、NTP、
-Tailscaleの三拠点経路が成立した。両方向で実VMを停止し、同じTCP接続（最初のSYN一回）とUDP変換先、
-元のリース・DUID・DNSを保持した。旧主系が不在の新規端末接続と、両機の再参加後の通信も成功した。
-切替後の全通信確認は26.356秒と15.925秒。TCPの最大応答待ちは7.166秒、独立送信UDPの最大無応答は6.855秒だった。
-UDPは1577送信・1348受信・229損失、DNSは918照会中16回失敗であり、無停止の結果ではない。
-自然更新、実回線・対象NIC、実運用の二台同時出口利用、更新・切戻しの受入はこの結果に含めない。
-旧設定が同期を要求していないIX側の既存SNAT接続も、継続成功とは扱わない。専用の二台は試験終了後に撤去した。
-
-2026-10-31: current `ops-native106` 配布物と実 fixture で、隔離 Linux namespace の二台 HA DHCP を実行した。`scripts/ha-state-peer.py --dhcp-scopes --binary-dir dist/bin` は通常・特殊端末の配布、両方向切替、同一 TCP 接続と UDP 変換先の維持を通過した。fixture は physical `ingress_interface: lan0` を明示する。`--initial-leases` は独立 dnsmasq の有限 lease と元期限の取込、片系停止中の新規取得、取得 DNS の UDP/TCP、再参加後の IPv4 TCP/UDP、両端末の更新と同期を通過した。更新は SIGUSR1 で促しており、43,200 秒 lease の自然更新、IPv6/PD/DS-Lite 全体、対象機器の受入には数えない。
-
-2026-10-30訂正: TCP応答後にだけUDPを送る旧試験の「UDP損失0」は、TCP停止中の連続UDPを測定していない。native80二段DNSの両方向切替では独立50ms送信を使い、985送信・810受信・175期限切れ、最大無応答4.543秒、同じTCP最大応答待ち4.575秒だった。新規通信と同じsocketの継続、損失と復旧時間を分けて判定する。
-
-`handoff-stop` / native-56は、同期断中のDHCP再起動が停止時の通信待ちでVRRP適用を止める経路を修正し、
-署名PID 1二台・独立ISC/AFTR・二WANで、両方向切替、元PD期限失効と回復、解放・保持・再取得まで完走した。
-同じTCPはSYN一回、UDP損失0、最長応答待ち6.82秒。最終設定撤去は待機系。1秒広告の一構成であり、
-旧15秒失敗の全条件、200ms広告、現行homert全設定・実機の受入に拡張しない。
-
-- 独立clientと独立VRRP peerまたは実二台で、選出、非preempt/preempt、track、GARP/NA、VIPとWAN/LAN VMAC、
-  アドレス/DAD、RA公開と撤去、切替後の端末経路をpacketとkernelで確認する。
-- DHCPv4の取得・更新・予約・期限切れ、DHCPv6情報、WAN DUID/IAID・PDと元期限を両方向へ引き継ぐ。
-  待機側が未選出で配布せず、競合配布・不正Release・期限延長がないことを独立端末で確認する。
-- 既存TCPの同一socket、UDP NAT mapping、新規通信を区別し、独立二WANとpacket captureで両方向の引き継ぎ・障害・復帰を確認する。
-  接続追跡同期の準備状態、mark、実egress、VIP公開、Health、経路、各packetの時刻を照合する。
-- worker/control/network/conntrackd/daemonの個別停止、同期断・復帰、古い通知、重複・逆順、snapshot転送中の切替、期限切れ、
-  長い分断と双方停止後の復旧を試す。連続障害の15秒失敗は再現・原因修正・再試験まで未解決として扱う。
-- 単体のDHCP/DNS/SLAAC/DoHとHAを組み合わせ、切替時に利用者から見える動作を確認する。新規接続だけで既存接続維持を合格にしない。
-
-## 4. routing・接続機能
-
-- BGP/BFD: 独立実装とIPv4/IPv6、single/multihop、VRF、recursive route、ECMP、BFD Down/復帰、撤回、再起動を確認。
-  経路数・更新速度・収束は目標を設定して実測し、部分RIBを完全な状態として扱わない。
-- WireGuard: 独立peerと双方向通信、endpoint再解決・roaming、key変更・取消、再起動、owned/foreign peer・routeを確認。
-- IPsec/IKE: 独立peerと認証、rekey、DPD、NAT-T、切断・再起動、変更/削除、別接続の非干渉を確認。
-- Tailscale: 独立tailnet peerとsubnet/exit-node、direct/relay、DNS、認証取消、identity再起動、route撤去を確認。
-  Tailscale SSHとrouterd管理SSHは別々に検証する。
-
-2026-10-31: 基点 `1a27177` の修正版 `ops-tailnet-defaults-native111` で、旧実装が使う
-Tailscale標準の転送・送信元変換を復元しました。設定は `NetfilterMode=2` と `NoSNAT=false` です。
-独自のNAT管理処理は追加せず、固定した公式エンジンが規則を所有します。
-両現行homertの読み取りで確認した、管理NICのDHCP既定経路（優先度100）も移行条件へ含めました。
-旧設定ファイルの外にあるOSの経路は自動取り込みの対象ではありません。
-
-隔離した4 CPU・4 GiBの二台に全設定を読み込み、管理アドレスと既定経路をDHCPで自動取得しました。
-各機を出口に指定したIPv4/IPv6のTCP/UDPが成立し、相手が受け取った送信元と各NICの実アドレスが一致しました。
-両機を順に停止・再起動し、同じ出口指定での復旧を既存の共通60秒枠内で確認しました。
-復旧確認の開始から全通信成立までは6.386秒と4.938秒で、途中の失敗3回も記録しています。
-先行試験ではIPv6の重複確認要求から約0.786秒後のTCPだけが別アドレスへ変換され、後続UDPは正常でした。
-重複確認の完了時刻は未採取であり、サービスの起動完了を全WAN通信の即時成立とは扱いません。
-
-LANの既存TCP接続とUDP変換先は両方向の切替で維持しました。TCPの最大応答待ちは7.390秒です。
-UDPの200ミリ秒応答期限超過は205/1750回、最大無応答は5.815秒、DNS失敗は20/1012回でした。
-元の長時間自然更新、対象機器の回線・負荷、別の出口識別子への自動変更は、この試験の受入範囲に含めません。
-公開手順の `scripts/tailscale-peer.py` から試験用NAT資源を除き、同版で標準モードも完走しました。
-直接接続・中継、両IPの転送、条件失効、認証取消、設定復帰、タグ付き再登録を確認しています。
-
-## 5. 設定、管理、運用と復旧
-
-2026-10-30: UDP syslog、OTLP/gRPCログ、operational event保持、DNS query保持、NFLOG packet記録を実製品と独立receiver/clientで確認した。転送先障害・復旧、並行通信、元の保持記録、worker再起動と撤去を機能ごとに確認している。DNS保持/NFLOGは統合版native84でも通過。OTLP metrics/traces、残る履歴datasetとDPIは未完成。各機能の成功を全homertや通常factory全設定起動の受入へ読み替えない。現在版・範囲と未解決は[引き継ぎ](pve-codex-handoff.md)を読む。
-
-2026-10-30 追加: homertの実設定にある旧OTLP LogSinkとDHCP由来DNSの取込を修正した。旧OTLPSink.Emitは送信せず、Telemetryだけが送信を所有する。独立Collectorで送信先変更・停止復旧・重複なしと並行UDP通信を確認した。旧DDNS表記はDNS UPDATEを有効にしない。名前付きDHCP生成元と明示した有限リース方針から、端末の名前変更、A/PTR、実DHCPRELEASEによる消失を確認した。BusyBox 1.36.1の`-q -R`で解放パケットを送信せず失敗する試験前提を修正し、ACKで取得したアドレスとマスクだけを端末へ適用した。固定の返却アドレスや追加経路に依存しない。
-
-FirewallEventLogは旧logstore.RecordBatch/ApplyRetentionを再利用して、同じ収集処理が保存と期限削除を所有する。独立端末の両IP通信、TCPフラグ、製品再起動後の保持、実送信エラー中の期限切れ行保持・新規記録、復帰後の削除前UDP転送を確認した。試験では7日保持/日次巡回を8秒/1秒へ縮めた。7日間の経過、過負荷時の無損失保存、実機受入を示すものではない。新たな外部デーモンは追加していない。
-
-- API/CLI/UIから設定、表示、削除、認可、失敗応答、secret非表示を確認。表示された状態を実worker・kernel・通信と照合する。
-- 設定を再適用し重複なく収束すること、複数operator/旧revision/重複request/遅延通知、適用途中の中断を確認する。
-  confirmed commitの期限切れ・明示確認・rollbackと、復旧中のkernel実状態を確認する。
-- logging/event/retention/export、時刻同期、clock step、disk full、worker停止、slow exporterを実環境で試し、
-  forwardingを維持しながら欠落・失効・エラーを正しく表示する。DPIは実engineの分類結果で確認する。
-- NTPは配布イメージの仮想RTCを意図的に遅らせ、DHCPv6学習→実時計補正→独立LAN client→
-  再起動後のdrift読込と再取得を通す。同期済みflagと、端末が採用できる時刻品質を区別する。
-  初期周波数推定は既定のpollと標本数で実測し、clientのmaxdistanceや採用条件を緩めない。
-  二度目の起動のNTP packet、trackingのskew/root distanceと端末採用時刻も残す。
-- 権限境界、credential失効、管理外のkernel資源の保護、watchdog、停止順序、バックアップと復元を確認する。
-
-## 6. 配布・対象機器・更新
-
-2026-10-31 13:15〜13:22 JST: コミット `1a27177` の同一保存形式・同一ソースから作った
-`ops-dhcp-pdscope-native109` と `ops-ha-update-native110` を署名し、homertの実設定を取り込んだ
-隔離Alpine/KVM二台（各4 CPU・4 GiB）で、待機機更新→再参加→装置切替→現設定を保持した旧版復帰が終了0で完走した。
-更新後の再参加は19.788秒、旧版復帰は20.350秒。署名した実行版の起動・正常確定と、設定本文・SSHの身元・Tailscaleの識別子を照合した。
-独立端末の自動取得DNS、両IPのTCP/UDP、BGP宛先、特殊端末・新規端末、TailscaleのLAN宛通信、両台のNTP採用も確認した。
-同じTCP接続とNAT対応を保持し、最大応答間隔は7.103秒。UDPは2483送信中225欠落、最大無応答5.577秒、DNSは1456回中16失敗で、無停止とはしない。
-署名準備は既存の一台更新手順を再利用した `scripts/homert-update-artifacts.py` を用い、各台の永続ディスクを分離した。
-私有の再実行手順は監督作業場へ保持し、専用VM900/901は削除した。異なる保存形式間の互換性、Tailscale出口通信、
-元の長いリースの自然更新、対象homert実機・実回線での受入をこの結果に含めない。
-
-2026-10-30 20:12〜20:16 JST: `1def991` の署名付き三版を使い、隔離した4 CPU・4 GiBのKVMで更新と復旧を確認した。
-独立ISC・PPPoE対向・Linux端末で、DHCP取得値による標準resolver、両IPのTCP/UDP、18秒リースの自然PD更新、
-アップロード中断と並行通信、正常更新、明示した旧版への復帰20.68秒、Health障害による自動復旧112.14秒が通過した。
-旧版へ戻した後も現設定・DUID・SSHの身元を保持した。候補の試行開始から90秒で失敗を記録し、既知正常版へ戻った。
-先行試行は必須WANの`ready_when`指定がなく、条件付きPD/Healthの起動前に正常確定して失敗した。
-既存の準備条件を明示し、90秒の期限と2秒の継続条件は変更していない。512MiB・2CPU・TCGでは短いDNS観測期限切れと
-端末のSERVFAILが残り、解消扱いにしない。同じソースの別識別子による受入であり、実homert全設定、異なる製品版間、
-対象機器、長時間自然更新、破損した実行ファイルの復旧は未受入。[再現手順](releases.md)を残し、専用VMは削除した。
-
-`handoff-stop`はAlpine3.24.3/Linux6.18.59-0-ltsの実QEMU/amd64起動で、同梱DHCP engine→独立端末の
-自動IPv4/gateway/DNS→PPPoE/PD/SLAAC→両family TCP/UDPとDNS、PPP/control交換、通常電源断まで通った。
-端末のDNS問い合わせ先は受信値を使用するが、OS標準resolver統合の試験ではない。署名更新・失敗復旧、
-homert全engineのイメージ、対象実機の受入は別に残る。
-
-- amd64/arm64の通常配布ビルドと署名付き一覧を検査し、実起動で必要な担当プロセスとエンジンを起動する。
-  `routerd` と `routerd-logging` は `CGO_ENABLED=0`、nDPIを組み込む `routerd-modules` は
-  `CGO_ENABLED=1` とし、いずれも静的リンクを確認する。
-  コンパイル・署名成功と対象architectureでの実行は別に記録する。
-- 実SSH upload、検証、stage、明示reboot、health確認、更新失敗とfallback、電源断、disk full、署名改竄、
-  kernel/module不一致、read-only rootfs、persistent stateと再起動後の管理到達を確認する。
-- 対象物理機器・NICでONU/HGW、端末、障害と復旧を試す。性能・並列接続・pps・帯域・遅延の受入値は対象機器と運用条件に基づいて定め、実測する。
-- 初回公開以降の対応製品版間の更新・戻し方を試す。未公開routerd2試作の格式・API互換は要求しない。
-
-## 管理機能と二台構成を統合した候補版の受入
-
-2026-10-31 16:45〜16:56 JST、ソース `20ea125`（公開済み `07c55c9` と管理機能群 `320f475` の統合）から、
-`ops-management-integrated-native123` を通常の `make build` と `make image` で作成した。
-保存設定の容量管理・削除保護、署名付きイベント連携、通信履歴の管理表示、保存設定の書き出し・再適用、
-ログ読み取り位置の再開、DHCP端末識別記録の管理表示を同じ候補版に統合した。
-隔離した名前空間では、実製品と独立したOpenSSH・旧routerdのイベント配信プロセス・端末を用いた六つの受入試験が終了0だった。
-設定の再適用後の取得DNS、再起動後のSSHホスト鍵、保存障害中のDHCP継続、API・SSH・HTTPの記録一致まで確認した。
-関連パッケージの競合検査と静的検査も終了0だった。各機能の実装件数と試験件数は同義ではない。
-
-通常APKを収めたAlpine 3.24.3/Linux 6.18.59のBIOSディスクを、隔離した二台のPVE仮想機械で起動した。
-homertの57項目を基にした設定と独立した通信相手を使い、DHCP/SLAAC/DNSの自動取得、IPv4・IPv6のTCP/UDP、
-BGP、DS-Lite、NTP、Tailscale、双方向の電源断切替とディスク再起動が終了0だった。
-最初のTCP接続とNAT対応を維持し、片系不在中の新規端末も通信できた。
-最長TCP応答時間は7.204秒、UDPは1,763送信中233欠落、最長無応答は5.972秒だった。
-DNSは1,017問い合わせ中17失敗した。停止した同じTailscale出口の選択は、再起動確認から6.790秒と3.791秒で回復した。
-切替時の無停止・無損失を示す結果ではない。
-
-二台試験はVirtIO/SCSIと試験用通信相手によるもので、対象ONU/HGW/NIC・必要負荷の受入ではない。
-元設定の物理SNATを使う既存接続の同期、別のTailscale出口の自動選択、長時間の自然更新も今回の合格範囲に含めない。
-自然更新は別版 `ops-management-combined-native120` の専用環境で継続し、実ACKを基準とする通常・特殊端末のT1はそれぞれ22:37:31.918 JSTと22:37:32.410 JSTである。
-通常ビルドとAPK内の実行ファイルは別々にハッシュを記録した。簡潔な証拠は `dist/combined123-result.json` に保存した。
-試験用の二台は削除済み。今回の候補版の合格は、GitHubの `main` ブランチへの取り込みや対象実機受入を意味しない。
-
-2026-10-31 17:12〜17:18 JST、同じ候補版123への署名付き更新、旧版120への明示切戻し、
-正常性確認に失敗した候補からの自動復旧を、それぞれ隔離PVE環境で確認した。
-更新後の通信復旧は36.278秒、明示切戻し後は34.725秒だった。自動復旧は90秒の試行期限を保ち、
-旧版への復帰と通信確認まで137.304秒だった。取得DNS、IPv4・IPv6のTCP/UDP、BGP、NTP、Tailscaleを確認し、
-保存設定、DHCPv6の識別情報、Tailscaleの識別情報、SSHホスト鍵を保持した。
-独立した正常性確認用の相手だけを停止し、候補が通信を転送していても必須条件を満たさない場合に確定されないことを確認した。
-基盤は既存のAlpine仮想機械と永続化した署名済み実行環境であり、起動ローダー更新や本番の旧識別情報の移行は対象外である。
-証拠は `dist/update123-result.json` と `dist/recovery123-result.json`。自然更新用の環境は変更していない。
-
-公開済みSAM修正 `c85c7a1` を取り込んだソース `79813e7` では、関連4パッケージの競合検査と静的検査が終了0だった。
-最初の競合検査は実行ジョブの作成権限マスクが `0002` だったため保存先の権限検査で失敗した。
-通常の `make` と同じ `0022` に修正して失敗したパッケージを再検査した。製品の権限検査は変更していない。
-この統合ソースの補助検査と、前述のソース `20ea125` による実通信結果を区別する。
-
-本番のhomert02/03は各4仮想CPU・4 GiBのPVE仮想機械で、VirtIOの三つのNICとVirtIO/SCSIディスクを使用している。
-対象構成との差分は本番の接続先、Ubuntu/Linux環境、事前変換した設定での新規導入、実際の負荷である。
-読み取り専用で取得した直近24時間の記録では、忙しい側の受信最大は730.105 Mbps、送信最大は704.146 Mbpsだった。
-いずれも60秒平均値の最大であり、瞬間最大、パケット処理数、候補版の性能合格を表さない。
-
-2026-10-31 17:54 JST: `4fcdb89` / `ops-management-integrated-native125` の全57設定を隔離PVEで再実行した。修正前はDNSのAレコードだけの変更・保存設定の復元で、現用HA版のDHCPv6観測が破棄され、端末の取得済みIPv6 DNSが不通になった。`30eaa27`は準備済みの基底版または現用HA版との完全一致で観測を保持する。変更前・DNS変更後・復元後の3点で、同じPD workerのPID・世代・設定識別値、prefixと元の優先/有効期限が一致した。復元から取得DNS、IPv4/IPv6 TCP/UDP、BGP、特殊端末、Tailscaleの確認まで3.299秒。続く製品全体の再起動後もDNS/両IP/BGP/IX/NTP/Tailscaleと識別情報が復帰し、終了0だった。専用VMは撤去済みで、自然更新用の版120とは別の結果である。
-
-mainへの統合作業版 `main-management-sam-126` は、管理PR #1と上記修正、SAM所有 `/32` の準備時生成を統合した。通常の `make build` による静的リンク3配布物で、管理の設定・復旧2ケースと、独立旧routerd RR/FRRとのSAM 4ケースが終了0。前段の `main-management-sam-125` では管理6機能の実daemon試験も終了0だった。固定claimのJSON再読込みとアドレス解析は観測更新から除き、設定準備時に一度だけ行う。SAM試験は `make check-sam-transport OLD_ROUTERD=/absolute/path/to/independent/routerd` で再実行できる。対象回線・native設定での新規導入・実測負荷、k8s/pve差分とCloud SAM全体は継続する。
-同じ `main-management-sam-126` の3実行物をハッシュ照合して固定し、通常版125のAlpine起動イメージへ明示的に配置した隔離PVEの全57設定も終了0だった。DNS変更・保存設定復元の前後で同じPD worker・prefix・元期限を保持し、復元から全通信確認まで4.305秒。続く製品全体の再起動後も取得DNS・両IP・BGP/IX・NTP・Tailscaleと識別情報が復帰した。これは通常125のkernel/initramfsと通常126の全3製品バイナリーを使った条件であり、126の新規起動イメージ全体を作り直した試験ではない。専用VMは撤去した。
-
-最終の `make check` は全体のRace Detector・vet・Python 36チェックを含め終了0。amd64/arm64の通常build、静的リンク6実行物、両architectureの実catalog・署名bundle受入も終了0。arm64機での実行を示すものではない。初回の大量設定Raceでは、同時ビルド中に元の確定期限を超過した。期限を変更しない再実行は通過した。UTCアドレスreadinessの一試行には最初の適用状態の記録がなく、原因を断定しない。元の500ms期限を維持して期限付き状態の適用を先に確認する条件を加え、単独・全体Raceとも通過した。
-
-2026-10-31: 公開コミット `25e7cf9` と、PVEで固定した126版の変更対象Goソース29件・埋込みHTMLが一致した。試験した3実行物のハッシュも通常build出力と一致し、PR #1はmainへ統合済み。同じ126版の二台停止/復帰も、以下の通常APKイメージで確認した。
-
-2026-10-31 18:37 JST: `25e7cf9` / `main-management-sam-126` の通常 `make image` から、新しい二台のAlpine/KVM・4CPU/4GiB・BIOS VirtIO/SCSIディスクを起動した。独立ISC/FRR/Headscale・公式Tailscale/DNS・DoH/NTPと自動取得端末で、両方向の実電源断・再参加が終了0。全通信復旧25.881/16.010秒、同じTCP socket・SYN・NAT mappingを保持し最大応答待ち7.196秒。UDP1,675送信/1,449受信/226期限切れ、最大無応答5.724秒、DNS951件中20失敗。旧主系不在と再参加後の新規DHCP/SLAAC端末も、取得DNS UDP/TCPと両IP TCP/UDPを使用できた。同じexit選択は再起動後2.734/2.090秒で復旧した。元60秒/15秒の条件を維持し、設定した別exitへの自動変更は行っていない。起動イメージ内のAPK版実行物を使用し、先の通常build出力を重ねた試験とは区別する。両試験VMは撤去済み。自然更新・対象接続先・実負荷とIX物理SNATの既存flow同期は、この結果に含めない。
-
-性能試験の対照として、製品とVMを除いた同じ単一SSH上のEthernet往復を、独立iperf3・単一TCP・各15秒で測定した。受信側は102.259/131.067 Mbpsだった。候補123の130〜149 Mbpsを製品上限と解釈できず、伝送・QEMU・スケジューリングのどこが律速かは未特定である。性能値を測る場合に限り、測定packetをSSHの管理経路から分離する。これは通常の通信受入の前提ではない。
-
-2026-11-01 10:29 JST: `25e7cf9` の通常126 APK imageから隔離PVEの4CPU/4GiB実VMを一台起動し、WAN/LANの両側にPVE内の独立network namespace端末を直接接続した。IPv4 NATとIPv6 forwardingだけを明示した最小ResourceProgramで15秒単一TCPを両方向に実行した。IPv4 NATの受信は1,274.734/1,279.954Mbps（相手でNAT後送信元`192.168.1.249`）、IPv6は1,228.380/1,243.248Mbps（元LAN端末送信元）だった。管理・結果回収用SSHとは別の二つのリンクでTCP/5201 captureは全ケース0 packetであり、測定通信がSSHを通らないことを確認した。これはfull homert/DS-Lite、DHCP/SLAAC/DNS、HA、対象回線/NICの性能受入ではない。完了後に専用VM、remote stage、disk、capture、詳細iperf出力を削除した。
-
-## 7. Cloud・SAM・Kubernetes
-
-- cloud providerごとに許可済みの使い捨て環境でinventory/action、権限不足・遅延・重複・owner競合、実通信、
-  停止・復旧・cleanupを確認する。費用や本番変更を自動的に許可されたと扱わない。
-- federationのproducer/consumer、順序逆転、重複、停止、revokeと復旧を実node間で確認する。
-- SAMのenrollment・claim・revoke・identity・placement、RR/leaf構成、WG/BGP、/32所有、NATなし双方向通信、
-  移動・分断・古い通知・計画drainを実peerで確認する。各providerのlive受入を別々に記録する。
-- 2026-10-31 `sam-wireguard-final-release`: 実routerd2 supervisor/control/network/SAM worker、独立旧routerd RR、FRR、root Linux netnsの二端末で、admitted RRからWireGuard peer/AllowedIPs、endpoint route、IPIP/BGPを生成し、WireGuard handshakeとNATなしTCP/UDP双方向転送を確認。明示revokeと元admission期限切れの各試験でIPIP/FIB routeを撤去し、通信が停止した。期限切れ試験では、再投影ごとのFirewall rule追加が共有設定を増殖させBGP worker停止に至る不具合も修正し、同じ元期限で再通過した。三配布物は同一release IDで静的linkを確認済み。/32 mobility/provider action、planned leaf/drain、分断復旧、FOU、PVE/実機・クラウドlive受入は未確認で、CLOUD-04全体の合格ではない。
-- 2026-10-31 `sam-mobility-candidate`: 上記の実構成で、claimの`mobility.ownedAddresses`にある`203.0.113.51/32`をleaf BGP経路としてFRRで観測し、独立RRのadmission期限切れと明示revokeの両方でFRRからの撤回を確認した。IPIP/WireGuard経由のNATなしTCP/UDP、広告・撤回、kernel FIB/tunnel撤去を含む4ケース（暗号化有無×revoke/期限切れ）が終了0。`make check`も終了0。これは認可済み単一claimのIPv4 /32 BGP deliveryであり、leaf間移動、複数owner選定、provider capture、planned drain、分断復旧、実機/cloud受入は未確認。
-- KubernetesはPod netnsとhostNetworkを別々に、実traffic、reschedule、node障害、旧owner撤去、管理、update/rollbackとCNI資源保護を確認する。
-
-## 8. 全34 work packageとの対応
-
-| 試験範囲 | 対応 work package |
+## 実行順と合格条件
+
+今回の実作業は現在の実HGWと隔離Linuxで進める。PVE/QEMUと追加のPBR調査は実行しない。以下の全体受入範囲と、今回実行する環境を混同しない。
+
+### 1. 単体ルーターを端末からインターネットまで通す
+
+homert02/03の一台分のintentと旧routerdの実装を照らし、native ResourceProgramへ明示する。互換converterは作らない。既存の例や試験fixtureを実設定の代わりにしない。
+
+独立したHGW/ONU側とLAN端末で、次をひとつの構成として確認する。
+
+- WAN DHCPv4、RA、DHCPv6-PD/Information、DUID/IAID、通常のDAD。
+- LAN DHCPv4の動的pool、OUI/MAC scope、予約、router/DNS/domain。予約対象以外の取得値はACKから読む。
+- LAN RA、SLAAC、RDNSS/DNSSL、stateless DHCPv6と、必要なstateful DHCPv6の実装状態を分けて確認する。
+- 端末が取得したDNSを使うIPv4/IPv6 UDP/TCP名前解決、LAN名、DHCP由来record、条件付き転送、DoH、上流停止・復旧。
+- IPv4 NAT/DS-Lite、IPv6 forwarding、4本のDS-Lite経路とbackup WAN、MTU 1454、MSS、DF/PTBを実通信とcaptureで確認する。
+- 初回接続、自然lease/PD更新、PD変更・期限、worker/control/router再起動、WAN障害と復帰、通常停止後に端末通信とkernel stateが収束すること。
+
+短時間の機能確認と自然更新を含む長時間確認は別に記録する。未観測の更新や対象機器の挙動を推定で合格にしない。
+
+短時間native gateを、作業中の15-resource例で実HGWへ適用する再実行コマンド:
+`make check-uplink DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18 UPLINK_WAN_MAC=02:72:6f:75:74:03 UPLINK_CONFIG=examples/single-router-dslite-dhcp-dns.yaml UPLINK_SECONDS=120 UPLINK_WAN_OUTAGE=1 UPLINK_FULL_RESTART=1` を使い、WAN DHCPv4は観測したlease、予約clientは設定した予約と照合する。OUI clientの動的割当はDHCP ACKから読み、宣言したscope内かを確認する。独立端末でDHCPv6 information、SLAAC、RAと一致する委譲IPv6 DNS listener、router A/AAAA、DHCP予約由来DNS、条件付き転送停止/復旧、DoH上流、DS-Lite/IPv6通信、WAN outage、PD workerとdaemon再起動後の復旧を確認する。この例のIPv4 leaseは12時間なので短時間gateではDHCPv4自然T1を主張しない。PD自然T1は上記の生成profile gateで別に完了している。native gateの合否と制限は実行後に追記する。
+
+第6回はmain-derived build `8ea44d776dc3`、実HGWへつないだens18 virtio uplink、隔離macvlan router namespace、独立Linux LAN client 2台で実行し終了0。15-resource ResourceProgramを適用し、WAN DHCPv4 lease、予約/OUI scope DHCPv4、DHCPv6 Information、RA/SLAACと委譲DNSを取得値から確認した。LANからrouterのIPv4/IPv6 DNS、予約record、条件付きDNSの正常応答・上流停止時のfailure isolation・復旧が通った。routerのDoH既定経路と、独立clientのIPv4/IPv6 HTTPSおよびDNS A/AAAA UDP/TCPを確認。WANをblackholeしてIPv4/IPv6が失敗し、解除後0.79秒で復旧、PD identityを保持した。PD worker SIGKILL後1.57秒、graceful restart後3.53秒、全daemon restart後3.78秒で端末通信が復旧し、DUID/IAID/prefixを維持。停止時のzero-lifetime RA、委譲LAN addressのkernel withdrawal、上流DHCPv6 Releaseなしも確認した。12回の通信round中、自然PD Renew/Replyは0回（T1まで約7,176秒）、DHCPv4 T1未到達。試験stage/capture/namespaceは自動撤去済み。制限:15-resource profileだけで、連続TCP、110-resource homert、ONU直結、対象物理NIC qualificationではない。
+
+### 2. 二WANと障害切替
+
+独立したWAN peerと端末からHealthの送信元、interface、mark、実probeをcaptureし、Health→PBR/FIB→packetを照合する。通常・障害・復帰・両WAN断を通し、worker再起動、古い通知、元期限切れ、confirmed rollback後に新規TCP/UDPと既存flowを分けて確認する。片方のNAT sourceを別回線へ流さない。
+
+### 3. 二台HA
+
+単体で通ったnative profileを二台へ広げる。VRRP readiness/VIP、GARP/NA、DHCP/PD/DUID/IAID、DHCP lease、conntrack/NAT、既存TCP socket、UDP mapping、新規clientを両方向の電源断・復帰で確認する。短いnamespace合格をhomert二台や連続障害の合格にしない。homertで使うBGP、NTP、Tailscale、DNSも同じ端末利用経路へ統合する。
+
+### 4. その他のwork package
+
+routerdの対応実装・実運用を参照し、実peerを用いて次を個別に進める。homert試験の不具合で独立作業全体を止めない。
+
+- SYS: sysctl/capability、NTP client/serverと時刻品質、権限分離/watchdog。
+- NET: PPPoE、link/VRF/VXLAN、DHCPv6 stateful/relay、DNS ownership、BGP/BFD、WireGuard。
+- CORE/OPS: ResourceProgram transaction/lifecycle、durable event、dynamic config/plugin、ControlAPI/CLI/Web、logging/retention/DPI。
+- HA/EXT: VRRP/cluster、lease/PD/conntrack同期、Tailscale、IPsec。
+- CLOUD/DIST: SAM/federation/provider、signed runtime・boot・更新・A/B、物理機・arm64、各cloud image、Kubernetes。
+- QUAL: 全field・default・lifecycle・status・event、実通信、障害復旧、配布先の差分が閉じるまで初回製品全体を完了扱いにしない。
+
+make check、Race Detector、vet、buildは変更ごとの補助確認としてMakefile経由で実行する。実通信の代替にしない。実行版、peer、設定profile、結果、未確認範囲をcommit前に照合し、まとまった変更ごとにcommit/pushする。
+
+## 最新の実HGW自然更新試験
+
+直近の実HGW自然更新gateは終了0。実HGWに試験専用MACのrouter namespaceを接続し、main由来build `7c1cb3619acb` と試験用生成profile、独立Linux LAN client 2台を使った。WAN/LAN設定とhost管理経路は変更していない。WAN captureでは自然Renewと対応Replyを1回ずつ観測し、client UDP/546→server/547とHGW UDP/49153→client/546、DUID・IAID=1・委譲prefixの一致、期限更新を確認した。initial DADはWAN/LAN両方で有効、global addressはnon-tentative、DAD failureなし。PD worker SIGKILL、graceful restart、daemon全体restart後の復旧は各1.32秒、3.61秒、3.99秒。zero-lifetime RAとupstream grantを保持したkernel withdrawal、両clientの自然DHCPv4更新、IPv4/IPv6 HTTPS・学習DNS UDP/TCPを676観測roundで確認。終了後にnamespace、capture、state、stageを削除した。制限:生成profileで、native full profile、連続TCP、ONU直結、対象物理NIC qualificationではない。
+
+最初の5回で見つかった設定/runner不一致は、DNS server数を1件に限定した比較、B4 sourceの誤ったLAN `/64`割当、IPv6 host routeの不足だった。DNS受信は複数serverを許容し、B4 sourceをWAN `/128`、host routeをWAN RA由来のdefault routeとDS-Lite source bypassへ修正した。第6回でこの15-resource profileの短時間受入を完了した。過去のraw outputは保持せず、再現手順と現在の結果・限界のみを記録する。
+
+## work package 対応
+
+| 受入経路 | work package |
 | --- | --- |
-| 実設定・単体LAN/WAN・基本DNS/DHCP | CORE-01, NET-05, NET-06, QUAL-01 |
-| Health・二WAN・firewall・PPPoE | NET-01, NET-02, NET-03, NET-04 |
-| HA・lease/PD・既存接続 | HA-01, HA-02, HA-03 |
-| BGP/BFD・WireGuard | NET-07, NET-08 |
-| 設定transaction・依存・event・plugin・runtime | CORE-02, CORE-03, CORE-04, CORE-05, CORE-06 |
-| OS・時刻・権限 | SYS-01, SYS-02, SYS-03 |
-| 管理・観測 | OPS-01, OPS-02, OPS-03 |
-| IPsec・Tailscale | EXT-01, EXT-02 |
-| 更新・実機・cloud image・Kubernetes | DIST-01, DIST-02, DIST-03, DIST-04 |
-| provider・federation・SAM | CLOUD-01, CLOUD-02, CLOUD-03, CLOUD-04 |
+| homert単体・DNS/DHCP/RA/NAT/DS-Lite | CORE-01, NET-05, NET-06, QUAL-01 |
+| 二WAN/Health/PBR/firewall/PPPoE | NET-01, NET-02, NET-03, NET-04 |
+| BGP/BFD/WireGuard | NET-07, NET-08 |
+| HA/lease/PD/conntrack | HA-01, HA-02, HA-03 |
+| 設定/runtime/event | CORE-02, CORE-03, CORE-04, CORE-05, CORE-06 |
+| OS/time/privilege | SYS-01, SYS-02, SYS-03 |
+| management/observability | OPS-01, OPS-02, OPS-03 |
+| IPsec/Tailscale | EXT-01, EXT-02 |
+| provider/federation/SAM | CLOUD-01, CLOUD-02, CLOUD-03, CLOUD-04 |
+| image/update/physical/cloud/Kubernetes | DIST-01, DIST-02, DIST-03, DIST-04 |
 
-各項目の詳細な機能範囲は実装計画の各work packageを参照する。`make check`、Race Detector、vet、静的ビルドは
-変更ごとの補助確認であり、上記の実通信や対象機器受入を代替しない。GitHub Actionsの完了はローカル開発の待ち条件にしない。
-実機・回線・cloudが利用できない場合は必要な接続先と未実証範囲を明示し、独立して進められる実装・試験を続ける。
-全項目の見積りに必要な実環境と未実装範囲が確定していないため、現時点で完成日時は約束しない。
-
-## OTLPログ転送の独立受入
-
-2026-10-30 13:54〜13:55 JST、`ba46e407`を基にした`otlp-ba46e407`と
-OpenTelemetry Collector 0.151.0を隔離した名前空間で起動しました。
-製品自身が発した記録の本文、重要度、元時刻、世代、読み取り位置、属性の受信を確認しました。
-収集器の停止中もローカル保存と管理処理は継続しました。宛先変更、停止中の設定置換・撤去、
-収集器復帰後の新規受信が成立し、並行したUDP通信は71往復、失敗0でした。
-
-再現手順は`make check-otlp`です。実行版のハッシュと受信記録は`dist/otlp-peer/`にあります。
-これはログのみの受入です。計測値、トレース、TLSの実相手機での受入は未確認です。
+実機、回線、providerが使えない範囲は必要な接続・peerを明記し、使用可能な独立環境で実装を続ける。GitHub Actions完了を待たず、関連するローカル検査と実通信を完了する。

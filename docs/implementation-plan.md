@@ -1,25 +1,27 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
-更新: 2026-11-02 22:35 UTC。製品コードの基準mainは `c9d7055`。この棚卸し変更はMakefile・設定例・計画文書を更新し、製品コードは変更しない。
+更新: 2026-11-03 00:21 UTC。mainは `8ea44d7`。作業ツリーで`make check`（Race Detector・vet込み）、static build、native profile検証を完了した。製品Goコードは`c9d7055`から不変。15-resource native profileを実HGWと独立clientで通すgateは第6回で終了0。DNS/DoH・DS-Lite IPv4/IPv6通信・WAN遮断復旧・PD worker/daemon再起動まで通過し、全試験stageを撤去した。これは110-resource homert全体の受入ではない。
 
-全体ゴールは2026-10-24 11:28:25 UTCに開始した。現時点で9日11時間06分が経過している。機械可読計画の34 work packageは `in_progress` 22件、`planned` 12件で、完了扱いはない。個別試験の成功だけを完成と数えない。
+全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で9日12時間53分が経過し、2026-10-29 16:56:38 UTCの期限から4日7時間25分遅れている。機械可読計画の34 work packageは `in_progress` 22件、`planned` 12件で、完了扱いはない。期限や個別試験の成功だけを完成と数えない。
 
 ## 現在の棚卸し
 
 - `make check` はGo/Python checks、Race Detector、vetを含め終了0。current-mainの署名付きSSH update/rollback統合試験は初回の試験全体90秒context切れを修正し、128.701秒で終了0。これは実SSH管理とrollback状態の受入であり、applianceの再起動受入ではない。
 - current-main `c9d7055` の通常Alpine/PID 1 applianceを隔離PVEで受け入れた。独立Linux LAN clientの動的DHCPv4、PPP/IPv4・IPv6 TCP/UDP、ISC DHCPv6 PD/Renew、再起動後のRebind、署名更新、明示rollback、Healthを失わせた候補の自動rollbackを確認した。自動復旧は113.06秒。試験VMは撤去済み。詳しい条件は[実通信試験計画](test-plan.md)に記録する。
-- 実HGWへ接続したmain由来product build `7c1cb3619acb` で、独立LAN client、DHCPv4/DHCPv6/SLAAC、条件付きDoH、IPv4 DS-Lite/IPv6通信、WAN outage復旧、worker/full restartを実行中。自然PD T1でのRenew/ReplyとDUID/IAID/prefix維持を待っている。現時点で全workerはreadyで、世代の変化はない。
-- このhostの`ens18`/`ens20`はvirtio NIC。実HGWとの通信は確認できるが、NTT ONU直結、対象NIC・実機資格は未受入である。native例の57 resourcesも、homertの109-resource設定全体の受入を意味しない。
+- 実HGWへ接続したmain由来product build `7c1cb3619acb` は、生成profileで独立LAN client、DHCPv4/DHCPv6/SLAAC、条件付きDoH、IPv4 DS-Lite/IPv6通信、WAN outage復旧、worker/full restartと自然PD T1 Renew/Replyを通過した。captureでUDP/49153からのAdvertise/Replyを受け、初回SolicitとRenewでDUID/IAID=1/prefixが一致し、期限更新した。旧routerdにも同じsource-port許容がある。実kernelではWAN/LANの`accept_dad=1`、global IPv6 addressはnon-tentativeでDAD failureなし。worker SIGKILL/graceful restart/full daemon restart後の復旧は1.32/3.61/3.99秒。自然DHCPv4 renew、IPv4/IPv6 HTTPS・学習DNS UDP/TCPを676 roundで確認し、試験後にraw artifactsを削除した。第6回のnative HGW gateは終了0。15-resource profileでWAN DHCPv4、予約/OUI-scope LAN DHCPv4、DHCPv6 Information/SLAAC、LAN DNS/DoH、DS-Lite IPv4/IPv6 HTTPS・DNS UDP/TCP、WAN outage recovery（0.79秒）、PD worker SIGKILL/graceful restart（1.57/3.53秒）、全daemon restart（3.78秒）、DUID/IAID/prefix保持、zero-lifetime RAによるLAN address撤去、upstream Releaseなしを確認した。自然PD T1（約7,176秒後）・DHCPv4 T1・連続TCPは未観測。raw artifactsは削除済み。homert全110 resources、ONU直結、対象物理NIC qualificationも未完了。
+- 2026-11-03に保存中のhomert02/03設定を読取専用で再集計した。各110 resources、全kind countは一致し、DNSForwarderは11件。両方にIPv6 host-traffic policy route（family IPv6/table 120）がある。設定値・秘密を出力・保存しない。
+- main上のnative例は `single-router-dslite-dhcp-dns.yaml` が13 resources、`homert02-native.yaml`と`homert03-native.yaml`が各14 resources。working single-router例はWAN DHCPv4とhost routeを加えて15 resources。過去の57-resource試験用設定は現行例ではなく、110-resource homert受入にも数えない。
+- このhostの`ens18`/`ens20`はvirtio NIC。HGW通信は確認できるが、NTT ONU直結、対象NIC・実機資格は未受入。
 
 ## 仕切り直した実行順
 
-1. **実HGW自然T1を閉じる。** 現在の実daemon runでRenew/Reply、DUID/IAID/prefix、worker状態、端末通信を観測し、結果と未確認範囲を記録する。raw capture/log、staging、release buildを片付けてから次へ進む。
-2. **homert単体のnative profileを完成させる。** 提供されたhomert02/03設定と旧routerdの該当実装を読み直し、109 resourcesが表す運用動作をnative `ResourceProgram`へ直接記述する。自動変換器や旧prototype互換は作らない。各動作を `equivalent`、明示変更、未対応へ分け、実値のsecretはcommitしない。DHCPv4動的poolと特殊client、WAN DHCPv6-PD/Information、DUID/IAID、RA/SLAAC、条件付きDNS/DoH、DS-Lite/NAT/MTU、BGP、NTP、Tailscale、管理をひとつの一台構成で独立client/peerに通す。
-3. **そのnative profileを通常Alpine/PID 1 applianceで受け入れる。** 隔離PVEの実kernel、独立WAN peer、Linux LAN client、packet captureで初回取得、自然更新、障害/復旧、workerとappliance再起動を確認する。テスト計画のこのprofile項目と実設定を各試験前に読み直し、取得値は動的に観測する。
-4. **一台の結果を二台HAへ広げる。** 同じnative profileでactive/standby、lease/PD引継ぎ、Health→PBR、conntrack/NAT、既存TCPとUDP、新規接続、両方向handoffと復帰を測る。既に通った小さなnamespace試験を繰り返さず、未確認の相互作用だけを実PVE peerで進める。
-5. **残りの34 work packageを計画順に閉じる。** homertで使うCORE/SYS/NET/HA/OPS/EXTの未完了を先行し、その後にPVE/Kubernetes、Cloud SAM/provider、配布/物理qualificationを進める。provider課金・本番切替は既存authorizationの範囲内に限る。全work packageと対象profileが終わるまで完成とは報告しない。
+1. **110-resource homert single profileを作る。** 本日再読した両node設定と旧routerdの実装・運用修正を、feature/caller/kernel effect単位で対応づける。まず現行single profileへ欠けている4本のDS-Lite service、Health/PBR、backup WAN、DHCP scopes/identity、複数DNS suffix/upstream/DoH、BGP/NTP/Tailscale/managementの実際に使われる範囲を実装する。実設定の値・秘密を転記しない。全設定を1回で置き換えるconverterは作らず、client通信経路を保ったままsectionごとに実HGWで受け入れる。
+2. **full single profileを同じ実HGW/独立clientでcold startから通す。** DNS/DHCP/RA/DS-Lite/Health/PBR、自然更新、worker/daemon restart、実通信とkernel/captureを確認し、完了済み15-resource gateの合格範囲を広げる。target ONU/NIC qualificationは分離して記録する。
+3. **実行環境は現在の実HGWと隔離Linuxに固定する。** 今回はPVE/QEMUの追加実行と追加のPBR調査を行わず、単体profileの未対応機能と実通信を進める。既存のPVE/Health→PBR試験結果を追加試験の理由にしない。ある一つの未解決gateが他の独立work packageの進行を止めない。
+4. **単体が通った後、二台HAを実環境で受け入れる。** VRRP/VIP readiness、DHCP/PD identity・lease同期、conntrack、既存TCP/UDPと新規通信、両方向切替・復帰を確認する。
+5. **34 work packageをJSONの依存関係に従い閉じる。** homertに必須のCORE/SYS/NET/HA/OPS/EXTを先行し、SAM/cloud/provider、image・hardware、Kubernetesを実peer・対象環境へ広げる。provider課金と本番変更は既存authorization内で行う。
 
-各実通信試験の直前に `docs/test-plan.md` 全体を読み直し、該当条件・既知の失敗・peer・実行版・観測点を確かめる。計画が現在の実装や環境とずれていれば開始前に直す。短いfixture値を製品要件にしない。独立作業は長時間lease観測と並行する。失敗は製品・fixture・環境に切り分け、修正後に同じ実通信を再確認する。終わった試験は要約と再実行手順だけを残し、不要なraw dataとbuild outputを削除する。
+各実通信試験の直前に `docs/test-plan.md` 全体を読み直す。動的に割り当たる値は実応答から取得し、固定値を期待するのは設定で明示した予約などに限る。先行する長時間観測と無関係な実装・レビューは並行する。失敗は製品・設定・peer・環境へ切り分け、原因を修正して影響した実通信を再確認する。終了した試験は簡潔な条件/結果/限界/再実行手順のみを残し、raw data・orphan process・不要なbuild outputを削除する。
 
 ## 1. 基準と到達点
 
