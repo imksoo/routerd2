@@ -44,7 +44,11 @@ RUN python3 scripts/ndpi-sources.py --root /target --arch "$TARGETARCH"
 COPY go.mod go.sum ./
 COPY third_party/google-nftables/ ./third_party/google-nftables/
 RUN go mod download
-COPY . .
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+COPY scripts/licenses.py ./scripts/
+COPY LICENSE Makefile ./
+COPY packaging/alpine/ndpi.Dockerfile ./packaging/alpine/
 ARG RELEASE_ID=dev
 RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/root/.cache/zig \
     case "$TARGETARCH" in amd64) target=x86_64-linux-musl ;; arm64) target=aarch64-linux-musl ;; *) exit 2 ;; esac \

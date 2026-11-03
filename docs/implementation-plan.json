@@ -11197,23 +11197,13 @@
     "physical_target_profile": "homert02/03 are identified PVE guests with4vCPU/4GiB, three VirtIO NICs and VirtIO/SCSI disks. Matching isolated PVE product boot/recovery was exercised; actual WAN/LAN attachment, clean installation from a preconverted native configuration, measured load and any additional hardware/architecture qualification remain open.",
     "validation_reporting": "Use docs/test-plan.md for the concise current gate state. Detailed historical checkpoint ledgers are not acceptance authority; keep only current result, limits and repeatable procedure. Never claim unrun gates or partial homert profiles complete.",
     "current_acceptance": {
-      "as_of_utc": "2026-11-03T09:12:01Z",
+      "as_of_utc": "2026-11-03T09:54:58Z",
       "homert_source": "User-provided read-only working copies at chatty.lain.local:~/homert02; the current homert02 and homert03 files each contain 110 resources with matching kind counts. Do not publish configuration values or secrets.",
       "completed_gates": [
-        "Current tested_source_head passed make check including Go/Python checks, race detector and vet; final runtimeplan Race and normal static build also passed.",
+        "Go runtime checkpoint842c47e passed make check and final runtimeplan Race. This unchanged Go code plus the bundle producer passed normal build, test-tools/race/vet and actual publisher/receiver operations.",
         "Earlier checkpoints passed isolated Alpine/PID1 PVE single-node networking and signed update/rollback gates; these are not acceptance of the current full profile. PVE/QEMU is excluded from current work.",
         "Earlier checkpoints passed actual supervisor/control/network/Health two-WAN PBR failover/recovery with independent peers, TCP/UDP and captures. This is not qualification of the latest full homert profile; no additional PBR investigation is planned."
       ],
-      "active_actual_hgw_run": {
-        "as_of_utc": "2026-11-03T09:12:01Z",
-        "build_identity": "df490351c3ff",
-        "product_code_checkpoint": "df490351c3ffb40f0d24ce3d7ba86f9c08e12351",
-        "command": "python3 scripts/uplink-smoke.py --uplink ens18 --config examples/single-router-dslite-dhcp-dns.yaml --seconds 0 --wan-mac 02:72:6f:75:74:03 --full-restart --tailnet",
-        "status": "Live owner PID1120320 verified,445 rounds,ready=true,all28 worker generations1. Original38-resource profile/source df49035; PD T1 at2026-11-03T09:42:40Z and final restart/exit pending.",
-        "local_progress_log": "/tmp/routerd2-aftr-natural.log",
-        "ownership": "Protect the live owner and its private stage until terminal. Independent DoH outage checks use a separate product node and do not change this router or its packet rules. Remove detailed output after concise results are recorded.",
-        "limit": "Not full homert, HA long-duration, continuous existing sockets, direct ONU or target hardware qualification."
-      },
       "current_changes": "候補準備で全ての観測を空にしていた処理を除き、同じworker設定のproducerと、同じ設定・依存関係の適用済みresourceだけを元の有限期限のまま評価する。準備段階は現在の条件履歴・イベント/derived ownerを進めない。小さな回帰確認では旧関数が無関係なMTU編集で稼働中consumerを停止することを再現し、修正後は維持、WAN自体の変更では旧観測を流用しないことを確認した。世代番号は他の退役workerからも引き継ぐため、番号だけで個々の再起動回数を推定しない。",
       "open_work_packages": 34,
       "unqualified_profiles": [
@@ -11224,7 +11214,7 @@
         "Kubernetes",
         "SAM/federation full path"
       ],
-      "tested_source_head": "1fa7cf0 plus candidate-fact retention changes; executed normal build1fa7cf099ae0",
+      "tested_source_head": "842c47e plus normal-build runtime bundle producer and source-closure changes; Go runtime unchanged",
       "native_examples": {
         "examples/single-router-dslite-dhcp-dns.yaml": 39,
         "examples/homert02-native.yaml": 48,
@@ -11310,19 +11300,12 @@
         ]
       },
       "full_profile_natural_renewal_gate": {
-        "status": "passed_exit_0_with_known_bgp_restarts",
-        "build_identity": "b03debf15982",
-        "profile_and_runner": "5861b7e plus LAN options",
-        "seconds_requested": 7800,
-        "communication_rounds": 678,
-        "natural_renew_reply_count": 1,
-        "renew_reply_observed_utc": "2026-11-03T05:24:16Z",
-        "pd_sigkill_recovery_seconds": 2.22,
-        "pd_graceful_recovery_seconds": 7.05,
-        "whole_daemon_recovery_seconds": 112.21,
-        "peers": "Actual HGW port49153, BusyBox/dhcpcd LAN clients and independent Headscale/Tailscale/FRR/DNS/NTP/Collector",
-        "limit": "BGP reached generation17; not stable all-service qualification, latest RA/SNAT/HA full-profile qualification or physical ONU/NIC qualification.",
-        "cleanup": "Owned processes/namespaces/private stage removed."
+        "as_of_utc": "2026-11-03T09:54:58Z",
+        "status": "passed, exit0;38-resource df49035 normal-operation profile",
+        "build_identity": "df490351c3ff",
+        "command": "python3 scripts/uplink-smoke.py --uplink ens18 --config examples/single-router-dslite-dhcp-dns.yaml --seconds 0 --wan-mac 02:72:6f:75:74:03 --full-restart --tailnet",
+        "observed": "終了0（2026-11-03 07:42〜09:46 UTC）: source/build `df49035`/`df490351c3ff`、単体38-resource profileで実HGWとの自然Renew/Reply1組と期限更新、623巡回の両IP HTTPS・UDP/TCP DNSを確認した。自然更新後の619巡回時点まで全28 worker generation1/Ready=trueを観測。PD SIGKILL2.90秒/通常再起動5.92秒、全daemon後の全項目再確認105.73秒も通過し、identityと両端末/Tailscale通信、停止時のRA撤去を確認した。105.73秒は抑制/samplingを含む全項目時間で、転送断時間ではない。owner/process/namespace/stageは撤去済み。二段DNS・候補設定修正の別受入、既存socket継続、全homert/実機資格とは範囲を区別する。",
+        "cleanup": "Owner/process/namespaces/private stage removed; outer progress log removed after concise result committed."
       },
       "public_doh_outage": {
         "as_of_utc": "2026-11-03T08:14:39Z",
@@ -11340,6 +11323,18 @@
         "observed": "基準main `1fa7cf0` + 候補設定の観測保持修正、通常build `1fa7cf099ae0`で単体39-resourceの実HGW手順が終了0。30秒のconfirmed commitでcoreのAレコードとLAN cache設定を変更し、両IP/UDP/TCPの候補回答と公開通信、無確認期限切れとcontrol SIGKILL後の元intent全体・回答・公開通信への復帰を確認した。候補疎通確認後から元の疎通を再確認するまで33.42秒/9.30秒で、転送断時間ではない。DNS編集と期限切れrollbackではWAN DHCPv4/RA/PDのPIDを維持した。PD SIGKILL3.21秒/通常再起動6.72秒、全daemon後の全項目再確認103.04秒も通過した。",
         "measurement": "33.42/9.30s are measured after candidate communication until restored communication, not forwarding outage duration. The configured confirmation timeout is30s.",
         "limit": "Short39-resource profile; not signed runtime/boot update, HA configuration changes, natural PD renewal on this run or physical hardware qualification."
+      },
+      "runtime_bundle_gate": {
+        "as_of_utc": "2026-11-03T09:54:58Z",
+        "status": "passed, native Linux amd64 build and actual signed receiver",
+        "build_identity": "842c47e32300",
+        "roles": 25,
+        "engines": 5,
+        "artifacts": 15,
+        "bytes": 527315456,
+        "license_files": 303,
+        "observed": "通常build `842c47e32300`で新しい`make runtime-bundle`が終了0。25役割・5 engine・15 artifacts、527,315,456 byteの署名配布物へsourceと303 license資料を同梱した。実receiverでstage/verify/initialize/statusと後続候補のprepare/cancelが通過し、元のactiveと増加済みwatermarkを維持。独立OpenSSLも署名を検証した。入力はprivate snapshotへ固定し、nDPIのsourceコピーをproduction/build入力へ限定してroot private probeとsite boot treeの非収録を確認した。再実行は[配布手順](runtime-bundle.md)。これは配布物と保存選択の受入であり、このbundleの実機起動・全profile更新は残る。",
+        "scope": "Offline build/sign/stage/verify/selection operations; full-profile signed boot/update/recovery remains open. Shared-host clock must not be modified by appliance chronyd; full-profile appliance execution needs its own kernel/clock domain."
       }
     }
   },

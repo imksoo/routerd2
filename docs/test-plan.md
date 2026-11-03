@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 09:17 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 09:54 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 実行原則
 
@@ -16,7 +16,7 @@
 
 基準main `9fe72fe` + 二段DNS設定、製品Go不変の通常build `df490351c3ff`で単体39-resource実HGW手順が終了0。LAN resolver（cache1000・queryLogなし）からcore resolver（cache10000・queryLogあり）へloopback UDP53で転送し、coreがzone/条件付き/学習DNS/DoHを所有する。実端末からの新しいqueryと同じIDのloopback往復・回答をcaptureで照合した。両IPのDNS/Internet、条件付き上流の停止/cache/SERVFAIL/復旧、coreのcache hit/履歴API/Web、DHCP各scope・sticky、BGP/NTP/Tailscale/運用記録が通過。PD SIGKILL3.16秒/通常再起動7.06秒、全daemon再起動後の全項目再確認103.15秒。後者は抑制/samplingを含み転送断時間ではない。自然PD更新0回・通信round2の短時間実行であり、長時間安定性や全homert private peerの受入には数えない。
 
-自然更新のlive ownerは別の38-resource profile・同じbuild `df490351c3ff`で2026-11-03 07:42 UTCから継続中。直近445通信round、全28 worker generation1/Ready=true。実PD T1は09:42:40 UTC予定で、更新・最終再起動の終了結果は未取得。二段DNS追加後の39-resource profileの自然更新結果には転用しない。前checkpoint `b03debf15982`は自然PD更新と終了0を確認したが、BGP等の再起動があり安定性は未受入。
+終了0（2026-11-03 07:42〜09:46 UTC）: source/build `df49035`/`df490351c3ff`、単体38-resource profileで実HGWとの自然Renew/Reply1組と期限更新、623巡回の両IP HTTPS・UDP/TCP DNSを確認した。自然更新後の619巡回時点まで全28 worker generation1/Ready=trueを観測。PD SIGKILL2.90秒/通常再起動5.92秒、全daemon後の全項目再確認105.73秒も通過し、identityと両端末/Tailscale通信、停止時のRA撤去を確認した。105.73秒は抑制/samplingを含む全項目時間で、転送断時間ではない。owner/process/namespace/stageは撤去済み。二段DNS・候補設定修正の別受入、既存socket継続、全homert/実機資格とは範囲を区別する。
 
 同じ二段DNSの各48-resource二台profileも実HGWで終了0。両方向のDNS/DoH・履歴API/Web、DHCP更新/Release/再取得・sticky/fingerprint、PD identity、BGP/NTP/Tailscale/exitと運用記録を確認。同一TCPはSYN1回・209応答・最大応答間隔10.89秒、UDP239応答・19期限超過・最大応答間隔10.52秒（1秒返信予算）。全項目確認58.91/73.57秒はsampling/再取得を含み、転送断時間ではない。二台のprocess/namespace/stageは撤去済み。短時間の両方向受入であり、長時間安定性・全private DNS peer・実機資格は残る。 先行する47-resource profileは両方向の同一TCP/UDP、DHCP scope/sticky/fingerprint、PD identity、DNS/DoH/BGP/NTP/Tailscale、管理/運用記録が終了0。停止中heartbeat、共通IPC3秒打切り、AFTR入力/通知の並列所有、古いsupervisor状態cacheを修正後、観測した停止理由でAFTR409/BGP/VRRP timeoutは未再発。長時間安定性は引き続き確認する。
 
@@ -97,6 +97,10 @@ rootで`nsenter --mount=/proc/<owner_pid>/ns/mnt ip netns exec <router>`内のWA
 2026-11-03 build `df490351c3ff`: 実DHCP端末のDF1500往復、AFTR→B4のIPv6断片2個と再構成、同一TCPのSYN MSS1460→1414とSYN/ACK1420→1414、HTTPSが通過。B4送信断片化/IPv6 PTB/外側MTU縮小と性能は未確認。[RFC6333 section5.3](https://www.rfc-editor.org/rfc/rfc6333.html#section-5.3)は外側IPv6での断片化/再構成を規定するため、内側DF1500が成功したことを不具合や試験失敗と決めつけない。
 
 ## 自然更新と残る全体受入
+
+終了0（2026-11-03 07:42〜09:46 UTC）: source/build `df49035`/`df490351c3ff`、単体38-resource profileで実HGWとの自然Renew/Reply1組と期限更新、623巡回の両IP HTTPS・UDP/TCP DNSを確認した。自然更新後の619巡回時点まで全28 worker generation1/Ready=trueを観測。PD SIGKILL2.90秒/通常再起動5.92秒、全daemon後の全項目再確認105.73秒も通過し、identityと両端末/Tailscale通信、停止時のRA撤去を確認した。105.73秒は抑制/samplingを含む全項目時間で、転送断時間ではない。owner/process/namespace/stageは撤去済み。二段DNS・候補設定修正の別受入、既存socket継続、全homert/実機資格とは範囲を区別する。
+
+通常build `842c47e32300`で新しい`make runtime-bundle`が終了0。25役割・5 engine・15 artifacts、527,315,456 byteの署名配布物へsourceと303 license資料を同梱した。実receiverでstage/verify/initialize/statusと後続候補のprepare/cancelが通過し、元のactiveと増加済みwatermarkを維持。独立OpenSSLも署名を検証した。入力はprivate snapshotへ固定し、nDPIのsourceコピーをproduction/build入力へ限定してroot private probeとsite boot treeの非収録を確認した。再実行は[配布手順](runtime-bundle.md)。これは配布物と保存選択の受入であり、このbundleの実機起動・全profile更新は残る。
 
 終了0（2026-11-03 05:39 UTC、開始03:25:30 UTC）: 設定/runner `5861b7e`、通常build ID `b03debf15982`（製品Go不変）で`--seconds 7800 --full-restart --tailnet`の自然更新観測を起動した。PD bound/IAID1も実プロセス・IPCで確認した。05:24:16 UTCの自然Renew/Replyと期限更新、678通信round、PD workerと全daemon再起動後の復旧を確認し、手順は終了0。stage/process/namespaceは撤去済み。BGPはgeneration17まで再起動したため長時間安定性は未受入。
 

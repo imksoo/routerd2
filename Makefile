@@ -19,6 +19,8 @@ QEMU_DAEMON_TIMEOUT ?= 180
 QEMU_RELEASE_TIMEOUT ?= 240
 QEMU_STORAGE_TIMEOUT ?= 240
 RELEASE_BUILT_DIR ?= dist/bin
+BUNDLE_BOOT ?= images/boot.json
+BUNDLE_OUTPUT ?= dist/routerd-runtime-$(RELEASE_ID)-$(shell $(GO) env GOARCH).tar
 DHCP6_SERVER ?= /usr/sbin/dhcpd
 FRR_BGPD ?= /usr/lib/frr/bgpd
 PPP_ARCH ?= $(shell $(GO) env GOARCH)
@@ -89,6 +91,7 @@ help:
 	  'make check-dhcp-relay  Verify DHCP peers, fragmentation and VRF isolation' \
 	  'make licenses          Collect dependency licenses and their manifest' \
 	  'make build             Build the native commands for the current platform' \
+	  'make runtime-bundle BUNDLE_SIGNING_KEY=... BUNDLE_SEQUENCE=...  Build a signed native runtime with engines, sources and notices' \
 	  'make build-linux       Build static linux/amd64 and linux/arm64 binaries' \
 	  'make release-built-test Verify actual amd64/arm64 release bundle identities' \
 	  'make apk               Test and build the Alpine package with abuild' \
@@ -303,6 +306,12 @@ build-publisher: licenses
 	chmod 755 dist dist/bin
 	umask 022; CGO_ENABLED=0 $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o dist/bin/routerd-bundle ./cmd/routerd-bundle
 	chmod 755 dist/bin/routerd-bundle
+
+.PHONY: runtime-bundle
+runtime-bundle:
+	@test -n '$(BUNDLE_SIGNING_KEY)' -a -n '$(BUNDLE_SEQUENCE)' || { printf '%s\n' 'Set an existing Ed25519 BUNDLE_SIGNING_KEY and a positive BUNDLE_SEQUENCE'; exit 1; }
+	$(MAKE) build build-publisher pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine chrony-engine
+	$(PYTHON) scripts/build-runtime-bundle.py --boot '$(BUNDLE_BOOT)' --binary-dir dist/bin --engine-dir dist --licenses dist/licenses --private-key-file '$(BUNDLE_SIGNING_KEY)' --sequence '$(BUNDLE_SEQUENCE)' --output '$(BUNDLE_OUTPUT)'
 
 build-linux:
 	@set -eu; umask 022; mkdir -p dist/bin; chmod 755 dist dist/bin; for arch in amd64 arm64; do \
