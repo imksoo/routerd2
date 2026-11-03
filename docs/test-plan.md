@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 11:07 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 11:27 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 実行原則
 
@@ -152,3 +152,17 @@ PVE/QEMUは実行しない。終了後は以前のbuild copy、両bundle/store�
 これはOSの待受競合を原因とする候補失敗と復旧の確認であり、競合が続いたままDNSを提供できるという主張ではない。
 
 実行結果: 2026-11-03、通常build `30054e56fdf6` / `799377d12628`の全factory署名bundleと独立RP-PPPoE/ISC/Linux LANで、更新→明示的復帰→失敗候補からの自動選択復旧が終了0。確認済み版へ再度rollbackする候補の起動時に、router namespace内の独立UDP processでDNS port53を占有した。実DNS workerのEADDRINUSEを観測し、11:03:26 UTC開始の既定120秒trialが11:05:26 UTCに失敗して製品自身がrebootを要求した。読取専用CLIで失敗digest、以前のactive、pending/attempt解消を確認。競合process終了後、保存選択/設定を手修復せずPID 1を再起動し、旧runtimeとpaired startupのrecovered記録、revisionの採用、更新後に追加したDNS回答、DUID、DNS UDP/TCPと両IP TCP/UDPが復旧した。high watermark=2、正常poweroff、captureの上流PD Releaseなしも通過。 これはOS待受競合による候補失敗と、外部競合解消後の復旧の確認。両buildの製品Goは同一で、同じkernelのPID namespaceを再起動した。実装/ABI変更を跨ぐ更新、kernel/bootloader再起動・停電、競合が続いた状態でのDNS提供、全homert profile/ONU/NIC資格は残る。PVE/QEMUと追加PBR調査、共有host時計の変更は行っていない。
+
+## 単体全構成の履歴archive・期限切れ
+
+保存homertのLogRetentionに合わせ、単体/二台native例のevent/DNS/flow/firewall/DHCP fingerprint保持へ既存syslog peerを接続する。
+`make check-uplink-retention`へ通常の`UPLINK_INTERFACE`/`UPLINK_CONFIG`/`UPLINK_SECONDS`等を渡す。
+同じownerが通常通信・設定rollback・PD復旧の後に保持試験を直列実行する（設定変更中に別の通常巡回を競合させない）。
+実際に生成済みのDNS query・終了したflow・NFLOG拒否・DHCP識別記録をread-only SQLで観測する。
+一時intentの期限2秒/間隔1秒とarchive専用の到達不能先で、期限後も元の記録が保持され、DNS UDP/TCP・両IP HTTPSが続くことを確認する。
+正常な受信先へ戻し、元のrecord identity/timestampのsyslog受信と期限削除を確認して元の7日/daily/vacuum intentへ戻す。
+live DBや時計へ時刻/行を注入しない。専用到達不能routeはfinallyで撤去し、WAN/通常syslog/OTLP/BGP peerの経路は変更しない。
+これは短い明示policyの自然期限とarchive送信error/復旧の確認であり、7日経過・lossless UDP archive・全signalの保持資格ではない。
+fixtureの終了後にDB/log/captureを撤去する。
+
+実行結果: 2026-11-03、基準main `6e0f020` + native設定/fixture変更、実行build `799377d12628`（製品Go不変）で、archiveを接続した単体39-resource実HGW/Tailscale手順が終了0。保存homertのLogRetention sinksを再確認し、event/DNS/flow/firewall/DHCP fingerprintの保持へ既存syslog peerを接続した。通常通信・confirmed rollback・PD復旧の後、同じowner内で一時intentの期限2秒/間隔1秒を直列実行。archive専用の到達不能先で4 datasetの元記録を保持したまま、独立端末のDNS UDP/TCPとIPv4/IPv6 HTTPSが成功した。正常な受信先へ戻し、DNS query10件、終了済みflow10件、NFLOG拒否2件、DHCP fingerprint5件について元の識別子/時刻のsyslog受信と期限削除を照合した。元の7日/daily/vacuum intentへ戻した後も通信が成功した。 これは明示した短いpolicyの自然期限・送信error/復旧と27件の受信確認であり、7日経過、lossless UDP配送、全signal/物理機器の資格ではない。変更した二台設定例はschema検証済みで、このarchive条件のHA実通信は未実行。

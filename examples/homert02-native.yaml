@@ -6,6 +6,7 @@ retention:
   max_age_seconds: 604800
   interval_seconds: 86400
   vacuum: true
+  syslog: [{address: "192.0.2.2:5514", facility: local6, tag: routerd2, min_level: info}]
 resources:
 - id: interface/wan0
   interface:
@@ -433,6 +434,7 @@ resources:
         max_age_seconds: 604800
         interval_seconds: 86400
         vacuum: true
+        syslog: [{address: "192.0.2.2:5514", facility: local6, tag: routerd2, min_level: info}]
       log_dhcp: true
       authoritative: true
       max_leases: 200
@@ -521,6 +523,7 @@ resources:
         max_age_seconds: 604800
         interval_seconds: 86400
         vacuum: true
+        syslog: [{address: "192.0.2.2:5514", facility: local6, tag: routerd2, min_level: info}]
       spec:
         cache:
           enabled: true
@@ -985,6 +988,7 @@ resources:
         max_age_seconds: 604800
         interval_seconds: 86400
         vacuum: true
+        syslog: [{address: "192.0.2.2:5514", facility: local6, tag: routerd2, min_level: info}]
 - id: service/packets
   service:
     name: packets
@@ -994,6 +998,7 @@ resources:
         max_age_seconds: 604800
         interval_seconds: 86400
         vacuum: true
+        syslog: [{address: "192.0.2.2:5514", facility: local6, tag: routerd2, min_level: info}]
 - id: interface/sync0
   interface:
     name: sync0

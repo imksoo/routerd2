@@ -1466,6 +1466,7 @@
     },
     {
       "id": "OPS-03",
+      "single_profile_archive_acceptance": "2026-11-03 native examples now connect existing syslog peer to event/DNS/flow/firewall/DHCP fingerprint retention, matching saved homert LogRetention sink intent. Actual HGW39-resource product build799377d12628 (Go unchanged) with independent clients/FRR/chronyd/Headscale/syslog/Collector exited0. Sequential explicit2s/1s policy: unreachable archive-only destination retained all four selected real datasets while LAN DNS UDP/TCP and IPv4/IPv6 HTTPS worked. Recovery received original identities/timestamps and expired DNS10/ended flows10/NFLOG deny2/DHCP fingerprints5. Original7d/daily/vacuum intent and communication restored; no DB/time injection. Ordinary scope/sticky/DNS/DoH/BGP/nDPI/NTP/OTLP/tailnet and PD restart2.01/4.99s passed; no natural renewal/full daemon restart this run. Three normal static builds/race/vet/Python36 and3 example validation passed. Two-node archive examples are config-validated only. No7-day elapsed/lossless UDP/all-signal/physical qualification claim.",
       "title": "観測・retention・export・native DPI",
       "milestone": "M5",
       "track": "operations",

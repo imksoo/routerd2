@@ -1,6 +1,16 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03 11:07 UTC。全体ゴールは継続中。
+更新: 2026-11-03 11:27 UTC。全体ゴールは継続中。
+
+## 単体構成のarchive接続と実履歴の期限切れ
+
+2026-11-03、基準main `6e0f020` + native設定/fixture変更、実行build `799377d12628`（製品Go不変）で、archiveを接続した単体39-resource実HGW/Tailscale手順が終了0。保存homertのLogRetention sinksを再確認し、event/DNS/flow/firewall/DHCP fingerprintの保持へ既存syslog peerを接続した。通常通信・confirmed rollback・PD復旧の後、同じowner内で一時intentの期限2秒/間隔1秒を直列実行。archive専用の到達不能先で4 datasetの元記録を保持したまま、独立端末のDNS UDP/TCPとIPv4/IPv6 HTTPSが成功した。正常な受信先へ戻し、DNS query10件、終了済みflow10件、NFLOG拒否2件、DHCP fingerprint5件について元の識別子/時刻のsyslog受信と期限削除を照合した。元の7日/daily/vacuum intentへ戻した後も通信が成功した。
+
+同じ実行で通常/特別DHCP scope・sticky、二段/条件付きDNS/両DoH、BGP peer障害復旧、nDPI/計数/SNI、NTP、syslog/OTLP、Tailscale/exit、両IP公開通信が通過。PD worker SIGKILL/正常再起動から再確認まで2.01/4.99秒、停止時のzero-lifetime RA/kernel撤去・上流Releaseなしも通過した。短時間2巡回・自然PD更新0回、全daemon再起動は今回未実行。通常Makefile build（後続build ID `6e0f020bf76c`）・3 static実行物、`make race vet`、Python36件・py_compile、3設定例のschema検証が通過。
+
+再実行: `make check-uplink-retention DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18 UPLINK_WAN_MAC=02:72:6f:75:74:03 UPLINK_CONFIG=examples/single-router-dslite-dhcp-dns.yaml UPLINK_SECONDS=20 UPLINK_TAILNET=1`。通常巡回と設定変更を並列に競合させず、同じownerが最後に保持試験を実行する。DB行/時刻やhost時計は変更しない。
+
+これは明示した短いpolicyの自然期限・送信error/復旧と27件の受信確認であり、7日経過、lossless UDP配送、全signal/物理機器の資格ではない。変更した二台設定例はschema検証済みで、このarchive条件のHA実通信は未実行。
 
 ## 失敗した署名候補からの実通信復旧
 

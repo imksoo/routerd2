@@ -33,7 +33,7 @@ def run(args, timeout=12):
     return result.stdout
 
 
-def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_restart, tailnet, config_path):
+def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_restart, tailnet, config_path, retention_check):
     def stop(*_):
         raise KeyboardInterrupt()
 
@@ -1459,6 +1459,8 @@ print(*s.getsockname())
                 wait(lambda: tailnet_observation().get("backend_state") == "Running")
                 check_tailnet()
                 print("PASS combined WAN/PD/LAN/tailnet whole-daemon restart retained identity and restored bidirectional TCP/UDP and Internet exit", flush=True)
+        if retention_check:
+            print(run(["python3", "-I", str(stage / "retention-check.py"), "--stage", str(stage), "--router", router, "--client", client], timeout=180), end="", flush=True)
         returned = any(
             run(
                 [
@@ -1629,6 +1631,7 @@ def main():
     parser.add_argument("--wan-outage", action="store_true", help="Blackhole this isolated router WAN and verify recovery")
     parser.add_argument("--full-restart", action="store_true", help="Restart the entire router with the same state and clients")
     parser.add_argument("--tailnet", action="store_true", help="Add independent Headscale/Tailscale with a fixed private underlay; exercise automatic LAN and real WAN exit together")
+    parser.add_argument("--retention-check", action="store_true", help="Check real history archive failure/recovery after normal communication trials")
     parser.add_argument("--inside", type=Path)
     args = parser.parse_args()
     if args.seconds < 0:
@@ -1639,8 +1642,10 @@ def main():
         parser.error("--dns-upstream belongs to the generated fixture; the native profile owns DNS intent")
     if not args.config and not args.aftr:
         parser.error("--aftr is required by the generated fixture")
+    if args.retention_check and not args.config:
+        parser.error("--retention-check uses the native profile datasets")
     if args.inside:
-        owner(args.inside, args.uplink, args.aftr, args.seconds, args.dns_upstream, args.wan_mac, args.wan_outage, args.full_restart, args.tailnet, args.config)
+        owner(args.inside, args.uplink, args.aftr, args.seconds, args.dns_upstream, args.wan_mac, args.wan_outage, args.full_restart, args.tailnet, args.config, args.retention_check)
         return
     root = [] if os.geteuid() == 0 else ["sudo", "-n"]
     persistent = args.state_dir.resolve() if args.state_dir else None
@@ -1665,7 +1670,7 @@ def main():
             profile = stage / "resource-program.yaml"
             run(root + ["install", "-m", "600", str(args.config.resolve()), str(profile)])
             run(root + ["install", "-m", "500", str(Path("dist/chrony-engine.tar").resolve()), str(stage / "chrony-engine.tar")])
-        for source, name in ([(Path("scripts/tailscale-peer.py"), "peer-fixture.py"), (Path("scripts/syslog-peer.py"), "syslog-peer.py")] if args.config else []) + [(Path(__file__), "owner.py"), (Path("dist/dnsmasq-engine.tar"), "dnsmasq-engine.tar")] + [
+        for source, name in ([(Path("scripts/tailscale-peer.py"), "peer-fixture.py"), (Path("scripts/syslog-peer.py"), "syslog-peer.py"), (Path("scripts/uplink-retention.py"), "retention-check.py")] if args.config else []) + [(Path(__file__), "owner.py"), (Path("dist/dnsmasq-engine.tar"), "dnsmasq-engine.tar")] + [
             (args.binary_dir / n, n)
             for n in ["routerd", "routerd-modules", "routerd-logging"]
         ]:
@@ -1709,6 +1714,8 @@ def main():
             command.append("--full-restart")
         if args.tailnet:
             command.append("--tailnet")
+        if args.retention_check:
+            command.append("--retention-check")
         subprocess.run(
             command,
             check=True,
