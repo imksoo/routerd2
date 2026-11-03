@@ -112,8 +112,8 @@ func ValidateNode(n Node) error {
 	}
 	families := map[bool]bool{}
 	for _, address := range n.Listen {
-		if !usableAddress(address) || families[address.Is4()] {
-			return errors.New("chronyd accepts one unicast listen address per family")
+		if (!usableAddress(address) && !address.IsUnspecified()) || families[address.Is4()] {
+			return errors.New("chronyd accepts one listen address per family")
 		}
 		families[address.Is4()] = true
 	}
