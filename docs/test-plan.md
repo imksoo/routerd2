@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 01:39 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 01:47 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 判定と実行原則
 
@@ -15,9 +15,9 @@
 
 ## 現在の実通信と限界
 
-25-resource native profile、基準main `5b46865` + OS trust-store修正、build ID `5b4686577c4a`で実HGW/独立FRR・Headscale・Tailscale・Linux clientの統合gateが終了0。CA指定を省略してHTTPS登録でき、LAN→tailnet peerのIPv4/IPv6 TCP/UDP、peer→広告LANのIPv4 TCP/UDP、product exit node経由のIPv4/IPv6 HTTPS・UDP DNSが通った。全daemon再起動後もnode identityを保持して同じ通信が復旧した。BGPの相互広告・両kernelの経路・LAN 2端末のNATなしTCP/UDP、DNS/cache/history・SSH/Web・WAN学習NTP源stratum 3と両IP Internetも同時に通過。PD worker SIGKILL/通常再起動後1.89/5.09秒で端末通信が戻り、full restartから全確認完了17.80秒（NTP測定を含む）。2通信round、zero-lifetime RA/kernel withdrawal、upstream Releaseなしを確認。host CA bundleのSHA-256は試験前後で一致。stage/key/CA mount/control DB/capture/namespaceは撤去済み。
+25-resource native profile、main由来build `28cb655c1ced`でDNS拡張を含む実HGW統合gateが終了0。独立dnsmasq 2 processの片系停止で残るupstreamへ切替、両系停止時の両IP cache保持・未取得名のSERVFAIL隔離、復旧を確認。子suffixと複数suffixのsource選択、WAN PD学習DNSによるpublic名のA応答とquery historyのsource、Cloudflare/Google両DoHの実probe成功も確認した。全daemon再起動後も同じDNS source群、BGP両kernel経路とTCP/UDP、Tailscale subnet/exitとidentity、管理・履歴・WAN学習NTP stratum 3、両IP Internetが復旧した。PD worker SIGKILL/通常再起動後2.94/5.18秒で端末通信が復旧。full restartから全確認完了43.90秒はDoH probeの成功待ちとNTP測定を含み、純粋な転送復旧時間ではない。2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。stage/key/CA mount/peer DB/capture/namespaceは撤去済み。
 
-`make check`（Go/Python、Race Detector、vet）、通常Makefile build、設定検証が終了0。3実行物は`readelf`でdynamic dependencyなし、nDPI source/license noticesを確認した。補助検査は実通信の代替ではない。
+製品Goコードは`28cb655`から不変。同checkpointの`make check`（Go/Python、Race Detector、vet）を引き継ぎ、今回の`make test-tools`（36件）・通常Makefile build・設定検証が終了0。3実行物は`readelf`でdynamic dependencyなし、nDPI source/license noticesを確認した。補助検査は実通信の代替ではない。
 
 homert02/03の保存中の実設定は各110 resources。native単体例は25 resourcesであり、resource数の一致を移植目標にはしないが、全意図の受入は未完了。34 work packageもin_progress22/planned12のまま。ens18/ens20はvirtio NICで、NTT ONU直結、対象NIC/実機、arm64、HA、cloud/Kubernetes全体を資格済みとは扱わない。
 
@@ -43,6 +43,12 @@ make check-uplink DOCKER='sudo -n docker' \
 - Tailscaleのpeer→LANはupstream既定のsubnet SNATを使う。旧routerdも既定値を上書きしていない。LAN→peer IPv6は明示NATでproductのtailnet addressを使い、IPv6 LAN subnetの双方向広告とは区別する。両IP exit HTTPS/UDP DNS、node identityと再起動後の通信も確認する。public controlとcontrol hostname bootstrap DNSは未受入。
 
 WAN captureは最大8MB、tailnet captureも最大8MBへ制限する。PD captureは限定filterと実行時間で抑える。ownerのprivate mount/namespace/key/lease/state/captureは終了時に撤去する。`UPLINK_SECONDS=7800`など自然T1へ達する時間で実行すれば同じnative profileの更新も観測できるが、短時間gateの合格で代用しない。
+
+## DNSのsource構成と切替確認
+
+基準main `28cb655`の25-resource native profileへ、2 upstreamの条件付きsource、同じupstreamを使う複数suffix、WAN PDから学習するDNS source、2系統のDoHと明示bootstrapを接続する。旧routerdのresolver/receive callerはsourceを宣言順に評価するため、子suffixを親suffixより先に配置する。longest matchへの自動並替えとは扱わない。
+
+独立dnsmasqを5353/5354へ別processで置き、それぞれ異なるAを返す。通常は選択された回答を記録し、primary停止時にはbackupの応答を確認、両方停止時にはcache済み回答の保持と未取得名のSERVFAILを確認して復旧する。`branch.split.test`と`corp.test`で子suffix/共有upstream、`www.example.net`でWAN学習DNSの応答とquery logのsourceを確認する。2系統のpublic DoHが実probeに成功することも確認する（初回と全daemon restart後に通過済み）。同じsource群をdaemon restart後にも照会し、通常のBGP/Tailscale/DHCP/PD/RA/管理/NTP/Internetを維持する。全private suffixの実peerや、個々のDoH停止切替は今回の範囲と分ける。実行コマンドと隔離/撤去手順は上記のとおり。
 
 ## 別に確認済みの範囲
 

@@ -198,14 +198,26 @@ resources:
               kind: zone
               match: [home.arpa]
               zoneRef: [home]
+            - name: branch-forwarder
+              kind: forward
+              match: [branch.split.test, corp.test]
+              upstreams: [udp://198.18.0.254:5354]
+            - name: wan-learned
+              kind: forward
+              match: [example.net]
+              upstreamFrom:
+                - {resource: DHCPv6PrefixDelegation/wan-pd, field: dnsServers}
             - name: site-forwarder
               kind: forward
               match: [split.test]
-              upstreams: [udp://198.18.0.254:5353]
+              upstreams: [udp://198.18.0.254:5353, udp://198.18.0.254:5354]
             - name: encrypted-public
               kind: forward
               match: ["."]
-              upstreams: [https://cloudflare-dns.com/dns-query]
+              upstreams: [https://cloudflare-dns.com/dns-query, https://dns.google/dns-query]
+              queryTimeout: 1s
+              healthcheck: {interval: 15s, timeout: 3s, failThreshold: 3, passThreshold: 2}
+              bootstrapResolver: [1.1.1.1, 8.8.8.8]
               bootstrapResolverFrom:
                 - {resource: DHCPv6PrefixDelegation/wan-pd, field: dnsServers}
         zones:

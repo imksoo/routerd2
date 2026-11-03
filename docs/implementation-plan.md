@@ -1,6 +1,6 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
-更新: 2026-11-03 01:39 UTC。main `5b46865`を基にBGP/Tailscaleを含む25-resource native単体profileが実HGW/独立peer/client gateを通過。OS標準CAをTailscale engineへ引き継ぐ修正、`make check`（Race Detector・vet）、static build/設定検証も通過。全homertとHA/対象環境は継続中。
+更新: 2026-11-03 01:47 UTC。main `28cb655`由来buildで25-resource native単体profileのDNS複数上流・suffix/学習DNS・両DoHを実HGW/独立peer/client gateへ統合し、restartまで終了0。製品Goコードは不変。全homertとHA/対象環境は継続中。
 
 全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で9日14時間10分、記録済み期限から4日8時間42分経過した。34 work packageはin_progress22件/planned12件。部分受入を全体の完成に数えない。
 
@@ -29,7 +29,7 @@ mainを取得し、直近の変更を統合した。34 work packageの状態は�
 
 25-resource native profile、基準main `5b46865` + OS trust-store修正、build ID `5b4686577c4a`で実HGW/独立FRR・Headscale・Tailscale・Linux clientの統合gateが終了0。CA指定を省略してHTTPS登録でき、LAN→tailnet peerのIPv4/IPv6 TCP/UDP、peer→広告LANのIPv4 TCP/UDP、product exit node経由のIPv4/IPv6 HTTPS・UDP DNSが通った。全daemon再起動後もnode identityを保持して同じ通信が復旧した。BGPの相互広告・両kernelの経路・LAN 2端末のNATなしTCP/UDP、DNS/cache/history・SSH/Web・WAN学習NTP源stratum 3と両IP Internetも同時に通過。PD worker SIGKILL/通常再起動後1.89/5.09秒で端末通信が戻り、full restartから全確認完了17.80秒（NTP測定を含む）。2通信round、zero-lifetime RA/kernel withdrawal、upstream Releaseなしを確認。host CA bundleのSHA-256は試験前後で一致。stage/key/CA mount/control DB/capture/namespaceは撤去済み。
 
-次は残る複数DNS/learnedDNS、DS-Lite/backup WANのnative設定、二BGP peers等の単体経路を埋め、同じprofileで自然更新と継続通信を確認する。追加のPBR調査・PVE/QEMUは行わない。
+DNSの複数上流/suffix/learnedDNS/両DoHを単体gateで接続した。次は実設定のprivate peer全体の確認、DS-Lite/backup WANのnative設定、二BGP peers等の単体経路を埋め、同じprofileで自然更新と継続通信を確認する。追加のPBR調査・PVE/QEMUは行わない。
 
 ## 仕切り直した実行順
 

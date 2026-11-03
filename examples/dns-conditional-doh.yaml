@@ -1,5 +1,6 @@
 # Replace the example LAN, domain, provider and WAN interface values for the site.
-# DNS is one service: longest matching suffix selects a conditional source;
+# DNS is one service: the first matching source selects the conditional path;
+# place more specific suffixes before their parent suffixes.
 # unmatched names use the encrypted public resolver.
 schema_version: 2
 resources:

@@ -324,7 +324,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             run(["ip", "-n", client, "address", "add", "198.19.0.2/24", "dev", "mgmt-peer"])
             run(["ip", "-n", client, "link", "set", "mgmt-peer", "up"])
 
-        def start_private_dns():
+        def start_private_dns(port, answer):
             return start(
                 client,
                 [
@@ -335,9 +335,9 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                     "--no-resolv",
                     "--bind-interfaces",
                     "--listen-address=" + dns_peer_address,
-                    "--port=5353",
+                    "--port=" + str(port),
                     "--local-ttl=1",
-                    "--address=/#/192.0.2.77",
+                    "--address=/#/" + answer,
                 ],
                 "private-dns",
             )
@@ -372,7 +372,9 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             start(bgp_peer, ["python3", "-u", "-c", echo["ECHO_SERVER"], "203.0.113.1"], "bgp-echo")
             wait(lambda: "READY" in (stage / "bgp-echo.log").read_text())
 
-        private_dns = start_private_dns()
+        private_dns = start_private_dns(5353, "192.0.2.77")
+        if config_path is not None:
+            backup_dns = start_private_dns(5354, "192.0.2.78")
         if config_path is not None:
             chrony_root = stage / "chrony-peer"
             chrony_root.mkdir()
@@ -775,20 +777,43 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                         raise
             check_tailnet()
             print("PASS actual HGW automatic LAN -> Tailscale peer IPv4/IPv6 (explicit IPv6 NAT), advertised IPv4 LAN <- peer TCP/UDP; IPv4/IPv6 exit HTTPS/UDP DNS", flush=True)
+        cached_answers = {}
         for server, family in ((lease[3], "-4"), (str(router_dns), "-6")):
-            answer = run(inside(client, ["dig", family, "@" + server, "available.split.test", "A", "+nocookie", "+short", "+time=3", "+tries=1"]))
-            assert answer.strip() == "192.0.2.77", "conditional DNS query reached the wrong upstream: " + answer
+            answer = run(inside(client, ["dig", family, "@" + server, "available.split.test", "A", "+nocookie", "+short", "+time=3", "+tries=1"])).strip()
+            assert answer in ({"192.0.2.77", "192.0.2.78"} if config_path is not None else {"192.0.2.77"}), "conditional DNS reached the wrong upstream: " + answer
+            cached_answers[server] = answer
         private_dns.terminate()
         private_dns.wait(timeout=3)
         if config_path is not None:
             for server, family in ((lease[3], "-4"), (str(router_dns), "-6")):
+                answer = run(inside(client, ["dig", family, "@" + server, "failover.split.test", "A", "+short", "+time=3", "+tries=1"]))
+                assert answer.strip() == "192.0.2.78", "conditional DNS did not use its remaining upstream: " + answer
+            backup_dns.terminate()
+            backup_dns.wait(timeout=3)
+            for server, family in ((lease[3], "-4"), (str(router_dns), "-6")):
                 cached = run(inside(client, ["dig", family, "@" + server, "available.split.test", "A", "+nocookie", "+short", "+time=3", "+tries=1"]))
-                assert cached.strip() == "192.0.2.77", "cached answer was lost when its upstream stopped: " + cached
+                assert cached.strip() == cached_answers[server], "cached answer was lost when its upstreams stopped: " + cached
         failed = run(inside(client, ["dig", "@" + lease[3], "offline.split.test", "A", "+time=3", "+tries=1"]))
         assert "status: SERVFAIL" in failed, "unavailable conditional DNS source fell through to the default upstream"
-        private_dns = start_private_dns()
-        wait(lambda: subprocess.run(inside(client, ["dig", "@" + lease[3], "recovered.split.test", "A", "+short", "+time=2", "+tries=1"]), capture_output=True, text=True).stdout.strip() == "192.0.2.77")
-        print("PASS independent conditional DNS source, failure isolation and recovery over LAN IPv4/IPv6", flush=True)
+        private_dns = start_private_dns(5353, "192.0.2.77")
+        if config_path is not None:
+            backup_dns = start_private_dns(5354, "192.0.2.78")
+        wait(lambda: subprocess.run(inside(client, ["dig", "@" + lease[3], "recovered.split.test", "A", "+short", "+time=2", "+tries=1"]), capture_output=True, text=True).stdout.strip() in ({"192.0.2.77", "192.0.2.78"} if config_path is not None else {"192.0.2.77"}))
+        print("PASS independent conditional DNS upstream availability, failure isolation and recovery over LAN IPv4/IPv6", flush=True)
+
+        def check_dns_sources():
+            for server, family in ((lease[3], "-4"), (str(router_dns), "-6")):
+                for name in ("answer.branch.split.test", "answer.corp.test"):
+                    answer = run(inside(client, ["dig", family, "@" + server, name, "A", "+short", "+time=3", "+tries=1"]))
+                    assert answer.strip() == "192.0.2.78", "DNS suffix selected the wrong source: " + answer
+                answer = run(inside(client, ["dig", family, "@" + server, "www.example.net", "A", "+time=3", "+tries=1"]))
+                assert "status: NOERROR" in answer and re.search(r"\sIN\s+A\s+", answer), "WAN learned DNS did not resolve the public name: " + answer
+            wait(lambda: any(q["upstream"] == "wan-learned" and q["responseCode"] == "NOERROR" for q in query("control.sock", "/v1/services/service.dns/dns-history?name=www.example.net&limit=20")["queries"]))
+            def doh_ready():
+                observed = query("services/dns.dns.sock", "/v1/status")["resources"][0]["observed"]["upstreams"]
+                return all(endpoint + ":Healthy" in observed for endpoint in ("https://cloudflare-dns.com/dns-query", "https://dns.google/dns-query"))
+            wait(doh_ready)
+            print("PASS multiple conditional suffixes, nested source precedence, WAN-learned DNS answers and both independent public DoH upstream probes", flush=True)
 
         def check_bgp():
             def paths_ready():
@@ -820,7 +845,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             wait(lambda: any(q["cacheHit"] for q in query("control.sock", history_path)["queries"]))
             page = run(inside(client, ["curl", "--noproxy", "*", "--fail", "--max-time", "4", "-sS",
                 "http://198.19.0.1:8080/dns-queries?service=service.dns&name=available.split.test.&limit=20"]))
-            assert 'data-query="' in page and "192.0.2.77" in page, "Web console omitted the recorded DNS answer"
+            assert 'data-query="' in page and any(address in page for address in ("192.0.2.77", "192.0.2.78")), "Web console omitted the recorded DNS answer"
             denied = subprocess.run(inside(client, ["curl", "--interface", "client0", "--noproxy", "*", "--max-time", "2", "-sS", "http://198.19.0.1:8080/"]), capture_output=True)
             assert denied.returncode != 0, "management console was reachable through the LAN interface"
             print("PASS loopback/management DNS, cache during upstream outage, persistent query history, SSH host identity and Web access restricted to management interface", flush=True)
@@ -841,6 +866,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             print("PASS NTP synchronized and independent LAN chronyd clients received time; host clock adjustment disabled", flush=True)
 
         if config_path is not None:
+            check_dns_sources()
             check_management()
             check_bgp()
             check_time()
@@ -1062,6 +1088,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             wait_dns()
             check_traffic()
             if config_path is not None:
+                check_dns_sources()
                 check_management()
                 check_bgp()
                 check_time()
