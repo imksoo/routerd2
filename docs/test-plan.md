@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 12:43 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 13:00 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 実行原則
 
@@ -204,3 +204,12 @@ DoH確認は固定provider名ではなく、実configに設定されたHTTPS上�
 通常の管理SSH/WebとLANからの管理console拒否、公開Internet/DNS/NTP、設定rollbackを維持し、全daemon再起動後にも両peerのTCP/UDP・観測sourceを再確認する。物理HGWの管理UIやHAのWAN VIP切替を検証したことにはしない。新規WAN/NIC・host routeは追加しない。
 
 2026-11-03: 上記の単体39-resource手順は終了0。通常build `96d01127742c`で、管理側/実WAN内peerへのTCP/UDPとpeer観測sourceをcold start・全daemon再起動後に確認。全項目再確認111.47秒は転送断時間ではない。詳細・限界は[引き継ぎ](pve-codex-handoff.md)を参照する。
+
+## 保存homertの個別IPv4経路とblackhole
+
+単体例には、LAN側gateway経由の`192.168.100.1/32`（metric10）、WANへのon-link `192.168.0.0/16`（metric20）、LAN側gateway経由の`172.16.0.0/12`（metric20）、`10.0.0.0/8` blackhole（metric20）を宣言する。LAN gatewayのbenchmarkアドレスは`198.18.0.253`で、実サイト値を公開しない。
+前項と同じ`make check-uplink`で、独立gateway namespaceに対象の受信アドレスとsocket peerを設定する。WAN側peerには実WAN lease経由で試験clientへの戻りhost routeを明示する。個別経路/私設網/WAN on-linkのTCP/UDP、kernelが選んだinterfaceとpeerの観測sourceを照合する。
+blackholeは実clientからTCP/UDPを送り、timeout、kernel blackhole route、短時間・最大20 packetのcaptureでLAN ingressあり/egressなしを確認する。管理側・追加経路の確認は基本DHCP/DNSが使えた直後に行い、他の既存項目の待機を先行させない。全daemon再起動後にも同じ確認を行う。
+このscopeは単体Linuxの経路適用と転送であり、実Starlink/IX2215の資格ではない。保存設定にある二つのLAN IPv4サブネットと異なるDHCP profileの構成差は別途解消し、同一サブネットのpool確認で代用しない。
+
+2026-11-03: 通常build `0fbb5c31fd34`、単体43-resourceの上記手順は終了0。起動時・全daemon再起動後の実TCP/UDPとblackhole ingress/egressを確認。全項目再確認111.44秒は転送断時間ではない。残る二つのLAN subnet/DHCP profileの構成差は未受入。詳細は[引き継ぎ](pve-codex-handoff.md)へ記録した。

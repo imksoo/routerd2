@@ -898,7 +898,12 @@
         "delegated_host_mask": "pd-host/native-44: homertの現行設定と旧routerdのdelegatedAddressWithPrefixLength/DS-Lite source処理を比較。delegations[].prefix_lengthは0/64をLAN、128をhost endpointとして設置し、旧IPv6DelegatedAddress指定を保持する。別DS-Lite suffixは/128で余計な接続/64を作らない。製品CLIの変換結果と実daemon・独立ISC/radvd/Linuxで、LANと同じ/64内にある二WAN /128の送信元TCP/UDP、LAN向けkernel route、通常DAD、RA/IA_NA、worker交換・元期限・失効復旧・DUID trial rollbackが成功。実HGW30秒でもWAN /128からの実AFTR/DS-Lite IPv4 HTTPS、native IPv6 HTTPS、DNS UDP/TCP、PD SIGKILL/RebindのDUID保持とRA/Release撤去が成功。別の長時間PD ownerとhost管理状態は不変。make checkのGo/Python/Race/vet、両architectureのCGO_ENABLED=0 buildと最終六ELFの署名catalog/publisher/stageのRace検査も成功。native-44自然Renew、ARM64実行、旧条件/VRRP import、homert置換、対象NICは未完了。",
         "original_egress_native76": "2026-10-30 JST: Old03:56JST HGW natural run failed05:05 before T1 with zero RA/default withdrawal. Do not claim resolved. Separate four-path run05:27JST continues on preceding candidate; actual T1 07:27:21JST. No long-run completion claim.",
         "heartbeat_ra_native76": "2026-10-30 JST: dns-input-native76 separates learned DNS input from blocking listener reports, preserving original deadlines. Local real-DNS TCP stall regression failed on preceding loop and passed after change. Prior08:12JST TCP DNS28088 SERVFAIL had no WAN query; exact historical failure branch unavailable, so causality remains unproven. New Alpine3.24.3/kernel6.18.59/512MiB/2-TCG-vCPU signed runtime passed99.57s prepare with acquired DNS UDP/TCP and both-IP TCP/UDP/management, normal reboot92.94s/confirmation and DUID/SSH retention. Intact subsequent candidate adopted config; independent Health outage withheld confirmation; native90s trial automatically restored known-good runtime/config, failure record, DUID/SSH, management/acquired DNS/both-IP; elapsed253.49s, full fixture PASS. Full make check passed; concurrent same-candidate pair/rejoin failed with VRRP effect request timeout, cause unresolved. Three traced runs passed without proving failure removal; final overlapped143.285s release Race, maximum effect1.020s/0.836s, TCP4.156s/UDP loss0. Temporary trace code removed. Related Race/vet/CGO0 amd64+arm64/signed sixELF passed. Separate traced no-replay HGW run completed7800s/724 rounds, natural Renew/Reply09:07:18JST matched once, whole daemon restart restored both clients10.23s; not latest DNS candidate, direct ONU or physical NIC qualification. Full native homert single-router profile and HA acceptance remain incomplete; real TCP/UDP allow/drop and capture passed. Entire34 packages/deadline/target qualification incomplete.",
-        "single_owner_aftr_and_registration": "2026-11-03: AFTR now reads typed inputs and publishes snapshots in one loop; removed polling goroutine/channel and retained original source/DNS deadlines. Real single38 and AFTR daemon/socket checks passed before the final supervisor status fix. Final paired47 HGW gate with that fix passed; initial AFTR409 absent from inspected stop reasons. Original-expiry tests use a2s grant to remain live through the1s input poll, then verify its original expiry. Latest single natural-T1/long-run acceptance remains pending; see CORE-03 and docs/pve-codex-handoff.md."
+        "single_owner_aftr_and_registration": "2026-11-03: AFTR now reads typed inputs and publishes snapshots in one loop; removed polling goroutine/channel and retained original source/DNS deadlines. Real single38 and AFTR daemon/socket checks passed before the final supervisor status fix. Final paired47 HGW gate with that fix passed; initial AFTR409 absent from inspected stop reasons. Original-expiry tests use a2s grant to remain live through the1s input poll, then verify its original expiry. Latest single natural-T1/long-run acceptance remains pending; see CORE-03 and docs/pve-codex-handoff.md.",
+        "single_profile_static_routes": {
+          "source": "0fbb5c3; normal build0fbb5c31fd34; Go unchanged",
+          "result": "2026-11-03、基準main `0fbb5c3` + native設定/fixture変更、通常build `0fbb5c31fd34`（製品Go不変）で、4つの保存IPv4経路を接続した単体43-resource実HGW手順が終了0。LAN gateway経由の個別host/私設網、WAN on-linkで独立clientのTCP/UDPが届き、選択interfaceとpeerの実観測sourceを照合した。10/8 blackholeはTCP/UDP timeout、実kernel routeと短時間captureのLAN ingressあり/egressなしで確認。追加経路と管理側通信は基本DHCP/DNSの直後に先行確認し、全daemon再起動後にも再確認した。",
+          "limit": "通常Internet/DNS/NTP、DHCP、管理、BGP、運用記録、Tailscaleも通過。confirmed rollback期限切れ30.25秒/control再起動6.05秒、PD SIGKILL2.29秒/通常再起動4.98秒、全daemon後の全項目再確認111.44秒。全項目時間は転送断時間ではない。20秒の2巡回・自然PD更新0回。通常build・3実行物static link、make test-tools race vet・py_compileが通過。実Starlink/IX2215・物理NIC資格ではない。保存設定は異なる二つのLAN IPv4 subnetを使うが、単体例のDHCP profileはまだ同一subnetの別poolであり、次に実構成との差を解消する。"
+        }
       }
     },
     {
@@ -11226,7 +11231,7 @@
     "physical_target_profile": "homert02/03 are identified PVE guests with4vCPU/4GiB, three VirtIO NICs and VirtIO/SCSI disks. Matching isolated PVE product boot/recovery was exercised; actual WAN/LAN attachment, clean installation from a preconverted native configuration, measured load and any additional hardware/architecture qualification remain open.",
     "validation_reporting": "Use docs/test-plan.md for the concise current gate state. Detailed historical checkpoint ledgers are not acceptance authority; keep only current result, limits and repeatable procedure. Never claim unrun gates or partial homert profiles complete.",
     "current_acceptance": {
-      "as_of_utc": "2026-11-03T12:43:23Z",
+      "as_of_utc": "2026-11-03T13:00:24Z",
       "homert_source": "User-provided read-only working copies at chatty.lain.local:~/homert02; the current homert02 and homert03 files each contain 110 resources with matching kind counts. Do not publish configuration values or secrets.",
       "completed_gates": [
         "Go runtime checkpoint842c47e passed make check and final runtimeplan Race. This unchanged Go code plus the bundle producer passed normal build, test-tools/race/vet and actual publisher/receiver operations.",
@@ -11243,18 +11248,18 @@
         "Kubernetes",
         "SAM/federation full path"
       ],
-      "tested_source_head": "96d0112 plus single-profile management/WAN-local source NAT and actual-client checks; runtime Go unchanged",
+      "tested_source_head": "0fbb5c3 plus four static-route declarations and actual-client/capture checks; runtime Go unchanged",
       "native_examples": {
-        "examples/single-router-dslite-dhcp-dns.yaml": 39,
+        "examples/single-router-dslite-dhcp-dns.yaml": 43,
         "examples/homert02-native.yaml": 48,
         "examples/homert03-native.yaml": 48,
         "full_homert_profile": "not present; the examples do not represent the complete current 110-resource intent"
       },
       "latest_native_profile_gate": {
-        "status": "39-resource actual-HGW management/WAN-local NAT and whole-daemon restart passed (exit0)",
-        "source": "96d0112; normal build96d01127742c; Go unchanged",
-        "observed": "2026-11-03、基準main `96d0112` + native設定/fixture変更、通常build `96d01127742c`（製品Go不変）で、LAN→管理側/WAN内機器の単体39-resource実HGW手順が終了0。保存homertのRFC1918宛先除外、管理側forward/SNATを単体例へ接続し、単体WAN内宛ては現用DHCPアドレスを使うmasqueradeで表した。既存管理peerと既存WAN gateway namespaceの実DHCPアドレスへ、別namespaceの自動LAN clientからTCP/UDPで通信し、peerがsocketで観測した送信元が管理アドレス/実WAN leaseであることを確認。全daemon再起動後にも同じ通信が通過した。管理peer自身の自己宛て通信は使っていない。",
-        "limit": "20-second observation/2 rounds/0 natural PD renewals. Full checks111.47s is not forwarding outage. Physical HGW management UI, paired WAN VIP SNAT and full homert acceptance remain open."
+        "status": "43-resource actual-HGW static/blackhole route integration and whole-daemon restart passed (exit0)",
+        "source": "0fbb5c3; normal build0fbb5c31fd34; Go unchanged",
+        "observed": "2026-11-03、基準main `0fbb5c3` + native設定/fixture変更、通常build `0fbb5c31fd34`（製品Go不変）で、4つの保存IPv4経路を接続した単体43-resource実HGW手順が終了0。LAN gateway経由の個別host/私設網、WAN on-linkで独立clientのTCP/UDPが届き、選択interfaceとpeerの実観測sourceを照合した。10/8 blackholeはTCP/UDP timeout、実kernel routeと短時間captureのLAN ingressあり/egressなしで確認。追加経路と管理側通信は基本DHCP/DNSの直後に先行確認し、全daemon再起動後にも再確認した。",
+        "limit": "20-second observation/2 rounds/0 natural PD renewals. Full checks111.44s is not forwarding outage. Distinct primary/legacy LAN subnets are not yet represented by the single profile."
       },
       "upstream_selection_correction": "Existing LAN static gateway, not ens20. Implemented and verified group weights 120 -> 80 -> 60 -> 120 with 60s hysteresis, actual Health workers, both LAN clients TCP/UDP, conntrack marks and kernel next hops. No new WAN NIC or site IP allocation prerequisite.",
       "latest_ha_foundation_gate": {
@@ -11377,7 +11382,7 @@
     {
       "stage": 1,
       "profile": "homert-single-implementation",
-      "next": "Connect saved individual private IPv4 routes and blackhole into the complete single-router profile and verify actual LAN packets with independent peers. Management/WAN-local source NAT and public DNS/NTP redirects now passed cold start and whole-daemon restart. Retain management recovery, no new WAN NIC, PVE/QEMU or additional PBR investigation. Keep full homert, paired integration and all34 work packages in scope.",
+      "next": "Match saved homert dual IPv4 LAN subnets and DHCP profiles. Current native example still puts primary and special pools in one subnet, unlike the saved primary/legacy /16 networks. Add the second address on the existing LAN interface, match gateway/source-NAT intent, then verify independently selected clients, masks/options, DNS/Internet and routing early. Keep no new WAN NIC, PVE/QEMU or additional PBR investigation; all34 packages and paired/physical acceptance remain in scope.",
       "acceptance": "Cold-start the complete single-router profile with an independent WAN peer and Linux client. Verify WAN/LAN DHCPv4 scopes and reservations, DHCPv6-PD/Information identity and natural renew, RA/DAD/SLAAC, local/conditional/DoH DNS, all DS-Lite paths and IPv6, Health/PBR, NAT/MTU/MSS, BGP/NTP/Tailscale/management where configured, and worker/daemon restart and recovery from actual packets, client results, kernel routes and firewall state. Keep ONU/physical-NIC qualification separate."
     },
     {

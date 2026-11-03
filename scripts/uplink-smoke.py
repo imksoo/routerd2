@@ -385,6 +385,11 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             echo = runpy.run_path(str(stage / "peer-fixture.py"))
             gateway_addresses = json.loads(run(["ip", "-n", gateway, "-j", "-4", "address", "show", "dev", "gateway-wan"]))
             wan_local_peer = next(a["local"] for link in gateway_addresses for a in link["addr_info"] if a["family"] == "inet")
+            for address, interface in (("192.168.100.1", "lo"), ("172.20.1.1", "lo"), ("192.168.50.1", "gateway-wan")):
+                run(["ip", "-n", gateway, "address", "add", address + "/32", "dev", interface])
+                name = "static-device-" + address
+                start(gateway, ["python3", "-u", "-c", echo["ECHO_SERVER"], address], name)
+                wait(lambda name=name: "READY" in (stage / (name + ".log")).read_text())
             for namespace, address, name in ((client, "198.19.0.2", "management-device"), (gateway, wan_local_peer, "wan-local-device")):
                 start(namespace, ["python3", "-u", "-c", echo["ECHO_SERVER"], address], name)
                 wait(lambda name=name: "READY" in (stage / (name + ".log")).read_text())
@@ -791,6 +796,51 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             wait(listening)
             print("Observed fresh IPv4/IPv6 DNS listener readiness; seconds", round((time.clock_gettime_ns(time.CLOCK_BOOTTIME) - started) / 1e9, 2), flush=True)
 
+        def check_local_devices():
+            wan = query("control.sock", "/v1/services/service.wan4")["snapshot"]
+            for destination, translated in (("198.19.0.2", "198.19.0.1"), (wan_local_peer, wan["currentAddress"])):
+                # The other LAN namespace owns the management peer. Use the
+                # automatic client so packets actually traverse the router.
+                run(inside(automatic, ["python3", "-c", echo["ECHO_CLIENT"], destination, translated]))
+            print("PASS independent LAN client reached management and WAN-local devices over TCP/UDP; peers observed the configured management and current WAN source addresses", flush=True)
+
+        def check_static_routes():
+            wan = query("control.sock", "/v1/services/service.wan4")["snapshot"]["currentAddress"]
+            source = json.loads(run(["ip", "-n", automatic, "-j", "route", "get", "192.168.50.1"]))[0]["prefsrc"]
+            # The WAN peer also serves the existing LAN gateway fixture. This
+            # host route gives its WAN device a symmetric return path.
+            run(["ip", "-n", gateway, "route", "replace", source + "/32", "via", wan, "dev", "gateway-wan"])
+            for destination, expected, interface in (("192.168.100.1", "198.18.0.1", "lan0"),
+                    ("172.20.1.1", "198.18.0.1", "lan0"), ("192.168.50.1", source, "wan0")):
+                route = json.loads(run(["ip", "-n", router, "-j", "route", "get", destination, "from", source, "iif", "lan0"]))[0]
+                assert route["dev"] == interface, route
+                run(inside(automatic, ["python3", "-c", echo["ECHO_CLIENT"], destination, expected]))
+            blackholes = json.loads(run(["ip", "-n", router, "-j", "route", "show", "type", "blackhole", "10.0.0.0/8"]))
+            assert any(row.get("dst") == "10.0.0.0/8" for row in blackholes), blackholes
+            packet_file = stage / "blackhole.pcap"
+            (stage / "blackhole-capture.log").write_text("")
+            packets = start(router, ["tcpdump", "--immediate-mode", "-Z", "root", "-U", "-n", "-i", "any",
+                "-c", "20", "-w", str(packet_file), "dst host 10.23.42.1 and (tcp port 18080 or udp port 18081)"], "blackhole-capture")
+            try:
+                wait(lambda: "listening on" in (stage / "blackhole-capture.log").read_text())
+                run(inside(automatic, ["python3", "-c", """import socket
+for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
+ with socket.socket(socket.AF_INET,kind) as connection:
+  connection.settimeout(1)
+  try:
+   connection.connect(('10.23.42.1',port));connection.sendall(b'blackhole');connection.recv(64)
+  except socket.timeout:continue
+  raise AssertionError('blackhole returned a reply')
+"""]))
+            finally:
+                packets.send_signal(signal.SIGINT)
+                packets.wait(timeout=5)
+            observed = subprocess.run(inside(router, ["tcpdump", "-n", "-r", "-"]), input=packet_file.read_bytes(), capture_output=True, check=True).stdout.decode()
+            for port in (18080, 18081):
+                assert any(" In " in row and "10.23.42.1." + str(port) in row for row in observed.splitlines()), observed
+            assert " Out " not in observed, observed
+            print("PASS configured host/private/on-link routes carried TCP/UDP with peer-observed sources; blackhole TCP/UDP entered LAN and never left the router", flush=True)
+
         wait_dns()
         if config_path is not None:
             for name, expected in (("router." + lan_domain, "198.18.0.1"), ("storage." + lan_domain, "198.18.0.11")):
@@ -799,6 +849,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             answer = run(inside(client, ["dig", "-6", "@" + str(router_dns), "router." + lan_domain, "AAAA", "+short", "+time=3", "+tries=1"]))
             assert ipaddress.IPv6Address(answer.strip()) == router_dns, "LAN DNS router AAAA does not match the router's observed delegated address: " + answer
             print("PASS independent LAN client resolved router IPv4/IPv6 and its DHCP reservation through routerd2 DNS", flush=True)
+            check_local_devices()
+            check_static_routes()
         if tailnet:
             def tailnet_observation():
                 return query("control.sock", "/v1/services/service.tailnet").get("snapshot", {})
@@ -1056,14 +1108,6 @@ print(*s.getsockname())
             assert denied.returncode != 0, "management console was reachable through the LAN interface"
             print("PASS loopback/management DNS, cache during upstream outage, persistent query history, SSH host identity and Web access restricted to management interface", flush=True)
 
-        def check_local_devices():
-            wan = query("control.sock", "/v1/services/service.wan4")["snapshot"]
-            for destination, translated in (("198.19.0.2", "198.19.0.1"), (wan_local_peer, wan["currentAddress"])):
-                # The other LAN namespace owns the management peer. Use the
-                # automatic client so packets actually traverse the router.
-                run(inside(automatic, ["python3", "-c", echo["ECHO_CLIENT"], destination, translated]))
-            print("PASS independent LAN client reached management and WAN-local devices over TCP/UDP; peers observed the configured management and current WAN source addresses", flush=True)
-
         special_clients = []
         def start_special_client(index, mac, requested=""):
             namespace = "r2special" + str(index) + "-" + str(os.getpid())
@@ -1205,7 +1249,6 @@ print(*s.getsockname())
             check_dns_sources()
             check_lan_distribution()
             check_management()
-            check_local_devices()
             check_bgp()
             check_bgp_peer_recovery()
             check_operations()
@@ -1497,6 +1540,7 @@ print(*s.getsockname())
                 check_dns_sources()
                 check_management()
                 check_local_devices()
+                check_static_routes()
                 check_bgp()
                 check_dslite_paths()
                 wait(lambda: all(query("control.sock", "/v1/services/service.health-dslite" + str(i)).get("snapshot", {}).get("active", False) for i in range(3)))

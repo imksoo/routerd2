@@ -1,6 +1,12 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03 12:43 UTC。全体ゴールは継続中。
+更新: 2026-11-03 13:00 UTC。全体ゴールは継続中。
+
+## 保存IPv4経路とblackholeの単体通信
+
+2026-11-03、基準main `0fbb5c3` + native設定/fixture変更、通常build `0fbb5c31fd34`（製品Go不変）で、4つの保存IPv4経路を接続した単体43-resource実HGW手順が終了0。LAN gateway経由の個別host/私設網、WAN on-linkで独立clientのTCP/UDPが届き、選択interfaceとpeerの実観測sourceを照合した。10/8 blackholeはTCP/UDP timeout、実kernel routeと短時間captureのLAN ingressあり/egressなしで確認。追加経路と管理側通信は基本DHCP/DNSの直後に先行確認し、全daemon再起動後にも再確認した。
+
+通常Internet/DNS/NTP、DHCP、管理、BGP、運用記録、Tailscaleも通過。confirmed rollback期限切れ30.25秒/control再起動6.05秒、PD SIGKILL2.29秒/通常再起動4.98秒、全daemon後の全項目再確認111.44秒。全項目時間は転送断時間ではない。20秒の2巡回・自然PD更新0回。通常build・3実行物static link、make test-tools race vet・py_compileが通過。実Starlink/IX2215・物理NIC資格ではない。保存設定は異なる二つのLAN IPv4 subnetを使うが、単体例のDHCP profileはまだ同一subnetの別poolであり、次に実構成との差を解消する。 再実行は[試験計画](test-plan.md)の「保存homertの個別IPv4経路とblackhole」。既存namespace内のpeer設定だけを行い、host route・PVE/QEMU・追加PBR調査は増やしていない。
 
 ## 管理側・WAN内機器への単体転送/NAT
 
