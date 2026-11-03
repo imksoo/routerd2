@@ -1996,3 +1996,9 @@ source fixture、isolated lab、engine PoC、provider simulator の実装は現�
 
 移植元 source の参照はすべて pinned SHA を使用する。
 外部 engine の方式は選定候補であり、掲載した upstream の機能説明を routerd2 への統合完了証拠として扱わない。
+
+### 実HGW二台profileの初期通信（2026-11-03）
+
+2026-11-03 04:12 UTC: 通常Makefile build ID `a3444d519fb0`（製品Goはwildcard NTP listener修正`19682da`を含む）と各47-resource二台profileで、実HGWの共有WAN RA/PD、共有LAN IPv6 identity、VRRP準備後公開、実DHCP端末のIPv4/IPv6 HTTPS・UDP/TCP DNS・独立chronyd `-Q`によるVIP NTP応答が通過した。現用aの正常停止後、同じ端末設定のままbで全項目が復旧し、停止開始から再確認まで17.01秒、途中の試行失敗3回。RA/NA packetとkernelも観測した。無停止・既存socket継続・逆方向復帰・全機能安定性の受入ではない。初期のVIP DNS拒否は`accept_mode: true`で修正した。単発失敗で試験を止める条件は廃し、断と復旧を記録する。
+
+上流は既存のDS-Lite群120→別DS-Lite80→既存LAN静的gateway60。ens20、新規回線、保存設定にないPPPoE終端を前提にしない。`make check-uplink-ha`で再実行する。自然PD T1は別のlive ownerで継続中。次は同じ二台profileの逆方向復帰・既存通信・全サービスと、既知のeffect ACK timeout/適用順序を確認する。

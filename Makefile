@@ -258,6 +258,13 @@ check-uplink: build dnsmasq-engine $(if $(UPLINK_CONFIG),chrony-engine) $(if $(f
 	@if test -n '$(UPLINK_CONFIG)'; then test -z '$(UPLINK_AFTR)' -a -z '$(UPLINK_DNS_UPSTREAM)' || { printf '%s\n' 'UPLINK_CONFIG supplies its own AFTR, DNS and features'; exit 1; }; $(RELEASE_BUILT_DIR)/routerd config validate '$(UPLINK_CONFIG)'; fi
 	$(PYTHON) scripts/uplink-smoke.py --uplink '$(UPLINK_INTERFACE)' $(if $(UPLINK_CONFIG),--config '$(UPLINK_CONFIG)',--aftr '$(UPLINK_AFTR)') --seconds '$(UPLINK_SECONDS)' $(if $(UPLINK_CONFIG),,--dns-upstream '$(UPLINK_DNS_UPSTREAM)') --wan-mac '$(UPLINK_WAN_MAC)' $(if $(UPLINK_STATE_DIR),--state-dir '$(UPLINK_STATE_DIR)') $(if $(filter 1,$(UPLINK_WAN_OUTAGE)),--wan-outage) $(if $(filter 1,$(UPLINK_FULL_RESTART)),--full-restart) $(if $(filter 1,$(UPLINK_TAILNET)),--tailnet)
 
+.PHONY: check-uplink-ha
+check-uplink-ha: build dnsmasq-engine conntrack-engine chrony-engine tailscale-engine tailscale-peers
+	@test -n '$(UPLINK_INTERFACE)' || { printf '%s\n' 'UPLINK_INTERFACE must select the authorized local access network'; exit 1; }
+	$(RELEASE_BUILT_DIR)/routerd config validate examples/homert02-native.yaml
+	$(RELEASE_BUILT_DIR)/routerd config validate examples/homert03-native.yaml
+	$(PYTHON) scripts/uplink-ha.py --uplink '$(UPLINK_INTERFACE)'
+
 .PHONY: check-ra-route-refresh
 check-ra-route-refresh: build
 	$(PYTHON) scripts/ra-route-refresh.py

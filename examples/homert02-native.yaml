@@ -1,194 +1,1029 @@
-# homert02の機能種別を基にした、隔離用のHA機能の部分設定例です。
-# LANアドレスと名前は隔離用の予約値です。AFTRはNTT向けの明示例です。
-# interface、証明書パス、上流、protocol identityは配備前に置き換えてください。
-# 相方の例はexamples/homert03-native.yamlです。このアドレスを実LANに接続しないでください。
+# Isolated full-feature HA node a; configure its peer with the paired file.
+# Benchmark addresses and explicit NTT AFTRs are test intent, not site configuration.
+# Provision credentials under /run/routerd-ha; see docs/test-plan.md.
 schema_version: 2
+retention:
+  max_age_seconds: 604800
+  interval_seconds: 86400
+  vacuum: true
 resources:
-  - id: interface/wan0
-    interface: {name: wan0, mtu: 1500}
-  - id: interface/lan0
-    interface: {name: lan0, mtu: 1500}
-  - id: address/lan-v4
-    depends_on: [interface/lan0]
-    address: {interface: lan0, cidr: 192.0.2.2/24}
-  - id: forwarding
-    forwarding: {ipv4: true, ipv6: true, conntrack_tcp_liberal: true}
-  - id: firewall
-    firewall:
-      forward:
-        - {from: lan0, to: dslite0}
-        - {from: dslite0, to: lan0}
-        - {from: lan0, to: wan0}
-        - {from: wan0, to: lan0}
-      mss_clamp:
-        - {from: lan0, to: dslite0, family: 4, mtu: 1454}
-        - {from: dslite0, to: lan0, family: 4, mtu: 1454}
-        - {from: lan0, to: wan0, family: 6, mtu: 1500}
-        - {from: wan0, to: lan0, family: 6, mtu: 1500}
-  - id: lan-dslite-nat
-    when: {fact: service.lan-ha.active}
-    nat:
-      - type: masquerade
-        match: {family: 4, source: 192.0.2.0/24, out_interface: dslite0}
-  - id: service/wan-ra
-    depends_on: [interface/wan0]
-    service:
-      name: wan-ra
-      ra_client:
-        interface: wan0
-        slaac: true
-        default_route: true
-        on_link: true
-        route_information: true
-        dns: true
-  - id: service/lan-ha
-    depends_on: [interface/lan0]
-    service:
-      name: lan-ha
-      vrrp:
-        interface: lan0
-        vip_interface: vip0
-        family: ipv4
-        virtual_router_id: 10
-        priority: 150
-        source_address: 192.0.2.2
-        unicast_peers: [192.0.2.3]
-        addresses: [192.0.2.1/24]
-        preempt: false
-        conntrack_sync:
-          interface: lan0
-          local_address: 192.0.2.2
-          peer_address: 192.0.2.3
-          port: 3780
-  - id: service/wan-pd
-    depends_on: [interface/wan0, interface/lan0]
-    service:
-      name: wan-pd
-      dhcp6:
-        interface: wan0
-        client_duid: "00030001020000000002"
-        iaid: 1
-        request_prefix: true
-        prefix_length: 60
-        delegations:
-          - {name: lan, interface: lan0, host_id: 1}
-          - {name: b4-source, interface: wan0, host_id: 33, prefix_length: 128}
-        ha:
-          owner: lan-ha
-          replication:
-            listen_address: 192.0.2.2:8444
-            peer_address: 192.0.2.3:8444
-            certificate_file: /var/lib/routerd/credentials/node-a.crt
-            private_key_file: /var/lib/routerd/credentials/node-a.key
-            peer_certificate_file: /var/lib/routerd/credentials/node-b.crt
-  - id: service/lan-ra
-    depends_on: [service/wan-pd, service/lan-ha]
-    when: {fact: service.lan-ha.active}
-    service:
-      name: lan-ra
-      ra:
-        interface: lan0
-        managed: false
-        other_config: true
-        router_lifetime_seconds: 1800
-        router_preference: high
-        mtu: 1500
-        from:
-          service: wan-pd
-          delegation: lan
-          use_learned_rdnss: true
-          use_learned_dnssl: true
-          valid_lifetime_seconds: 7200
-          preferred_lifetime_seconds: 3600
-  - id: service/lan-info
-    depends_on: [service/wan-pd, service/lan-ha]
-    when: {fact: service.lan-ha.active}
-    service:
-      name: lan-info
-      dhcp6_server:
-        interface: lan0
-        server_duid: "00030001020000000001"
-        dns_delegation: {service: wan-pd, delegation: lan}
-        dns_from: [wan-pd]
-        sntp_from: [wan-pd]
-        search_from: [wan-pd]
-        refresh_seconds: 1800
-  - id: service/lan-leases
-    depends_on: [interface/lan0, address/lan-v4, service/lan-ha]
-    service:
-      name: lan-leases
-      dhcp_server:
-        interface: vip0
-        ingress_interface: lan0
-        server_address: 192.0.2.1
-        primary:
-          prefix: 192.0.2.0/24
-          start: 192.0.2.64
-          end: 192.0.2.191
-          lease_seconds: 43200
-          router: 192.0.2.1
-          dns_servers: [192.0.2.1]
-          domain: home.arpa
-        sticky_hold_days: 3
-        fingerprint_retention: {max_age_seconds: 604800, interval_seconds: 86400, vacuum: true}
-        authoritative: true
-        max_leases: 200
-        ha:
-          owner: lan-ha
-          replication:
-            listen_address: 192.0.2.2:8443
-            peer_address: 192.0.2.3:8443
-            certificate_file: /var/lib/routerd/credentials/node-a.crt
-            private_key_file: /var/lib/routerd/credentials/node-a.key
-            peer_certificate_file: /var/lib/routerd/credentials/node-b.crt
-  - id: service/internet
-    depends_on: [interface/wan0, service/wan-pd, service/lan-ha]
-    when: {fact: service.lan-ha.active}
-    ready_when: {fact: service.internet.active}
-    service:
-      name: internet
-      ds_lite:
-        interface: wan0
-        tunnel: dslite0
-        source_from: wan-pd
-        source_delegation: b4-source
-        aftr_from: wan-pd
-        dns_from: [wan-pd, wan-ra]
-        candidates: [2404:8e00::feed:100]
-        mtu: 1454
-        b4_address: 192.0.0.2/32
-        default_route: true
-        metric: 200
-  - id: service/resolver
-    depends_on: [interface/lan0, service/lan-ha]
-    when: {fact: service.lan-ha.active}
-    service:
-      name: resolver
-      dns:
-        listen_interface: vip0
+- id: interface/wan0
+  interface:
+    name: wan0
+    ipv4_rp_filter: 0
+- id: interface/lan0
+  interface:
+    name: lan0
+- id: interface/mgmt0
+  interface:
+    name: mgmt0
+- id: interface/bgp0
+  interface:
+    name: bgp0
+- id: address/bgp
+  depends_on:
+  - interface/bgp0
+  address:
+    interface: bgp0
+    cidr: 192.0.2.10/24
+- id: interface/peer0
+  interface:
+    name: peer0
+- id: address/tailnet-underlay
+  depends_on:
+  - interface/peer0
+  address:
+    interface: peer0
+    cidr: 198.51.100.2/24
+- id: address/management
+  depends_on:
+  - interface/mgmt0
+  address:
+    interface: mgmt0
+    cidr: 198.19.0.2/24
+- id: address/lan
+  depends_on:
+  - interface/lan0
+  address:
+    interface: lan0
+    cidr: 198.18.0.2/24
+- id: forwarding
+  forwarding:
+    ipv4: true
+    ipv6: true
+    ipv4_rp_filter: 0
+    conntrack_tcp_liberal: true
+- id: firewall
+  firewall:
+    flow_observation_group: 2
+    input:
+      policy: accept
+      rules:
+      - match:
+          in_interface: mgmt0
+          source: 198.19.0.0/24
+          protocol: tcp
+          destination_ports:
+          - start: 2222
+          - start: 8080
+        action: accept
+      - match:
+          protocol: tcp
+          destination_ports:
+          - start: 2222
+          - start: 8080
+        action: drop
+        log:
+          group: 1
+          copy_range: 2048
+          prefix: management-deny
+      - match:
+          in_interface: wan-ha
+          protocol: udp
+          destination_ports:
+          - start: 53
+        action: drop
+      - match:
+          in_interface: wan-ha
+          protocol: tcp
+          destination_ports:
+          - start: 53
+        action: drop
+    forward:
+    - from: tailscale0
+      to: lan0
+    - from: tailscale0
+      to: dslite0
+    - from: tailscale0
+      to: wan-ha
+    - from: lan0
+      to: tailscale0
+    - from: vip0
+      to: tailscale0
+    - from: lan6-ha
+      to: tailscale0
+    - from: lan0
+      to: bgp0
+    - from: vip0
+      to: bgp0
+    - from: lan6-ha
+      to: bgp0
+    - from: bgp0
+      to: lan0
+    - from: lan0
+      to: lan0
+    - from: vip0
+      to: lan0
+    - from: lan6-ha
+      to: lan0
+    - from: lan0
+      to: dslite0
+    - from: vip0
+      to: dslite0
+    - from: lan6-ha
+      to: dslite0
+    - from: lan0
+      to: dslite1
+    - from: vip0
+      to: dslite1
+    - from: lan6-ha
+      to: dslite1
+    - from: lan0
+      to: dslite2
+    - from: vip0
+      to: dslite2
+    - from: lan6-ha
+      to: dslite2
+    - from: lan0
+      to: dslite3
+    - from: vip0
+      to: dslite3
+    - from: lan6-ha
+      to: dslite3
+    - from: lan0
+      to: wan-ha
+    - from: vip0
+      to: wan-ha
+    - from: lan6-ha
+      to: wan-ha
+    mss_clamp:
+    - from: lan0
+      to: dslite1
+      family: 4
+      mtu: 1454
+    - from: vip0
+      to: dslite1
+      family: 4
+      mtu: 1454
+    - from: lan6-ha
+      to: dslite1
+      family: 4
+      mtu: 1454
+    - from: dslite1
+      to: lan0
+      family: 4
+      mtu: 1454
+    - from: lan0
+      to: dslite2
+      family: 4
+      mtu: 1454
+    - from: vip0
+      to: dslite2
+      family: 4
+      mtu: 1454
+    - from: lan6-ha
+      to: dslite2
+      family: 4
+      mtu: 1454
+    - from: dslite2
+      to: lan0
+      family: 4
+      mtu: 1454
+    - from: lan0
+      to: dslite3
+      family: 4
+      mtu: 1454
+    - from: vip0
+      to: dslite3
+      family: 4
+      mtu: 1454
+    - from: lan6-ha
+      to: dslite3
+      family: 4
+      mtu: 1454
+    - from: dslite3
+      to: lan0
+      family: 4
+      mtu: 1454
+    - from: lan0
+      to: dslite0
+      family: 4
+      mtu: 1454
+    - from: vip0
+      to: dslite0
+      family: 4
+      mtu: 1454
+    - from: lan6-ha
+      to: dslite0
+      family: 4
+      mtu: 1454
+    - from: dslite0
+      to: lan0
+      family: 4
+      mtu: 1454
+    - from: lan0
+      to: wan-ha
+      family: 6
+      mtu: 1500
+    - from: vip0
+      to: wan-ha
+      family: 6
+      mtu: 1500
+    - from: lan6-ha
+      to: wan-ha
+      family: 6
+      mtu: 1500
+    - from: wan-ha
+      to: lan0
+      family: 6
+      mtu: 1500
+    ipv4_clear_df:
+    - from: lan0
+      to: dslite1
+    - from: vip0
+      to: dslite1
+    - from: lan6-ha
+      to: dslite1
+    - from: lan0
+      to: dslite2
+    - from: vip0
+      to: dslite2
+    - from: lan6-ha
+      to: dslite2
+    - from: lan0
+      to: dslite3
+    - from: vip0
+      to: dslite3
+    - from: lan6-ha
+      to: dslite3
+    - from: lan0
+      to: dslite0
+    - from: vip0
+      to: dslite0
+    - from: lan6-ha
+      to: dslite0
+- id: lan-dslite-nat
+  nat:
+  - type: masquerade
+    match:
+      family: 4
+      source: 198.18.0.0/24
+      out_interface: lan0
+  - type: masquerade
+    match:
+      family: 4
+      source: 198.18.0.0/24
+      out_interface: dslite0
+  - type: masquerade
+    match:
+      family: 4
+      source: 100.64.0.0/10
+      out_interface: dslite0
+  - type: masquerade
+    match:
+      family: 6
+      source: fd7a:115c:a1e0::/48
+      out_interface: wan-ha
+  - type: masquerade
+    match:
+      family: 6
+      out_interface: tailscale0
+  - type: masquerade
+    match:
+      family: 4
+      source: 198.18.0.0/24
+      out_interface: dslite1
+  - type: masquerade
+    match:
+      family: 4
+      source: 198.18.0.0/24
+      out_interface: dslite2
+  - type: masquerade
+    match:
+      family: 4
+      source: 198.18.0.0/24
+      out_interface: dslite3
+- id: service/wan4
+  depends_on:
+  - interface/wan0
+  service:
+    name: wan4
+    dhcp4:
+      interface: wan-ha
+      hostname: routerd2
+      default_route: false
+  when:
+    fact: service.lan-ha.elected
+- id: service/wan-ra
+  depends_on:
+  - interface/wan0
+  service:
+    name: wan-ra
+    ra_client:
+      interface: wan-ha
+      slaac: true
+      default_route: true
+      on_link: true
+      route_information: true
+      dns: true
+  when:
+    fact: service.lan-ha.elected
+- id: service/wan-pd
+  depends_on:
+  - interface/wan0
+  - interface/lan0
+  service:
+    name: wan-pd
+    dhcp6:
+      interface: wan-ha
+      iaid: 1
+      request_prefix: true
+      prefix_length: 60
+      delegations:
+      - name: lan
+        interface: lan6-ha
+        host_id: 1
+      - name: b4-source
+        interface: wan-ha
+        host_id: 33
+        prefix_length: 128
+      - name: b4-source1
+        interface: wan-ha
+        host_id: 34
+        prefix_length: 128
+      - name: b4-source2
+        interface: wan-ha
+        host_id: 19
+        prefix_length: 128
+      - name: b4-source3
+        interface: wan-ha
+        host_id: 35
+        prefix_length: 128
+      client_duid: "0003000102005e000143"
+      ha:
+        owner: lan-ha
+        replication:
+          listen_address: 169.254.42.2:8444
+          peer_address: 169.254.42.3:8444
+          certificate_file: /run/routerd-ha/node-a.crt
+          private_key_file: /run/routerd-ha/node-a.key
+          peer_certificate_file: /run/routerd-ha/node-b.crt
+- id: service/lan-ra
+  depends_on:
+  - service/wan-pd
+  service:
+    name: lan-ra
+    ra:
+      interface: lan6-ha
+      managed: false
+      other_config: true
+      router_lifetime_seconds: 1800
+      router_preference: high
+      mtu: 1500
+      from:
+        service: wan-pd
+        delegation: lan
+        rdnss_router: true
+        valid_lifetime_seconds: 7200
+        preferred_lifetime_seconds: 3600
+      dnssl:
+      - home.arpa
+  when:
+    fact: service.lan-ha.elected
+- id: service/lan-info
+  depends_on:
+  - service/wan-pd
+  service:
+    name: lan-info
+    dhcp6_server:
+      interface: lan6-ha
+      dns_delegation:
+        service: wan-pd
+        delegation: lan
+      domain_search:
+      - home.arpa
+      refresh_seconds: 1800
+      server_duid: "0003000102005e000144"
+  when:
+    fact: service.lan-ha.elected
+- id: service/lan-leases
+  depends_on:
+  - interface/lan0
+  - address/lan
+  service:
+    name: lan-leases
+    dhcp_server:
+      interface: vip0
+      server_address: 198.18.0.1
+      primary:
+        prefix: 198.18.0.0/24
+        start: 198.18.0.64
+        end: 198.18.0.191
+        lease_seconds: 43200
+        router: 198.18.0.1
+        dns_servers:
+        - 198.18.0.1
+        ntp_servers:
+        - 198.18.0.1
+        - 198.18.0.254
+        domain: home.arpa
+        options:
+        - name: domain-search
+          value: home.arpa
+      sticky_hold_days: 3
+      fingerprint_retention:
+        max_age_seconds: 604800
+        interval_seconds: 86400
+        vacuum: true
+      log_dhcp: true
+      authoritative: true
+      max_leases: 200
+      scopes:
+      - name: special-devices
+        match:
+          ouiPrefixes:
+          - 02:77:00
+          macAddresses:
+          - 02:77:01:00:00:05
+          - 02:77:01:00:00:06
+          - 02:77:01:00:00:07
+          - 02:77:01:00:00:08
+          - 02:77:01:00:00:09
+          - 02:77:01:00:00:0a
+        prefix: 198.18.0.0/24
+        start: 198.18.0.32
+        end: 198.18.0.63
+        lease_seconds: 43200
+        router: 198.18.0.253
+        dns_servers:
+        - 198.18.0.253
+      reservations:
+      - mac_address: 02:00:00:00:00:01
+        hostname: printer
+        ip_address: 198.18.0.10
+      - mac_address: 02:00:00:00:00:02
+        hostname: storage
+        ip_address: 198.18.0.11
+      ingress_interface: lan0
+      ha:
+        owner: lan-ha
+        replication:
+          listen_address: 169.254.42.2:8443
+          peer_address: 169.254.42.3:8443
+          certificate_file: /run/routerd-ha/node-a.crt
+          private_key_file: /run/routerd-ha/node-a.key
+          peer_certificate_file: /run/routerd-ha/node-b.crt
+- id: service/internet
+  depends_on:
+  - interface/wan0
+  ready_when:
+    fact: service.internet.active
+  service:
+    name: internet
+    ds_lite:
+      interface: wan-ha
+      tunnel: dslite0
+      source_from: wan-pd
+      source_delegation: b4-source
+      candidates:
+      - 2404:8e00::feed:100
+      mtu: 1454
+      b4_address: 192.0.0.2/32
+      default_route: true
+      metric: 200
+  when:
+    fact: service.lan-ha.elected
+- id: host-wan
+  depends_on:
+  - service/wan-ra
+  host_route:
+    interface: wan-ha
+    router_from: service.wan-ra
+    table: 120
+    priority: 10120
+    bypasses:
+    - service: service.internet
+      priority: 10100
+    - service: service.internet1
+      priority: 10101
+    - service: service.internet2
+      priority: 10102
+    - service: service.internet3
+      priority: 10103
+  when:
+    fact: service.lan-ha.elected
+- id: service/dns
+  depends_on:
+  - interface/lan0
+  - address/lan
+  - address/management
+  - host-wan
+  service:
+    name: dns
+    dns:
+      query_log_retention:
+        max_age_seconds: 604800
+        interval_seconds: 86400
+        vacuum: true
+      spec:
+        cache:
+          enabled: true
+          maxEntries: 10000
+          minTTL: 60s
+          maxTTL: 24h
+          negativeTTL: 30s
+        queryLog:
+          enabled: true
+        listen:
+        - name: loopback
+          addresses:
+          - 127.0.0.1
+          port: 53
+        - name: management
+          addressFrom:
+          - resource: Interface/mgmt0
+            field: ipv4Addresses
+          port: 53
+        - name: lan-v4
+          port: 53
+          addressFrom:
+          - resource: VirtualAddress/lan-ha
+            field: address
+        - name: lan-v6
+          addressFrom:
+          - resource: IPv6DelegatedAddress/wan-pd/lan
+          port: 53
+        sources:
+        - name: local
+          kind: zone
+          match:
+          - home.arpa
+          zoneRef:
+          - home
+        - name: branch-forwarder
+          kind: forward
+          match:
+          - branch.split.test
+          - corp.test
+          upstreams:
+          - udp://198.18.0.254:5354
+        - name: wan-learned
+          kind: forward
+          match:
+          - example.net
+          upstreamFrom:
+          - resource: DHCPv6PrefixDelegation/wan-pd
+            field: dnsServers
+        - name: site-forwarder
+          kind: forward
+          match:
+          - split.test
+          upstreams:
+          - udp://198.18.0.254:5353
+          - udp://198.18.0.254:5354
+        - name: encrypted-public
+          kind: forward
+          match:
+          - .
+          upstreams:
+          - https://cloudflare-dns.com/dns-query
+          - https://dns.google/dns-query
+          queryTimeout: 1s
+          healthcheck:
+            interval: 15s
+            timeout: 3s
+            failThreshold: 3
+            passThreshold: 2
+          bootstrapResolver:
+          - 1.1.1.1
+          - 8.8.8.8
+          bootstrapResolverFrom:
+          - resource: DHCPv6PrefixDelegation/wan-pd
+            field: dnsServers
+      zones:
+      - name: home
         spec:
-          listen:
-            - {name: lan, addresses: [192.0.2.1], port: 53}
-          sources:
-            - name: local
-              kind: zone
-              match: [home.arpa]
-              zoneRef: [home]
-            - name: site-forwarder
-              kind: forward
-              match: [office.example]
-              upstreams: [udp://192.0.2.53:53]
-            - name: encrypted-public
-              kind: forward
-              match: ["."]
-              upstreams: [https://cloudflare-dns.com/dns-query]
-              bootstrapResolverFrom:
-                - {resource: DHCPv6PrefixDelegation/wan-pd, field: dnsServers}
-        zones:
-          - name: home
-            spec:
-              zone: home.arpa
-              records:
-                - {hostname: router, ipv4: 192.0.2.1}
-              dhcpDerived:
-                sources: [DHCPv4Server/lan-leases]
+          zone: home.arpa
+          records:
+          - hostname: router
+            ipv4: 198.18.0.1
+            ipv6From:
+              resource: IPv6DelegatedAddress/wan-pd/lan
+              field: address
+          dhcpDerived:
+            sources:
+            - DHCPv4Server/lan-leases
+  when:
+    fact: service.lan-ha.elected
+- id: service/time
+  depends_on:
+  - address/lan
+  service:
+    name: time
+    ntp:
+      sources:
+      - sources_from:
+        - wan-pd
+        servers:
+        - address: 198.18.0.254
+      listen:
+      - 0.0.0.0
+      allow:
+      - 198.18.0.0/24
+- id: service/console
+  depends_on:
+  - address/management
+  service:
+    name: console
+    web_console:
+      listen: 198.19.0.2:8080
+      title: routerd2
+- id: service/routing
+  depends_on:
+  - address/bgp
+  - address/lan
+  service:
+    name: routing
+    bgp:
+      runtime:
+        version: 1
+        global:
+          asn: 64500
+          routerID: 192.0.2.10
+          listenAddresses:
+          - 192.0.2.10
+          listenPort: 179
+          families:
+          - ipv4-unicast
+          importPolicy:
+            allowedPrefixes:
+            - 203.0.113.0/24
+            nextHopRewrite: peer-address
+          gracefulRestart:
+            enabled: true
+            restartTime: 120
+            staleRoutesTime: 360
+        peers:
+          192.0.2.2:
+            address: 192.0.2.2
+            asn: 64512
+            importPolicy:
+              allowedPrefixes:
+              - 203.0.113.0/24
+              nextHopRewrite: peer-address
+            exportPolicyName: lan
+            exportPolicy:
+              allowedPrefixes:
+              - 198.18.0.0/24
+          192.0.2.3:
+            address: 192.0.2.3
+            asn: 64512
+            importPolicy:
+              allowedPrefixes:
+              - 203.0.113.0/24
+              nextHopRewrite: peer-address
+            exportPolicyName: lan
+            exportPolicy:
+              allowedPrefixes:
+              - 198.18.0.0/24
+        paths:
+        - source: routerd-static
+          prefix: 198.18.0.0/24
+      bind_interface: bgp0
+      fib_interface: bgp0
+- id: service/tailnet
+  depends_on:
+  - address/tailnet-underlay
+  - address/lan
+  service:
+    name: tailnet
+    tailscale:
+      interface: tailscale0
+      server_url: https://198.51.100.1:8443
+      hostname: hgw-router-a
+      auth_key_file: /run/routerd-ha/tailscale-a.key
+      advertise_routes:
+      - 198.18.0.0/24
+      advertise_exit_node: true
+- id: service/internet1
+  depends_on:
+  - interface/wan0
+  ready_when:
+    fact: service.internet1.active
+  service:
+    name: internet1
+    ds_lite:
+      interface: wan-ha
+      tunnel: dslite1
+      source_from: wan-pd
+      source_delegation: b4-source1
+      candidates:
+      - 2404:8e00::feed:101
+      mtu: 1454
+      b4_address: 192.0.0.2/32
+      default_route: true
+      metric: 201
+  when:
+    fact: service.lan-ha.elected
+- id: service/internet2
+  depends_on:
+  - interface/wan0
+  ready_when:
+    fact: service.internet2.active
+  service:
+    name: internet2
+    ds_lite:
+      interface: wan-ha
+      tunnel: dslite2
+      source_from: wan-pd
+      source_delegation: b4-source2
+      candidates:
+      - 2404:8e00::feed:102
+      mtu: 1454
+      b4_address: 192.0.0.2/32
+      default_route: true
+      metric: 202
+  when:
+    fact: service.lan-ha.elected
+- id: service/internet3
+  depends_on:
+  - interface/wan0
+  ready_when:
+    fact: service.internet3.active
+  service:
+    name: internet3
+    ds_lite:
+      interface: wan-ha
+      tunnel: dslite3
+      source_from: wan-pd
+      source_delegation: b4-source3
+      candidates:
+      - 2404:8e00::feed:100
+      mtu: 1454
+      b4_address: 192.0.0.2/32
+      default_route: true
+      metric: 203
+  when:
+    fact: service.lan-ha.elected
+- id: upstream-selection
+  depends_on:
+  - address/lan
+  egress_policy:
+    in_interface: vip0
+    hysteresis_millis: 60000
+    sources:
+    - 198.18.0.0/24
+    exclude_destinations:
+    - 198.18.0.0/24
+    - 198.19.0.0/24
+    - 192.0.2.0/24
+    - 203.0.113.0/24
+    - 100.64.0.0/10
+    groups:
+    - name: dslite-pd-balanced
+      weight: 120
+      targets:
+      - name: internet
+        interface: dslite0
+        table: 110
+        priority: 1100
+        mark: 272
+        when:
+          fact: service.health-dslite0.active
+        owner_when:
+          fact: service.internet.active
+      - name: internet1
+        interface: dslite1
+        table: 111
+        priority: 1101
+        mark: 273
+        when:
+          fact: service.health-dslite1.active
+        owner_when:
+          fact: service.internet1.active
+      - name: internet2
+        interface: dslite2
+        table: 112
+        priority: 1102
+        mark: 274
+        when:
+          fact: service.health-dslite2.active
+        owner_when:
+          fact: service.internet2.active
+    - name: dslite-secondary
+      weight: 80
+      targets:
+      - name: internet3
+        interface: dslite3
+        table: 113
+        priority: 1103
+        mark: 275
+        when:
+          fact: service.health-dslite3.active
+        owner_when:
+          fact: service.internet3.active
+    - name: lan-static
+      weight: 60
+      targets:
+      - name: lan-gateway
+        interface: lan0
+        gateway: 198.18.0.253
+        table: 114
+        priority: 1104
+        mark: 276
+        when:
+          fact: service.health-static.active
+  when:
+    fact: service.lan-ha.elected
+- id: service/health-dslite0
+  depends_on:
+  - service/internet
+  service:
+    name: health-dslite0
+    health:
+      interface: dslite0
+      source_address: 192.0.0.2
+      mark: 272
+      target: 1.1.1.1
+      protocol: tcp
+      port: 443
+      interval_ms: 1000
+      timeout_ms: 700
+      healthy_threshold: 2
+      unhealthy_threshold: 3
+  when:
+    fact: service.lan-ha.elected
+- id: service/health-dslite1
+  depends_on:
+  - service/internet1
+  service:
+    name: health-dslite1
+    health:
+      interface: dslite1
+      source_address: 192.0.0.2
+      mark: 273
+      target: 1.1.1.1
+      protocol: tcp
+      port: 443
+      interval_ms: 1000
+      timeout_ms: 700
+      healthy_threshold: 2
+      unhealthy_threshold: 3
+  when:
+    fact: service.lan-ha.elected
+- id: service/health-dslite2
+  depends_on:
+  - service/internet2
+  service:
+    name: health-dslite2
+    health:
+      interface: dslite2
+      source_address: 192.0.0.2
+      mark: 274
+      target: 1.1.1.1
+      protocol: tcp
+      port: 443
+      interval_ms: 1000
+      timeout_ms: 700
+      healthy_threshold: 2
+      unhealthy_threshold: 3
+  when:
+    fact: service.lan-ha.elected
+- id: service/health-dslite3
+  depends_on:
+  - service/internet3
+  service:
+    name: health-dslite3
+    health:
+      interface: dslite3
+      source_address: 192.0.0.2
+      mark: 275
+      target: 1.1.1.1
+      protocol: tcp
+      port: 443
+      interval_ms: 1000
+      timeout_ms: 700
+      healthy_threshold: 2
+      unhealthy_threshold: 3
+  when:
+    fact: service.lan-ha.elected
+- id: service/health-static
+  depends_on:
+  - address/lan
+  service:
+    name: health-static
+    health:
+      interface: lan0
+      source_address: 198.18.0.2
+      mark: 276
+      target: 1.1.1.1
+      protocol: tcp
+      port: 443
+      interval_ms: 1000
+      timeout_ms: 700
+      healthy_threshold: 2
+      unhealthy_threshold: 3
+  when:
+    fact: service.lan-ha.elected
+- id: service/remote-log
+  service:
+    name: remote-log
+    syslog:
+      address: 192.0.2.2:5514
+      facility: local6
+      tag: routerd2
+      min_level: info
+- id: service/telemetry
+  service:
+    name: telemetry
+    otlp_logs:
+      endpoint: 192.0.2.2:4317
+      insecure: true
+      service_name: routerd2
+      service_namespace: routerd
+      min_level: info
+      signals:
+      - logs
+      - metrics
+      - traces
+- id: service/flows
+  service:
+    name: flows
+    traffic_flow:
+      application_layer: true
+      packet_group: 2
+      retention:
+        max_age_seconds: 604800
+        interval_seconds: 86400
+        vacuum: true
+- id: service/packets
+  service:
+    name: packets
+    firewall_log:
+      group: 1
+      retention:
+        max_age_seconds: 604800
+        interval_seconds: 86400
+        vacuum: true
+- id: interface/sync0
+  interface:
+    name: sync0
+- id: address/sync
+  depends_on:
+  - interface/sync0
+  address:
+    interface: sync0
+    cidr: 169.254.42.2/16
+- id: service/lan-ha
+  depends_on:
+  - address/lan
+  - address/sync
+  service:
+    name: lan-ha
+    vrrp:
+      interface: lan0
+      family: ipv4
+      source_address: 198.18.0.2
+      unicast_peers:
+      - 198.18.0.3
+      vip_interface: vip0
+      virtual_router_id: 42
+      priority: 150
+      preempt: false
+      accept_mode: true
+      advert_interval_centiseconds: 100
+      addresses:
+      - 198.18.0.1/24
+      graceful_activation:
+        timeout: 45s
+        ready_when:
+          all:
+          - fact: service.wan-pd.active
+          - fact: service.lan-ra.sent
+          - fact: resource.upstream-selection.applied
+      conntrack_sync:
+        interface: sync0
+        local_address: 169.254.42.2
+        peer_address: 169.254.42.3
+- id: link/wan-ha
+  when:
+    fact: service.lan-ha.elected
+  link:
+    name: wan-ha
+    kind: macvlan
+    parent: wan0
+    hardware_addr: 02:00:5e:00:01:43
+    ipv6_addr_gen_mode: none
+- id: interface/wan-ha
+  interface:
+    name: wan-ha
+- id: address/wan-ha-ll
+  address:
+    interface: wan-ha
+    cidr: fe80::5eff:fe00:143/64
+- id: link/lan6-ha
+  when:
+    fact: service.lan-ha.elected
+  link:
+    name: lan6-ha
+    kind: macvlan
+    parent: lan0
+    hardware_addr: 02:00:5e:00:01:44
+    ipv6_addr_gen_mode: none
+- id: interface/lan6-ha
+  interface:
+    name: lan6-ha
+- id: address/lan6-ha-ll
+  address:
+    interface: lan6-ha
+    cidr: fe80::5eff:fe00:144/64
