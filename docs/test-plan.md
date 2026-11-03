@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 03:22 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 03:40 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 実行原則
 
@@ -43,6 +43,16 @@ WAN/tailnet captureは各最大8MB、PD captureはudp546と実行時間で限定
 6. **BGP・NTP。** 独立FRR/Zebra2台でLAN198.18.0.0/24とpeer203.0.113.0/24を相互広告し、受信RIB・両kernel・product best pathでLAN2端末のNATなしTCP/UDPを確認する。各bgpdを一台ずつ停止/再加入し、残るpeerの通信と復旧を確認する。特定peerの初期選択や切戻しを要求しない。長時間GR期限・両peer同時断・既存socket無損失継続は別の受入。NTPは実WAN学習源と独立chronyd2 clientの応答を確認し、`-x`/`-Q`でhost時計を変更しない。fallbackとappliance時計補正は別の受入。
 7. **管理・Tailscale。** 一時鍵で管理SSH `show status`、Web履歴、LANからWebへの拒否、初回management generation1/restarts0、再起動後の鍵/履歴を確認する。独立Headscale/TailscaleへIPv4 LAN/exitを広告し、acceptDNS/acceptRoutes=falseとupstream既定のsubnet SNATを維持する。OS標準CAと試験CAはownerのprivate mount内で結合し、auth key/control DBをprivate stageへ置く。LAN→peer両IP、peer→LAN IPv4、両IP exit HTTPS/UDP DNSとnode identity保持を確認する。LAN→tailnet IPv6は明示NATであり、delegated IPv6 subnetの双方向広告ではない。public control/hostname bootstrapは別の受入。
 8. **運用と復旧。** INFO syslog/OTLP、logs/metrics/traces、group1 NFLOG、group2 native nDPI/flow history、7日/daily/vacuumを既存ownerへ接続する。独立BGP peer上にsyslog UDP5514と公式Collector gRPC4317をdaemonより先に待受させる。実公開通信の双方向計数・native由来・TLS SNI、実管理拒否のhistory、観測開始後の新しいHealth syslog/log/metric/spanを照合する。samplingは旧既定30秒で、短flow全件保存・lossless deliveryを主張しない。PD worker SIGKILL/通常再起動と全daemon再起動後に上記の通信・identity・履歴・更新を確認し、正常停止時には上流Releaseなしでprefixを撤去する。
+
+## 自然更新と並行するHA基盤の通信継続
+
+基準main `9fb64f4`の通常実行物、build ID `9fb64f4267e9`で`make check-ha-state`が終了0。独立Linux namespace/PID1の2 product processとclient/serverで、A→B/B→AのVRRP/NAT引継ぎ、同一TCP socketとUDP mapping、同期済みDHCP leaseの実Renew/ACK、worker/conntrack engine再起動を確認した。TCP再接続なし（captureのSYNは1回）、最大応答待ち1.665秒。UDPは50ms送信/200ms返信予算で3009送信・2942受信・67期限超過、最大無応答1.110秒（このfixture条件での測定）。同期断中の独立割当/更新と復帰、未設定証明書の拒否、実lease期限での失効、3日sticky期限を変えない再起動/引継ぎ、保持中の別client割当と元client再取得も通過。設定削除で同期workerを回収し、元のconntrack sysctlへ復元した。実HGWの38-resource全体を二台化した結果や、14-resource例・実homert二台の資格とは分ける。
+
+`make check-ha-state DOCKER='sudo -n docker'`で、既存の独立Linux namespace/PID1の2 product process、VRRP/共有WAN・LAN identity、conntrackd FTFW、相互認証TLSのDHCP同期を確認する。追加PVE/QEMUやPBR/二WAN切替のflagsは使わない。自然更新ownerのMAC・namespace・プロセス・時計へ触れない。署名bundleは通常Makefile build/publisherとpinned engineから作る。
+
+独立peerのTCPは再接続しないsocket、UDPも同一socketで送受信し、両方向takeover、worker/engine再起動、同期断中のDHCP更新、同期復帰、lease期限/削除/保持を観測する。packetでTCP SYN回数、UDP NAT tuple、DHCP Request/ACK、同期交通を照合する。TCP/UDPの継続clientは明示した静的LANアドレスを使い、DHCP clientは別に実割当/更新を確認する。fixtureのtcp_loose=0はmidstreamの拾い直しをstate同期と誤認しないための限定したkernel条件で、製品が明示するliberal modeはhomertどおり適用する。UDPは50ms送信・200ms返信予算を観測条件として記録し、これ自体を全環境の製品性能条件にしない。
+
+このgateはnative HA/NAT/DHCP基盤の受入であり、現在の38-resource実HGW単体全体の二台化や実homert二台の資格とは分ける。14-resource homert examplesのWAN /128 B4 source、NTT向けMTU1454/inner IPv4、RA/保持を単体確認済み契約に合わせるが、設定検証だけでそのHA例の全通信を資格済みとはしない。private stage/log/pcapはgate終了後の簡潔な記録/統合を終えて撤去する。
 
 ## 自然更新と残る全体受入
 

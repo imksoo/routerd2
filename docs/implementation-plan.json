@@ -11185,7 +11185,7 @@
     "physical_target_profile": "homert02/03 are identified PVE guests with4vCPU/4GiB, three VirtIO NICs and VirtIO/SCSI disks. Matching isolated PVE product boot/recovery was exercised; actual WAN/LAN attachment, clean installation from a preconverted native configuration, measured load and any additional hardware/architecture qualification remain open.",
     "validation_reporting": "Use docs/test-plan.md for the concise current gate state. Detailed historical checkpoint ledgers are not acceptance authority; keep only current result, limits and repeatable procedure. Never claim unrun gates or partial homert profiles complete.",
     "current_acceptance": {
-      "as_of_utc": "2026-11-03T03:22:39Z",
+      "as_of_utc": "2026-11-03T03:40:19Z",
       "product_code_checkpoint": "b03debf1598204125f2f00363fd7ca036e3ad26e",
       "homert_source": "User-provided read-only working copies at chatty.lain.local:~/homert02; the current homert02 and homert03 files each contain 110 resources with matching kind counts. Do not publish configuration values or secrets.",
       "completed_gates": [
@@ -11225,14 +11225,22 @@
         "observed": "38-resource native profile、基準main b03debf + LAN配布設定、build ID b03debf15982で実HGW統合gateが終了0。通常・予約・OUI・特定MACの独立端末5台で、通常gateway/DNS .1と特別gateway/DNS .253を実ACKから設定し、公開HTTPS/UDP DNSが往復した。通常/予約端末はNTP2アドレスとdomain-searchも取得。実Releaseで3日分の保持期限が保存され、端末IP撤去後も別MACの同アドレス要求には別leaseを配り、元MACには保持アドレスを再配布した。全daemon restart後も特別端末3台のRenew/ACK・通信とfingerprint APIが復旧した。LAN RAのhigh優先度/MTU1500/valid最大7200秒/preferred最大3600秒を実packetで確認。上流選択、4 DS-Lite、DNS/DoH、nDPI/計数/SNI、fresh syslog/OTLP、BGP/NTP/Tailscaleも通過。PD worker SIGKILL/通常再起動後の復旧2.96/5.85秒、全daemon restartから全確認102.76秒（60秒抑制と30秒sampling等を含む）。2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。自然T1・既存socket継続・3日/7日経過削除・全homert/HA/実機資格は今回の範囲外。",
         "limit": "Actual 3-day hold creation/reacquisition, not elapsed 3/7-day expiry. Full-profile natural T1, continuous sockets, full homert/HA/ONU/target NIC remain open."
       },
-      "upstream_selection_correction": "Existing LAN static gateway, not ens20. Implemented and verified group weights 120 -> 80 -> 60 -> 120 with 60s hysteresis, actual Health workers, both LAN clients TCP/UDP, conntrack marks and kernel next hops. No new WAN NIC or site IP allocation prerequisite."
+      "upstream_selection_correction": "Existing LAN static gateway, not ens20. Implemented and verified group weights 120 -> 80 -> 60 -> 120 with 60s hysteresis, actual Health workers, both LAN clients TCP/UDP, conntrack marks and kernel next hops. No new WAN NIC or site IP allocation prerequisite.",
+      "latest_ha_foundation_gate": {
+        "status": "passed (exit 0)",
+        "build_identity": "9fb64f4267e9",
+        "source": "Product runtime from 9fb64f4; Go unchanged from b1a3e48. Corrected partial homert examples passed configuration validation separately.",
+        "command": "make check-ha-state DOCKER='sudo -n docker'",
+        "observed": "基準main 9fb64f4の通常実行物、build ID 9fb64f4267e9でmake check-ha-stateが終了0。独立Linux namespace/PID1の2 product processとclient/serverで、A→B/B→AのVRRP/NAT引継ぎ、同一TCP socketとUDP mapping、同期済みDHCP leaseの実Renew/ACK、worker/conntrack engine再起動を確認した。TCP再接続なし（captureのSYNは1回）、最大応答待ち1.665秒。UDPは50ms送信/200ms返信予算で3009送信・2942受信・67期限超過、最大無応答1.110秒（このfixture条件での測定）。同期断中の独立割当/更新と復帰、未設定証明書の拒否、実lease期限での失効、3日sticky期限を変えない再起動/引継ぎ、保持中の別client割当と元client再取得も通過。設定削除で同期workerを回収し、元のconntrack sysctlへ復元した。実HGWの38-resource全体を二台化した結果や、14-resource例・実homert二台の資格とは分ける。",
+        "limit": "Static-address continuity client and separate real DHCP clients; direct IPv4 SNAT HA foundation, not full 38-resource real-HGW two-node deployment, actual homert pair, physical NIC or performance qualification."
+      }
     }
   },
   "execution_order": [
     {
       "stage": 1,
       "profile": "homert-single-implementation",
-      "next": "LAN intent passed with five clients, including special OUI/exact-MAC gateway/DNS, primary/reservation NTP/domain-search, real sticky release/hold/reacquisition, fingerprints, and RA high/MTU/lifetime bounds. Next observe natural PD T1 and continuity on this complete current profile while advancing remaining single-router intent and HA independently. Keep full homert/HA/remaining work packages open; no PVE/QEMU or extra PBR investigation.",
+      "next": "Natural full-profile PD T1 observation remains live; protect it and continue independent implementation. Native IPv4 VRRP/NAT/DHCP HA foundation now passed real same-socket TCP/UDP two-way takeover, engine/worker restart, sync outage/recovery, lease expiry/sticky retention and authenticated lease sync. Integrate the remaining complete single-router intent and then full-profile two-node readiness/PD/NAT/services; do not treat this foundation gate as full homert HA acceptance. No PVE/QEMU or extra PBR investigation.",
       "acceptance": "Cold-start the complete single-router profile with an independent WAN peer and Linux client. Verify WAN/LAN DHCPv4 scopes and reservations, DHCPv6-PD/Information identity and natural renew, RA/DAD/SLAAC, local/conditional/DoH DNS, all DS-Lite paths and IPv6, Health/PBR, NAT/MTU/MSS, BGP/NTP/Tailscale/management where configured, and worker/daemon restart and recovery from actual packets, client results, kernel routes and firewall state. Keep ONU/physical-NIC qualification separate."
     },
     {

@@ -1,8 +1,10 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
-更新: 2026-11-03 03:22 UTC。syslog/OTLP、native nDPIの通信分類・計数・TLS SNIとfirewall履歴を同一単体profileへ接続し、実HGW/独立端末・受信peer、全daemon restart後の新規Health記録まで受入済み。通常/予約/特別scope・保持・RA配布も受入済み。次は全profileの自然更新・通信継続を進める。全homert/HAの受入は継続中。
+更新: 2026-11-03 03:40 UTC。syslog/OTLP、native nDPIの通信分類・計数・TLS SNIとfirewall履歴を同一単体profileへ接続し、実HGW/独立端末・受信peer、全daemon restart後の新規Health記録まで受入済み。通常/予約/特別scope・保持・RA配布も受入済み。次は全profileの自然更新・通信継続を進める。全homert/HAの受入は継続中。
 
-全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で9日15時間54分、記録済み期限から4日10時間26分経過した。34 work packageはin_progress22件/planned12件。部分受入を全体の完成に数えない。
+全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で9日16時間11分、記録済み期限から4日10時間43分経過した。34 work packageはin_progress22件/planned12件。部分受入を全体の完成に数えない。
+
+HA基盤の並行確認: 基準main `9fb64f4`の通常実行物、build ID `9fb64f4267e9`で`make check-ha-state`が終了0。独立Linux namespace/PID1の2 product processとclient/serverで、A→B/B→AのVRRP/NAT引継ぎ、同一TCP socketとUDP mapping、同期済みDHCP leaseの実Renew/ACK、worker/conntrack engine再起動を確認した。TCP再接続なし（captureのSYNは1回）、最大応答待ち1.665秒。UDPは50ms送信/200ms返信予算で3009送信・2942受信・67期限超過、最大無応答1.110秒（このfixture条件での測定）。同期断中の独立割当/更新と復帰、未設定証明書の拒否、実lease期限での失効、3日sticky期限を変えない再起動/引継ぎ、保持中の別client割当と元client再取得も通過。設定削除で同期workerを回収し、元のconntrack sysctlへ復元した。実HGWの38-resource全体を二台化した結果や、14-resource例・実homert二台の資格とは分ける。
 
 ## 現在の棚卸し
 

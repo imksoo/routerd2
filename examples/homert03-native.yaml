@@ -1,5 +1,5 @@
 # homert03の機能種別を基にした、隔離用HA相方の設定例です。
-# アドレスと名前は文書用の予約値で、実設定から転記していません。
+# LANアドレスと名前は隔離用の予約値です。AFTRはNTT向けの明示例です。
 # interface、証明書パス、上流、protocol identityは配備前に置き換えてください。
 # この例はschema検証用で、本番HA設定として受け入れたものではありません。
 schema_version: 2
@@ -21,8 +21,8 @@ resources:
         - {from: lan0, to: wan0}
         - {from: wan0, to: lan0}
       mss_clamp:
-        - {from: lan0, to: dslite0, family: 4, mtu: 1460}
-        - {from: dslite0, to: lan0, family: 4, mtu: 1460}
+        - {from: lan0, to: dslite0, family: 4, mtu: 1454}
+        - {from: dslite0, to: lan0, family: 4, mtu: 1454}
         - {from: lan0, to: wan0, family: 6, mtu: 1500}
         - {from: wan0, to: lan0, family: 6, mtu: 1500}
   - id: lan-dslite-nat
@@ -72,7 +72,7 @@ resources:
         prefix_length: 60
         delegations:
           - {name: lan, interface: lan0, host_id: 1}
-          - {name: b4-source, interface: lan0, host_id: 33}
+          - {name: b4-source, interface: wan0, host_id: 33, prefix_length: 128}
         ha:
           owner: lan-ha
           replication:
@@ -91,11 +91,15 @@ resources:
         managed: false
         other_config: true
         router_lifetime_seconds: 1800
+        router_preference: high
+        mtu: 1500
         from:
           service: wan-pd
           delegation: lan
           use_learned_rdnss: true
           use_learned_dnssl: true
+          valid_lifetime_seconds: 7200
+          preferred_lifetime_seconds: 3600
   - id: service/lan-info
     depends_on: [service/wan-pd, service/lan-ha]
     when: {fact: service.lan-ha.active}
@@ -125,6 +129,8 @@ resources:
           router: 192.0.2.1
           dns_servers: [192.0.2.1]
           domain: home.arpa
+        sticky_hold_days: 3
+        fingerprint_retention: {max_age_seconds: 604800, interval_seconds: 86400, vacuum: true}
         authoritative: true
         max_leases: 200
         ha:
@@ -148,9 +154,9 @@ resources:
         source_delegation: b4-source
         aftr_from: wan-pd
         dns_from: [wan-pd, wan-ra]
-        b4_address: 203.0.113.2/32
-        b4_peer: 203.0.113.1/32
-        route_gateway: 203.0.113.1
+        candidates: [2404:8e00::feed:100]
+        mtu: 1454
+        b4_address: 192.0.0.2/32
         default_route: true
         metric: 200
   - id: service/resolver
