@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"reflect"
 	"sort"
 	"time"
@@ -238,6 +239,11 @@ func (e *Engine) nativeWireGuard(saved wireGuardRecorded, old ownedWireGuard, li
 			return out, err
 		}
 		entry := wireGuardNativePeer{PublicKey: key, AllowedIPs: append([]string(nil), peer.AllowedIPs...), Endpoint: peer.Endpoint, PersistentKeepalive: uint16(peer.PersistentKeepalive)}
+		if _, err := netip.ParseAddrPort(peer.Endpoint); peer.Endpoint != "" && err != nil {
+			// DNS is resolved outside the writer lock. The endpoint maintainer
+			// fills this passive bootstrap without replacing the peer/session.
+			entry.Endpoint = ""
+		}
 		// Roaming endpoints and passive peers are observations, not drift. Carry
 		// the last authenticated endpoint into a replacement only when the
 		// declarative endpoint did not change. Static -> passive clears it by

@@ -54,9 +54,26 @@ Removing a peer replaces the full desired set. Routes and addresses associated
 with the link are handled by the same network transaction and reconciliation
 path. Endpoint roaming learned from authenticated traffic is retained while
 the declared endpoint is unchanged. A changed endpoint declaration takes
-precedence. An empty endpoint permits a passive peer; an explicit endpoint must
-be a numeric unicast IP and port. IPv6 link-local endpoints require a zone.
-Hostname resolution and SAM enrollment are separate, currently unimplemented
+precedence. An empty endpoint permits a passive peer. An explicit endpoint is a
+hostname or unicast IP with a port. IPv6 link-local endpoints require a zone.
+
+The network worker resolves hostname endpoints through the OS resolver, with
+DNS I/O outside its writer lock. A new peer waits for its resolved bootstrap
+address and actual handshake. Every 30 seconds, a handshake older than 135
+seconds permits re-resolution, following the upstream
+[wireguard-tools procedure](https://git.zx2c4.com/wireguard-tools/tree/contrib/reresolve-dns/reresolve-dns.sh).
+Fresh authenticated roaming takes precedence. A failed lookup keeps the current
+endpoint, and an address still present in the answer set is retained. Endpoint
+updates use the kernel's update-only peer operation, preserving the key,
+AllowedIPs and session. Only declarations are journaled. Configure the OS
+resolver so that the endpoint hostname can be resolved without this tunnel.
+
+`make check-wireguard` uses independent wireguard-tools/dnsmasq and a LAN client
+with the actual product processes and kernel. It exercises hostname bootstrap,
+TCP/UDP forwarding, port roaming, natural handshake aging, DNS failure/recovery,
+peer movement, daemon restart and peer removal.
+
+SAM enrollment and complete generated peer sets remain separate, incomplete
 parts of the original resource contract.
 
 `listen_port: 0` selects an available port when a new device becomes active and

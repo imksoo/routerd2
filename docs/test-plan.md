@@ -2,6 +2,12 @@
 
 更新: 2026-11-03。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
+## WireGuard hostname endpointとroaming
+
+`make check-wireguard DOCKER='sudo -n docker'`は実supervisor/control/networkとLinux WireGuard、独立wireguard-tools・dnsmasq・LAN端末を専用network/mount namespaceで動かす。試験内の`/etc/resolv.conf`だけを独立DNSへ向け、hostのresolver・経路・時計を保護する。hostnameからの接続とLANの実TCP/UDP、認証済み送信元portのroamingとDNS変更の優先関係、peer停止中の自然な135秒経過、NXDOMAINによる現endpointの保持、DNS復旧と移動先への接続、daemon再起動・peer撤去を確認する。待ち時間はwireguard-tools公式reresolve-dnsの条件を使い、時計・handshake時刻を注入しない。全体上限300秒、captureは既存の有界手順を使い、終了時に鍵・process・namespace・raw出力を撤去する。IPv6 underlay、SAM由来peer集合、全NET-08と物理機器の受入を継続する。
+
+初回とpeer復帰では実handshakeを確認してからLAN TCP/UDPを測定する。peerのlink停止でLinuxが撤去したLANへの戻り経路は、独立peerの起動設定として再適用する。接続準備中の短いTCP期限やpeer設定の欠落を製品の通信結果へ読み替えない。
+
 ## 実行原則
 
 - 毎回の実通信直前にこの計画全体を読み、対象・peer・実行版・観測点・隔離・復旧を確認する。変更対象の旧routerd実装、caller、運用修正と保存中homert02/03の実設定を参照する。秘密は公開しない。

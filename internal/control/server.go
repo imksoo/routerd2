@@ -33,6 +33,7 @@ func ServeNetwork(ctx context.Context, dir, stateDir string, ready func()) error
 	defer cancel()
 	expiryDone := make(chan error, 1)
 	setsDone := make(chan error, 1)
+	wireGuardDone := make(chan error, 1)
 	go func() {
 		expiryDone <- e.MaintainAuthority(runCtx)
 		cancel()
@@ -41,9 +42,13 @@ func ServeNetwork(ctx context.Context, dir, stateDir string, ready func()) error
 		setsDone <- e.MaintainAddressSets(runCtx)
 		cancel()
 	}()
+	go func() {
+		wireGuardDone <- e.MaintainWireGuardEndpoints(runCtx)
+		cancel()
+	}()
 	err = localapi.Serve(runCtx, filepath.Join(dir, NetworkSocketName), networkHandler(e), ready)
 	cancel()
-	return errors.Join(err, <-expiryDone, <-setsDone)
+	return errors.Join(err, <-expiryDone, <-setsDone, <-wireGuardDone)
 }
 
 type nativeNetwork interface {

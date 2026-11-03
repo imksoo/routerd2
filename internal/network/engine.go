@@ -86,17 +86,19 @@ type kernel interface {
 }
 
 type Engine struct {
-	mu              sync.Mutex
-	opts            Options
-	kernel          kernel
-	state           journal
-	lock            *os.File
-	directory       *os.File
-	journalName     string
-	journalPresent  bool
-	authorityWake   chan struct{}
-	addressSets     map[string]resolvedAddressSet
-	addressSetsWake chan struct{}
+	mu               sync.Mutex
+	opts             Options
+	kernel           kernel
+	state            journal
+	lock             *os.File
+	directory        *os.File
+	journalName      string
+	journalPresent   bool
+	authorityWake    chan struct{}
+	addressSets      map[string]resolvedAddressSet
+	addressSetsWake  chan struct{}
+	wireGuardDNS     []wireGuardDNSPeer
+	wireGuardDNSWake chan struct{}
 }
 
 // New locks the ownership journal and reads it. It makes no kernel changes.
@@ -135,8 +137,15 @@ func newEngine(opts Options, k kernel) (*Engine, error) {
 		state.Status = "degraded"
 		state.LastError = "previous apply was interrupted; reconcile the committed configuration"
 	}
-	e := &Engine{opts: opts, kernel: k, lock: f, directory: dir, journalName: name, journalPresent: inspection.Present, state: state, authorityWake: make(chan struct{}, 1), addressSetsWake: make(chan struct{}, 1)}
+	e := &Engine{
+		opts: opts, kernel: k, lock: f, directory: dir,
+		journalName: name, journalPresent: inspection.Present, state: state,
+		authorityWake:    make(chan struct{}, 1),
+		addressSetsWake:  make(chan struct{}, 1),
+		wireGuardDNSWake: make(chan struct{}, 1),
+	}
 	e.prepareAddressSets(state.Desired.Firewall)
+	e.prepareWireGuardDNS(state.Desired.WireGuard)
 
 	return e, nil
 }
@@ -267,6 +276,7 @@ func (e *Engine) Apply(ctx context.Context, revision uint64, desired Desired) (A
 	}
 	if err == nil {
 		e.prepareAddressSets(d.Firewall)
+		e.prepareWireGuardDNS(d.WireGuard)
 	}
 	return ApplyResult{Revision: e.state.Revision, AttemptedRevision: e.state.AttemptedRevision, Status: e.state.Status}, err
 }

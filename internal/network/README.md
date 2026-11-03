@@ -232,7 +232,7 @@ causes reconciliation to stop without changing that device.
 | `public_key` | Canonical nonzero base64 key; duplicate and self peers are rejected. |
 | `preshared_key_file` | Optional versioned secret file. Empty clears the PSK. |
 | `allowed_ips` | Canonical IPv4/IPv6 network prefixes. Identical prefixes cannot occur twice; nested distinct prefixes use WireGuard longest-prefix matching. |
-| `endpoint` | Numeric unicast IP:port, with an interface zone for IPv6 link-local. Empty enables passive endpoint learning. Hostname resolution belongs to the control plane and is rejected here. |
+| `endpoint` | Hostname or unicast IP:port, with an interface zone for IPv6 link-local. Empty enables passive endpoint learning. The network worker resolves hostnames through its OS resolver outside the writer lock. |
 | `persistent_keepalive` | 0–65535 seconds, with zero disabling it. |
 
 No `wg`, `ip`, external daemon or userspace UAPI socket is involved. Existing

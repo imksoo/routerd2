@@ -1067,7 +1067,7 @@
       "title": "WireGuard の動的 peer・endpoint・identity",
       "milestone": "M3",
       "track": "network",
-      "status": "planned",
+      "status": "in_progress",
       "scope": "baseline_parity",
       "risk": "high",
       "depends_on": [
@@ -1093,9 +1093,21 @@
       ],
       "planned_targets": [
         "internal/network",
-        "internal/runtimeplan",
-        "internal/protocol/wireguard-control (新設予定)"
-      ]
+        "internal/control",
+        "internal/runtimeplan"
+      ],
+      "implementation_notes": {
+        "implemented": "Hostname endpoints normalize at the configuration boundary. Existing network worker owns OS DNS resolution outside its writer mutex. Prepared targets belong to the configuration. A30-second loop follows wireguard-tools reresolve-dns: handshakes younger than135s retain authenticated roaming. Recheck declaration, link/peer ownership and handshake after DNS waits. UPDATE_ONLY changes the endpoint without recreating the peer or writing learned addresses into intent/journal. Lookup failure retains the existing endpoint; an endpoint still answered is retained. Loop cancellation is joined before engine close.",
+        "upstream_comparison": "Read routerd pkg/wireguard/wireguard.go applyLinux/RenderSetConf and controller/callers. Its wg setconf accepts hostname endpoints. Reuse the interoperability behavior with the native kernel owner and upstream wireguard-tools contrib/reresolve-dns handshake rule, through native generic netlink in the existing network owner.",
+        "validation": "Baseline6b8adcf plus this patch, normal build6b8adcfea522: actual supervisor/control/network plus Linux kernel and independent wireguard-tools/dnsmasq/LAN passed in181.62s. Uppercase-hostname bootstrap, authenticated port roaming through DNS rotation, natural stale handshake, NXDOMAIN preserving the endpoint, restored DNS/moved peer and TCP/UDP, daemon restart and peer removal passed. Actual captures show NXDOMAIN, encrypted UDP to the moved address and LAN TCP SYN/SYN-ACK plus UDP replies. Full make check/Go Race/vet/Python36 and normal three static executables passed.",
+        "procedure": "make check-wireguard DOCKER='sudo -n docker'; existing build: python3 scripts/daemon-tests.py wireguard",
+        "runner_corrections": "Initial communication checks preceded actual handshake, and peer link-down removed its explicit return route. Check handshake before measuring application traffic and reapply the independent peer return route on its startup. Temporary diagnostics removed.",
+        "remaining": [
+          "IPv6 hostname underlay and target physical-device acceptance.",
+          "Complete peersFrom/SAM/enrollment identity and key/PSK generation/rotation contracts, including dynamic source expiry and removal.",
+          "Remaining NET-08 acceptance gates, full homert intent, signed full-profile appliance boot/update and all34 work packages remain open."
+        ]
+      }
     },
     {
       "id": "HA-01",

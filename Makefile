@@ -85,6 +85,7 @@ help:
 	  'make check-pd-ra       Verify PD renewal, delegated RA and client traffic' \
 	  'make check-bgp         Verify actual BGP FIB, reporting failure and ownership expiry' \
 	  'make check-bgp-frr     Verify real FRR BGP exchange, forwarding and restart' \
+	  'make check-wireguard   Verify hostname endpoints, roaming and DNS recovery with independent peers' \
 	  'make check-aftr        Verify AFTR input identity, DNS and tunnel expiry' \
 	  'make check-ra-client   Verify real RA, source/default-route TCP/UDP and expiry' \
 	  'make check-ra-aftr     Verify learned RA/DNS to DS-Lite LAN forwarding and expiry' \
@@ -243,6 +244,10 @@ check-bgp-frr: build
 
 check-bfd: build
 	$(PYTHON) scripts/daemon-tests.py bfd --go '$(GO)'
+
+.PHONY: check-wireguard
+check-wireguard: build
+	$(PYTHON) scripts/daemon-tests.py wireguard --go '$(GO)'
 
 .PHONY: check-dhcp6-server
 check-dhcp6-server: build dnsmasq-engine

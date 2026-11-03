@@ -51,6 +51,17 @@ func (f *fakeWireGuardKernel) ReadWireGuard(index int) (wireGuardDevice, error) 
 	return device, nil
 }
 
+func (f *fakeWireGuardKernel) SetWireGuardEndpoint(index int, key wireGuardKey, endpoint string) error {
+	device := f.devices[index]
+	for i := range device.Peers {
+		if device.Peers[i].PublicKey == key {
+			device.Peers[i].Endpoint = endpoint
+		}
+	}
+	f.devices[index] = device
+	return nil
+}
+
 func (f *fakeWireGuardKernel) ReplaceWireGuard(index int, wanted wireGuardDevice) error {
 	link, err := f.linkAt(index)
 	if err != nil {
@@ -131,7 +142,6 @@ func TestWireGuardValidation(t *testing.T) {
 		{"unowned", func(d *Desired) { d.Links = nil }},
 		{"inline-or-invalid-key", func(d *Desired) { d.WireGuard[0].Peers[0].PublicKey = "secret-invalid-data" }},
 		{"zero-public-key", func(d *Desired) { d.WireGuard[0].Peers[0].PublicKey = (wireGuardKey{}).encoded() }},
-		{"hostname", func(d *Desired) { d.WireGuard[0].Peers[0].Endpoint = "vpn.example:51820" }},
 		{"zone-required", func(d *Desired) { d.WireGuard[0].Peers[0].Endpoint = "[fe80::2]:51820" }},
 		{"same-prefix", func(d *Desired) {
 			peer := d.WireGuard[0].Peers[0]

@@ -2,6 +2,16 @@
 
 更新: 2026-11-03。全体ゴールは継続中。
 
+## WireGuard hostname endpointの接続と復旧
+
+旧routerdの`pkg/wireguard/wireguard.go`とcontroller/caller、公式wireguard-toolsの[reresolve-dns](https://git.zx2c4.com/wireguard-tools/tree/contrib/reresolve-dns/reresolve-dns.sh)を参照した。`endpoint`にhostnameを受け入れ、network workerがOS resolverで再解決する。認証済みhandshakeから135秒以内はroamingを優先し、30秒巡回で古い接続を再解決する。DNS待ちはwriter lockの外へ置き、待った後に現在の宣言・link/peer所有権・handshakeを再確認する。kernelのUPDATE_ONLYでendpointだけを変更し、宣言・観測・秘密鍵の所有を維持する。
+
+基準main `6b8adcf` + 本変更、通常build `6b8adcfea522`で、実supervisor/control/networkとLinux kernel、独立wireguard-tools/dnsmasq/LAN端末による手順が終了0（181.62秒）。大文字を含むhostnameでの接続とLAN TCP/UDP、認証済みport roaming中のDNS変更、peer停止後の自然なhandshake期限経過、NXDOMAINでのendpoint保持、DNS復旧後の移動先反映・実handshake・LAN通信、daemon再起動後の通信、peer撤去を確認した。captureで実NXDOMAIN、移動先との暗号化UDP、LANのSYN/SYN-ACKとUDP応答を照合した。
+
+先行手順は接続準備中の2秒TCP期限と、link停止で消える独立peerの戻り経路を見落として停止した。実handshake後に通信を測り、peerの起動設定へ戻り経路を含めた。実handshakeとpeerの経路が成立した上で、元の2秒TCP/UDP期限で受け入れた。一時的な詳細診断を撤去した。
+
+`make check`（全Go/Race Detector/vet・Python36件）、通常3実行物のstatic linkが通過。再実行は`make check-wireguard DOCKER='sudo -n docker'`、通常build済みなら`python3 scripts/daemon-tests.py wireguard`。OS resolverはtunnelなしで相手名を解決できるよう設定する。NET-08は着手済みとし、IPv6 underlay、SAM/enrollment由来peer集合、動的key/PSK更新と全体の受入を継続する。全homertの署名appliance起動・更新には独立kernel/時計の許可済み実行機が必要。
+
 ## homertの固定時刻源を単体・二台構成へ接続
 
 保存中の両homert設定と旧routerdの`pkg/controller/chain/ntp.go`を再読した。autoのNTPClientは学習源と公開2hostnameのfallbackを持ち、staticのNTPServerは私設peerと同じ公開2hostnameを常時設定する。native例には後者が欠けていた。既存の一つのchronydへ二つの時刻源宣言を接続し、core DNSで名前解決する。私設peerは隔離環境の独立chronydへ対応づけた。

@@ -381,6 +381,26 @@ func wireGuardPeerSegment(peer wireGuardNativePeer, prefixes []string, first boo
 // Whole-set replacement is deliberately NOT called atomic: WireGuard SET can
 // partially mutate a device even within one message. The engine journals its
 // intent and holds the owned device DOWN until every batch and readback succeeds.
+func (k *linuxKernel) SetWireGuardEndpoint(index int, key wireGuardKey, endpoint string) error {
+	family, err := wireGuardFamily()
+	if err != nil {
+		return err
+	}
+	address, err := encodeWireGuardEndpoint(endpoint)
+	if err != nil {
+		return err
+	}
+	request := wireGuardRequest(family.ID, unix.WG_CMD_SET_DEVICE, index, unix.NLM_F_ACK)
+	peers := wireGuardAttr(unix.WGDEVICE_A_PEERS|unix.NLA_F_NESTED, nil)
+	peer := peers.AddRtAttr(1|unix.NLA_F_NESTED, nil)
+	peer.AddRtAttr(unix.WGPEER_A_PUBLIC_KEY, key[:])
+	peer.AddRtAttr(unix.WGPEER_A_FLAGS, wireGuardUint32(unix.WGPEER_F_UPDATE_ONLY))
+	peer.AddRtAttr(unix.WGPEER_A_ENDPOINT, address)
+	request.AddData(peers)
+	_, err = request.Execute(unix.NETLINK_GENERIC, 0)
+	return err
+}
+
 func (k *linuxKernel) ReplaceWireGuard(index int, wanted wireGuardDevice) error {
 	family, err := wireGuardFamily()
 	if err != nil {

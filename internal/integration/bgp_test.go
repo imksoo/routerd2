@@ -382,6 +382,9 @@ func isolateFixtureTimeout(t *testing.T, name string, timeout time.Duration) boo
 		if os.Geteuid() == 0 {
 			cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: unix.CLONE_NEWNET}
 		}
+		if name == "TestDaemonWireGuardDNS" {
+			cmd.SysProcAttr.Cloneflags |= unix.CLONE_NEWNS
+		}
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			if (errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES)) && os.Getenv("ROUTERD2_INTEGRATION_REQUIRED") != "1" {

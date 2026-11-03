@@ -7,11 +7,15 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/miekg/dns"
 )
 
 const (
@@ -46,10 +50,10 @@ type WireGuard struct {
 	Peers        []WireGuardPeer `json:"peers,omitempty"`
 }
 
-// WireGuardPeer is part of the complete desired peer set. Endpoint is a numeric
-// unicast IP:port; an IPv6 link-local address requires an interface zone. Empty
+// WireGuardPeer is part of the complete desired peer set. Endpoint is a hostname
+// or unicast IP:port; an IPv6 link-local address requires an interface zone. Empty
 // means a passive peer, whose endpoint can be learned by authenticated traffic.
-// A roaming runtime endpoint is preserved unless this declaration changes.
+// A recent authenticated roaming endpoint takes precedence over DNS refresh.
 type WireGuardPeer struct {
 	PublicKey           string   `json:"public_key"`
 	PresharedKeyFile    string   `json:"preshared_key_file,omitempty"`
@@ -146,6 +150,7 @@ type wireGuardKernel interface {
 	ReadWireGuard(index int) (wireGuardDevice, error)
 	ReplaceWireGuard(index int, wanted wireGuardDevice) error
 	SetWireGuardUp(index int, up bool) error
+	SetWireGuardEndpoint(index int, key wireGuardKey, endpoint string) error
 }
 
 // The native backend closes its private netlink sockets when the independent
@@ -205,10 +210,8 @@ func validateWireGuard(d Desired) error {
 				add("wireguard %s peer %d: persistent_keepalive must be 0..65535 seconds", device.Interface, i)
 			}
 			if peer.Endpoint != "" {
-				endpoint, err := netip.ParseAddrPort(peer.Endpoint)
-				a := endpoint.Addr()
-				if err != nil || endpoint.Port() == 0 || a.Is4In6() || a.IsUnspecified() || a.IsMulticast() || a.Zone() != "" && (!a.Is6() || !validName(a.Zone())) || a.IsLinkLocalUnicast() && a.Is6() && a.Zone() == "" {
-					add("wireguard %s peer %d: endpoint must be a numeric unicast IP:port, with a zone for IPv6 link-local", device.Interface, i)
+				if _, _, err := parseWireGuardPeerEndpoint(peer.Endpoint); err != nil {
+					add("wireguard %s peer %d: %v", device.Interface, i, err)
 				}
 			}
 			for j, raw := range peer.AllowedIPs {
@@ -240,8 +243,8 @@ func normalizeWireGuard(device WireGuard) WireGuard {
 	for i := range device.Peers {
 		peer := &device.Peers[i]
 		if peer.Endpoint != "" {
-			endpoint, _ := netip.ParseAddrPort(peer.Endpoint)
-			peer.Endpoint = endpoint.String()
+			host, port, _ := parseWireGuardPeerEndpoint(peer.Endpoint)
+			peer.Endpoint = net.JoinHostPort(host, strconv.Itoa(int(port)))
 		}
 		for j, prefix := range peer.AllowedIPs {
 			p, _ := netip.ParsePrefix(prefix)
@@ -251,6 +254,24 @@ func normalizeWireGuard(device WireGuard) WireGuard {
 	}
 	sort.Slice(device.Peers, func(i, j int) bool { return device.Peers[i].PublicKey < device.Peers[j].PublicKey })
 	return device
+}
+
+func parseWireGuardPeerEndpoint(raw string) (string, uint16, error) {
+	host, port, err := net.SplitHostPort(raw)
+	value, portErr := strconv.ParseUint(port, 10, 16)
+	if err != nil || portErr != nil || value == 0 {
+		return "", 0, errors.New("WireGuard endpoint requires a host and port 1..65535")
+	}
+	if address, err := netip.ParseAddr(host); err == nil {
+		if address.Is4In6() || address.IsUnspecified() || address.IsMulticast() || address.Zone() != "" && (!address.Is6() || !validName(address.Zone())) || address.Is6() && address.IsLinkLocalUnicast() && address.Zone() == "" {
+			return "", 0, errors.New("WireGuard endpoint requires a unicast address and a zone for IPv6 link-local")
+		}
+		return address.String(), uint16(value), nil
+	}
+	if _, valid := dns.IsDomainName(host); !valid || host == "." || strings.ContainsAny(host, " /\\\t\r\n\x00:%") {
+		return "", 0, errors.New("invalid WireGuard endpoint hostname")
+	}
+	return strings.ToLower(host), uint16(value), nil
 }
 
 func publicWireGuardState(name string, device wireGuardDevice, owned, quarantined bool) WireGuardState {

@@ -1,5 +1,7 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
+NET-08のhostname endpointを既存network ownerへ接続し、独立wireguard-tools/dnsmasq/LAN端末でbootstrap・roaming・DNS失敗/復旧・移動先でのTCP/UDP・daemon再起動・撤去を受け入れた。標準のhandshake期限と実kernelを使う。SAM由来peer集合・動的identityと全体の残作業は継続する。実行版と再実行手順は[引き継ぎ](pve-codex-handoff.md)に記載する。
+
 保存設定で常時使うNTP固定3時刻源を、既存の学習時刻源と同じengineへ接続した。通常build `3555b25e2e91`で単体45-resourceの全daemon再起動と、二台各54-resourceの両方向引継ぎ・新規端末確認が終了0。今回の引継ぎ前後の独立NTP照会timeoutは0回。時刻源の同時使用・実通信・品質の観測と残作業は[引き継ぎ](pve-codex-handoff.md)に記載する。
 
 main `8840131`・通常build `8840131f706a`の各54-resource二台例で、旧現用停止中に初めて接続する端末のDHCPv4/SLAAC/DHCPv6 Information、両IP DNS/Internet、旧現用再加入時の新規lease同期を両方向で受け入れた。既存socket/NAT tuple、設定rollback/confirmと全機能再確認も通過。引継ぎ中のNTP品質・長時間安定性と全体の残作業を継続する。条件・測定値は[引き継ぎ](pve-codex-handoff.md)に記載する。

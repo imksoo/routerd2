@@ -12,6 +12,7 @@ import tempfile
 # Each fixture verifies its disposable user/network namespace before mutation.
 # Timeout is the outer harness budget, not a protocol or client deadline.
 SUITES = {
+    "wireguard": (("TestDaemonWireGuardDNS", ("wan0", "lan0"), 300),),
     "event-group": (("TestDaemonSignedEventGroup", (), 140),),
     "sam-transport": (
         ("TestDaemonSAMIPIPBGPWithFRR", ("wan0", "lan0"), 90),
