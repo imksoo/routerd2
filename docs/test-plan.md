@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 14:32 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 14:56 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 実行原則
 
@@ -239,3 +239,7 @@ blackholeは実clientからTCP/UDPを送り、timeout、kernel blackhole route�
 現用daemon停止/再加入を両方向に行い、上記通信、両LANのDHCP mask/gateway/DNS・Renew/Release/再取得、共有PD identity、管理/Tailscale/運用記録を確認する。継続TCPは1.1.1.1:443、UDPは転送集合外の9.9.9.10:53を用い、同一socketとNAT tuple/mark、TCP SYN、応答間隔を照合する。UDP宛先が実membership外であることを確認し、ローカルDNS転送を上流UDP継続と数えない。build済み同一版で確認側を修正した場合は`python3 scripts/uplink-ha.py --uplink ens18`で再実行できる。
 
 2026-11-03: 通常build `adbd41ffa4be`、各52-resourceの上記手順は終了0。両方向の通信・同一TCP/UDP・DHCP/PD identityと再加入を確認した。結果・応答間隔・未受入範囲は[引き継ぎ](pve-codex-handoff.md)を参照する。
+
+二台運転中の設定変更は同じHA手順の各引継ぎ前に現用機で行う。実control APIから現行intent/revisionを読み、coreのrouter AとLAN cacheを一つの30秒候補へ変更する。独立LAN端末から両IP UDP/TCPの候補回答と公開HTTPSを確認し、無確認の自然期限切れ、元intent全体と回答への復帰、rolled_back_timeout eventを照合する。再適用した候補を実confirm APIで確定し、通常commitで元のintentへ戻す。両caseで現用機とWAN DHCPv4/RA/PD・VRRP・BGPのPIDを維持する。既存TCP/UDPは設定変更中から両方向のdaemon停止/再加入まで継続させる。これは各nodeへの設定変更であり、node間の設定自動同期や更新中のcontrol交換を合格に含めない。
+
+2026-11-03: 基準main `b9d4d14` + 無変更workerの反映待ち修正、通常build ID `b9d4d14bc85b`の最終手順が終了0。両nodeの設定変更/期限切れ/confirmと、設定変更中からの同一TCP/UDP・両方向の引継ぎを確認した。結果・限界は[引き継ぎ](pve-codex-handoff.md)を参照する。

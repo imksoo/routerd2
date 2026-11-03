@@ -1,6 +1,6 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
-単体で受け入れた二つのLAN /16、NAT条件、個別経路、WAN共有BGP、公開DNS/NTP転送を各52-resourceの二台例へ接続した。通常build `adbd41ffa4be`で両方向のdaemon停止/再加入と実通信が終了0。同一TCP（SYN1回）/UDPのNAT tuple・PD identity・DHCP更新/再取得を保持した。既存の上流順位とhysteresisを使い、WANを追加しない。次は保存intentの残り、二台での設定更新・保持障害を進める。詳細・限界は[引き継ぎ](pve-codex-handoff.md)を参照する。
+HA運転中のDNS変更で、無変更のVRRP反映待ちを設定epochで打ち切り、現用権を失う不具合を修正した。実HGW二台で両nodeの期限切れ復帰・明示confirm・元設定への復元が終了0。WAN/VRRP/BGP workerのPIDを維持し、同一TCP/UDPを設定変更と両方向の引継ぎまで継続できた。次は保存設定のWAN固定共有IPv4と固定SNATを接続し、現在のDHCP/masqueradeとの差を解消する。詳細・残作業は[引き継ぎ](pve-codex-handoff.md)を参照する。
 
 保存設定の二つのLAN /16とDHCP profileを単体44-resourceへ接続し、実netmask/割当/通信と全daemon再起動後が通過した。保存NAT除外も反映し、私設/機器用宛ての元sourceとInternet/管理/WAN内のSNATを実peerで確認。次は残る保存intentと実接続topologyを照合し、単体で受け入れた構成を二台profileへ接続する。詳細は[引き継ぎ](pve-codex-handoff.md)を参照する。
 

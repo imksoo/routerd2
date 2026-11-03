@@ -1,6 +1,16 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03 14:32 UTC。全体ゴールは継続中。
+更新: 2026-11-03 14:56 UTC。全体ゴールは継続中。
+
+## 無関係な設定変更でHAの現用権を失わない
+
+基準main `b9d4d14`の実HGW二台試験で、DNSのAレコード/cacheだけを変更するとVRRP workerがHTTP409で停止し、待機機へ切り替わる問題を再現した。ApplyConfigが設定更新時に、変更していないworkerのカーネル反映待ちも一律にErrStaleで終了していた。反映待ちは実際のworker identityと原通知に結び付け、不要な設定epochを削除した。新しい設定でも同一のworker/通知を保持する要求だけを継続し、新しいprojectionの実適用後にACKする。worker交換、古い通知、元の期限とカーネル反映の検査は維持する。
+
+2026-11-03、基準main `b9d4d14` + 本修正、通常Makefile build ID `b9d4d14bc85b`で、各52-resourceの最終HA手順が終了0。各現用機で両IP UDP/TCPの候補DNS回答と公開HTTPS、30秒候補の自然期限切れ・元intent全体/回答への復帰、再適用/明示confirm/元設定への通常commitが通過。期限切れは32.46/32.61秒、confirmから復元を含む操作は3.57/3.90秒。いずれも現用権とWAN DHCPv4/RA/PD・VRRP・BGPのPIDを維持した。確認側のfalse省略による比較誤りは、APIが返した適用済み/確定済みの設定同士を照合するよう修正した。
+
+同じTCP/UDPを設定変更前から両方向のdaemon停止/再加入まで継続し、SYN1回・TCP333応答/最大間隔16.10秒、UDP372応答/16期限超過/最大間隔10.52秒（返信予算1秒）。同じNAT tuple/mark・共有PD identity、実DHCP更新/再取得、通常通信/運用記録/Tailscale exitも通過。全項目56.31/66.94秒は転送断時間ではない。make test-tools race vet、関連runtimeplan Race、fmt-check、通常build/3実行物static linkが通過。再実行は[試験計画](test-plan.md)末尾。node間の設定自動同期、pending中のcontrol交換、保持障害、物理機器と全34 packageは未受入。
+
+次の実装差: 保存homertのWAN固定共有IPv4（/32）とそれを使う固定SNATに対し、現在の二台例はWAN DHCPアドレスのmasqueradeを使っている。この二つを同等の受入として扱わず、既存WAN上の共有アドレス/固定SNATを次に接続する。サイトの稼働IPは試験へ流用しない。
 
 ## 二つのLAN・経路・転送機能の二台HA受入
 

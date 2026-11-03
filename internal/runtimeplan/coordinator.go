@@ -27,12 +27,11 @@ import (
 // only the serialized coordinator can acknowledge its kernel effects. In
 // particular, no protocol callback acquires op or changes the module set.
 type pendingApplication struct {
-	update      serviceconfig.Update
-	sourceEpoch uint64
-	done        chan struct{}
-	err         error
-	receipt     serviceconfig.ApplicationReceipt
-	withdrawRA  map[string][]string
+	update     serviceconfig.Update
+	done       chan struct{}
+	err        error
+	receipt    serviceconfig.ApplicationReceipt
+	withdrawRA map[string][]string
 }
 
 func sameUpdate(a, b serviceconfig.Update) bool {
@@ -69,7 +68,7 @@ func (r *Runtime) waitApplicationLocked(ctx context.Context, effect *pendingAppl
 			ready, until := facts.ConditionAuthority(activation.ReadyWhen)
 			unpublished = ready != resourceprogram.True || facts.NowNanos == 0 || facts.NowNanos >= until
 		}
-		if unpublished && effect.sourceEpoch == r.sourceEpoch && r.applications[u.Name] == effect && r.applied.sourceEpoch == r.sourceEpoch && r.applied.network != nil && vrrpEffectApplied(u, *r.applied.network, false) == nil {
+		if unpublished && r.applications[u.Name] == effect && r.applied.sourceEpoch == r.sourceEpoch && r.applied.network != nil && vrrpEffectApplied(u, *r.applied.network, false) == nil {
 			effect.receipt.VRRP, err = r.vrrpDecisionLocked(u.Name, false)
 			effect.receipt.Applied = err == nil
 			r.finishApplicationLocked(u.Name, err)
@@ -108,12 +107,12 @@ func (r *Runtime) queueApplicationLocked(u serviceconfig.Update) *pendingApplica
 		r.applications = make(map[string]*pendingApplication)
 	}
 	effect := r.applications[u.Name]
-	if effect == nil || effect.sourceEpoch != r.sourceEpoch || !sameUpdate(effect.update, u) {
+	if effect == nil || !sameUpdate(effect.update, u) {
 		if effect != nil {
 			r.finishApplicationLocked(u.Name, ErrStale)
 		}
 		u.Snapshot = append(json.RawMessage(nil), u.Snapshot...)
-		effect = &pendingApplication{update: u, sourceEpoch: r.sourceEpoch, done: make(chan struct{})}
+		effect = &pendingApplication{update: u, done: make(chan struct{})}
 		if u.Role == "dhcp6" {
 			effect.withdrawRA = r.dhcp6WithdrawalsLocked(u.Name)
 		}
@@ -135,7 +134,7 @@ func (r *Runtime) finishApplicationLocked(name string, err error) {
 func (r *Runtime) fenceApplicationsLocked() {
 	for name, effect := range r.applications {
 		module, ok := r.guard.modules[name]
-		valid := ok && effect.sourceEpoch == r.sourceEpoch && module.Role == effect.update.Role && module.Generation == effect.update.Generation && module.ConfigDigest == effect.update.ConfigDigest
+		valid := ok && module.Role == effect.update.Role && module.Generation == effect.update.Generation && module.ConfigDigest == effect.update.ConfigDigest
 		if valid {
 			continue
 		}
@@ -157,7 +156,7 @@ func (r *Runtime) finishApplicationsLocked(p projection, applications map[string
 		current, ok := r.records[name]
 		binding, bound := r.bindings[name]
 		module, registered := r.guard.modules[name]
-		if !ok || !bound || !registered || module.Role != effect.update.Role || module.Generation != effect.update.Generation || module.ConfigDigest != effect.update.ConfigDigest || binding.digest != effect.update.ConfigDigest || effect.sourceEpoch != r.sourceEpoch || !sameUpdate(current, effect.update) {
+		if !ok || !bound || !registered || module.Role != effect.update.Role || module.Generation != effect.update.Generation || module.ConfigDigest != effect.update.ConfigDigest || binding.digest != effect.update.ConfigDigest || !sameUpdate(current, effect.update) {
 			err = ErrStale
 		}
 		if err == nil {
@@ -228,7 +227,7 @@ func vrrpEffectApplied(u serviceconfig.Update, d network.Desired, active bool) e
 
 func (r *Runtime) pendingWithdrawalLocked(name string) bool {
 	effect := r.applications[name]
-	if effect == nil || effect.sourceEpoch != r.sourceEpoch {
+	if effect == nil {
 		return false
 	}
 	current, ok := r.records[name]

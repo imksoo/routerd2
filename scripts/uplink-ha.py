@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run paired native homert profiles against a real HGW and independent peers."""
 import argparse
+import copy
 from datetime import datetime
 import ipaddress
 import json
@@ -47,8 +48,12 @@ def owner(stage, uplink):
                 return
             time.sleep(.2)
         raise RuntimeError("full native HA readiness deadline")
-    def api(node, socket, path):
-        return json.loads(run(["curl", "--fail-with-body", "--max-time", "4", "-sS", "--unix-socket", str(stage / node / "run" / socket), "http://localhost" + path]))
+    def api(node, socket, path, body=None):
+        seconds = 35 if body is not None else 4
+        command = ["curl", "--fail-with-body", "--max-time", str(seconds), "-sS", "--unix-socket", str(stage / node / "run" / socket), "http://localhost" + path]
+        if body is not None:
+            command += ["-H", "Content-Type: application/json", "--data-binary", json.dumps(body)]
+        return json.loads(run(command, seconds + 5))
     def connect(key, device, bridge, mac=None):
         port = key + "-" + device
         run(["ip", "link", "add", device, "netns", names[key], "type", "veth", "peer", "name", port, "netns", names["wire"]])
@@ -227,6 +232,9 @@ def owner(stage, uplink):
         hook.chmod(0o500)
         dhcp_client = start("client", ["busybox", "udhcpc", "-f", "-i", "client0", "-s", str(hook), "-p", str(stage / "client.pid")], "client-dhcp")
         wait(lease.exists)
+        def advertised_dns():
+            advertised = re.findall(r"rdnss option[^\n]* lifetime (\d+)s, addr: ([0-9a-f:]+)", (stage / "client-ra.log").read_text())
+            return next((str(ipaddress.ip_address(address)) for seconds,address in reversed(advertised) if int(seconds) > 0), None)
         def traffic():
             address,gateway,dns = lease.read_text().split()
             assert gateway==dns=="198.18.0.1", (gateway,dns)
@@ -239,9 +247,6 @@ def owner(stage, uplink):
                 print("PASS HA client HTTPS", family, flush=True)
             for transport in ([],["+tcp"]):
                 assert run(inside("client", ["dig", "@"+dns, "example.net", "A", "+short", "+time=3", "+tries=1"]+transport)).strip()
-            def advertised_dns():
-                advertised = re.findall(r"rdnss option[^\n]* lifetime (\d+)s, addr: ([0-9a-f:]+)", (stage / "client-ra.log").read_text())
-                return next((str(ipaddress.ip_address(address)) for seconds,address in reversed(advertised) if int(seconds) > 0), None)
             wait(advertised_dns)
             dns6 = advertised_dns()
             assert run(inside("client", ["dig", "-6", "@"+dns6, "example.net", "AAAA", "+short", "+time=3", "+tries=1"])).strip()
@@ -295,6 +300,57 @@ def owner(stage, uplink):
             print("PASS HA private routing without NAT, management/WAN source NAT and public DNS/NTP local redirects via", node, flush=True)
             print("PASS HA conditional DNS/nested suffix, both DoH peers, FRR advertisements and client TCP/UDP without NAT via", node, flush=True)
             print("PASS HA client lease and IPv4/IPv6 HTTPS, UDP/TCP DNS via", elected(), flush=True)
+        def check_configuration(node):
+            original = api(node, "control.sock", "/v1/config")
+            workers = {m["name"]: m["pid"] for m in api(node, "supervisor.sock", "/v1/status")["modules"]
+                if m["name"] in ("service.wan4", "service.wan-ra", "service.wan-pd", "service.lan-ha", "service.routing")}
+            candidate = copy.deepcopy(original["config"])
+            core = next(r["service"]["dns"] for r in candidate["resources"] if r["id"] == "service/dns-core")
+            zone = core["zones"][0]["spec"]
+            record = next(r for r in zone["records"] if r["hostname"] == "router")
+            original_answer = record["ipv4"]
+            record["ipv4"] = "192.0.2.99"
+            lan = next(r["service"]["dns"] for r in candidate["resources"] if r["id"] == "service/dns")
+            lan["spec"]["cache"]["enabled"] = False
+            dns6 = advertised_dns()
+            def answers(expected):
+                for server in ("198.18.0.1", dns6):
+                    for transport in ("+notcp", "+tcp"):
+                        answer = subprocess.run(inside("client", ["dig", "@" + server, "router." + zone["zone"].rstrip("."), "A", "+short", "+time=2", "+tries=1", transport]), capture_output=True, text=True, timeout=4)
+                        if answer.returncode or answer.stdout.strip() != expected:
+                            return False
+                return True
+            for mode in ("timeout", "confirm"):
+                started = time.monotonic()
+                request_id = "ha-dns-" + node + "-" + mode
+                applied = api(node, "control.sock", "/v1/config/commit", {
+                    "expected_revision": api(node, "control.sock", "/v1/config")["revision"],
+                    "request_id": request_id, "config": candidate, "confirm_timeout_seconds": 30})
+                assert applied["confirmation"]["request_id"] == request_id, applied
+                print("HA candidate applied", node, mode, "revision", applied["revision"], flush=True)
+                wait(lambda: answers("192.0.2.99"), 20)
+                for family, host in (("-4", "1.1.1.1"), ("-6", "[2606:4700:4700::1111]")):
+                    run(inside("client", ["curl", family, "--noproxy", "*", "--fail", "--max-time", "8", "--resolve", "one.one.one.one:443:" + host, "-sS", "-I", "https://one.one.one.one/"]))
+                if mode == "timeout":
+                    def rolled_back():
+                        state = api(node, "control.sock", "/v1/config")
+                        return state["revision"] > applied["revision"] and not state.get("confirmation") and state["healthy"]
+                    wait(rolled_back, 45)
+                    restored = api(node, "control.sock", "/v1/config")
+                    changes = api(node, "control.sock", "/v1/events?producer_epoch=" + restored["producer_epoch"] + "&after_sequence=0")
+                    assert any(e["type"] == "rolled_back_timeout" and e.get("request_id") == request_id for e in changes["events"]), changes
+                else:
+                    confirmed = api(node, "control.sock", "/v1/config/confirm", {"revision": applied["revision"], "request_id": request_id})
+                    assert not confirmed.get("confirmation") and confirmed["config"] == applied["config"] and confirmed["healthy"], confirmed
+                    restored = api(node, "control.sock", "/v1/config/commit", {
+                        "expected_revision": confirmed["revision"], "request_id": "ha-dns-restore-" + node, "config": original["config"]})
+                assert restored["config"] == original["config"], "HA DNS edit did not restore the complete original intent"
+                wait(lambda: answers(original_answer), 20)
+                current = {m["name"]: m["pid"] for m in api(node, "supervisor.sock", "/v1/status")["modules"] if m["name"] in workers}
+                assert current == workers, ("HA DNS edit restarted unrelated protocol workers", workers, current)
+                assert elected() == node, "HA DNS edit changed the serving owner"
+                print("PASS HA configuration", mode, "on", node, "seconds", round(time.monotonic() - started, 2), "client IPv4/IPv6 UDP/TCP candidate/restored DNS, Internet and unchanged WAN/VRRP/BGP workers", flush=True)
+
         def client_ipv6_ready():
             addresses = json.loads(run(inside("client", ["ip", "-j", "-6", "address", "show", "dev", "client0", "scope", "global"])))
             usable = any(not info.get("tentative") and not info.get("dadfailed")
@@ -486,6 +542,7 @@ def owner(stage, uplink):
             previous = elected()
             survivor = "b" if previous == "a" else "a"
             wait(lambda: standby_synced(survivor))
+            check_configuration(previous)
             handoff_started = time.monotonic()
             daemons[previous].send_signal(signal.SIGTERM)
             daemons[previous].wait(timeout=30)

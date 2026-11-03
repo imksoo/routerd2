@@ -428,8 +428,12 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 			r.mu.Unlock()
 			return r.failure(errors.New("source cutover epoch exhausted"))
 		}
-		for name := range r.applications {
-			r.finishApplicationLocked(name, ErrStale)
+		// An unchanged worker keeps its accepted observation and pending effect.
+		// The new projection must still apply that effect before acknowledging it.
+		for name, effect := range r.applications {
+			if bindings[name].digest != effect.update.ConfigDigest || !sameUpdate(retained[name], effect.update) {
+				r.finishApplicationLocked(name, ErrStale)
+			}
 		}
 		r.sourceEpoch++
 		r.egressSelections = nil
