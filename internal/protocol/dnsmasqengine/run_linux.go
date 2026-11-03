@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
 //go:build linux
 
-package dhcpserver
+package dnsmasqengine
 
 import (
 	"encoding/json"
 	"io"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"syscall"
@@ -17,13 +16,19 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// RunEngine gives dnsmasq its own filesystem and the sole lease directory.
+type Settings struct {
+	Config         []byte `json:"config"`
+	StateDirectory string `json:"state_directory"`
+	EventSocket    string `json:"event_socket,omitempty"`
+}
+
+// Run gives dnsmasq its own filesystem and the sole lease directory.
 // dnsmasq owns packet processing and lease persistence; routerd owns its lifetime.
-func RunEngine() error {
+func Run() error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	f := os.NewFile(3, "dnsmasq-config")
-	var settings engineSettings
+	var settings Settings
 	err := json.NewDecoder(io.LimitReader(f, 1<<20)).Decode(&settings)
 	f.Close()
 	if err != nil {
@@ -35,7 +40,7 @@ func RunEngine() error {
 	if err := unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, ""); err != nil {
 		return err
 	}
-	state, err := statefs.OpenDirectory(filepath.Dir(settings.Intent.StatePath), false)
+	state, err := statefs.OpenDirectory(settings.StateDirectory, false)
 	if err != nil {
 		return err
 	}
@@ -76,7 +81,7 @@ func RunEngine() error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile("/etc/dnsmasq.conf", dnsmasqConfig(settings), 0600); err != nil {
+	if err := os.WriteFile("/etc/dnsmasq.conf", settings.Config, 0600); err != nil {
 		return err
 	}
 	return syscall.Exec("/usr/sbin/dnsmasq", []string{"dnsmasq", "--keep-in-foreground", "--conf-file=/etc/dnsmasq.conf"}, []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "ROUTERD_DHCP_EVENT_SOCKET=" + settings.EventSocket})

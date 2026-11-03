@@ -31,7 +31,7 @@ func Command(role string) string {
 		return "usr/sbin/conntrackd"
 	case "tailscale":
 		return "usr/sbin/tailscaled"
-	case "dhcp_server":
+	case "dhcp_server", "dhcp6_server":
 		return "usr/sbin/dnsmasq"
 	default:
 		return ""

@@ -16,7 +16,7 @@ make runtime-bundle DOCKER='sudo -n docker' \
 単調増加させる。既存の出力ファイルは置き換えない。
 通常の出力は`dist/routerd-runtime-<release-id>-<arch>.tar`。
 `BUNDLE_OUTPUT`で新しい出力先、`BUNDLE_BOOT`でboot catalogを指定できる。
-既定は`images/boot.json`で、現在は25役割・5 engineを宣言している。
+既定は`images/boot.json`で、現在は25役割と6つのengine role bindingを宣言している。DHCPv4/v6は同じdnsmasqを使うため、engine本体とsourceは5組のままで、署名物にも一組だけ収録する。
 この入口はbuild host上で動くnative Linux build向け。異なるarchitectureの実行資格は別に確認する。
 
 publisherへ渡す前に、選択したビルド成果物をowner専用の一時領域へ固定する。

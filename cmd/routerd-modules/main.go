@@ -22,7 +22,7 @@ import (
 	"github.com/imksoo/routerd2/internal/logging"
 	"github.com/imksoo/routerd2/internal/management"
 	"github.com/imksoo/routerd2/internal/protocol/conntracksync"
-	"github.com/imksoo/routerd2/internal/protocol/dhcpserver"
+	"github.com/imksoo/routerd2/internal/protocol/dnsmasqengine"
 	"github.com/imksoo/routerd2/internal/protocol/ntp"
 	"github.com/imksoo/routerd2/internal/protocol/pppoe"
 	"github.com/imksoo/routerd2/internal/protocol/tailscale"
@@ -46,7 +46,7 @@ func run(args []string) error {
 		return ntp.RunEngine()
 	}
 	if len(args) == 1 && args[0] == "dnsmasq-engine" {
-		return dhcpserver.RunEngine()
+		return dnsmasqengine.Run()
 	}
 	if len(args) == 1 && args[0] == "tailscale-engine" {
 		return tailscale.RunEngine()

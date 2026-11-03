@@ -245,7 +245,7 @@ check-bfd: build
 	$(PYTHON) scripts/daemon-tests.py bfd --go '$(GO)'
 
 .PHONY: check-dhcp6-server
-check-dhcp6-server: build
+check-dhcp6-server: build dnsmasq-engine
 	$(PYTHON) scripts/daemon-tests.py dhcp6-server --go '$(GO)'
 
 .PHONY: check-dhcp6-ra-pd

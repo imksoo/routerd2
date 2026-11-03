@@ -8,7 +8,8 @@
     "dhcp_server": "/usr/lib/routerd/dnsmasq-engine.tar",
     "vrrp": "/usr/lib/routerd/conntrack-engine.tar",
     "tailscale": "/usr/lib/routerd/tailscale-engine.tar",
-    "ntp": "/usr/lib/routerd/chrony-engine.tar"
+    "ntp": "/usr/lib/routerd/chrony-engine.tar",
+    "dhcp6_server": "/usr/lib/routerd/dnsmasq-engine.tar"
   },
   "kernel_modules": [
     "virtio_pci",

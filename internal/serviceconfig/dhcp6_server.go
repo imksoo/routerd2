@@ -10,17 +10,18 @@ import (
 )
 
 type DHCP6Server struct {
-	LogDHCP        bool           `json:"log_dhcp,omitempty"`
-	Interface      string         `json:"interface"`
-	ServerDUID     string         `json:"server_duid,omitempty"`
-	DNSServers     []netip.Addr   `json:"dns_servers,omitempty"`
-	SNTPServers    []netip.Addr   `json:"sntp_servers,omitempty"`
-	DomainSearch   []string       `json:"domain_search,omitempty"`
-	DNSFrom        []string       `json:"dns_from,omitempty"`
-	DNSDelegation  *DNSDelegation `json:"dns_delegation,omitempty"`
-	SNTPFrom       []string       `json:"sntp_from,omitempty"`
-	SearchFrom     []string       `json:"search_from,omitempty"`
-	RefreshSeconds uint32         `json:"refresh_seconds,omitempty"`
+	Pool           *dhcp6serverconfig.Pool `json:"pool,omitempty"`
+	LogDHCP        bool                    `json:"log_dhcp,omitempty"`
+	Interface      string                  `json:"interface"`
+	ServerDUID     string                  `json:"server_duid,omitempty"`
+	DNSServers     []netip.Addr            `json:"dns_servers,omitempty"`
+	SNTPServers    []netip.Addr            `json:"sntp_servers,omitempty"`
+	DomainSearch   []string                `json:"domain_search,omitempty"`
+	DNSFrom        []string                `json:"dns_from,omitempty"`
+	DNSDelegation  *DNSDelegation          `json:"dns_delegation,omitempty"`
+	SNTPFrom       []string                `json:"sntp_from,omitempty"`
+	SearchFrom     []string                `json:"search_from,omitempty"`
+	RefreshSeconds uint32                  `json:"refresh_seconds,omitempty"`
 }
 
 // DNSDelegation selects the router address installed from a PD allocation.
@@ -36,7 +37,7 @@ type DHCP6ServerInput struct {
 
 func (s Service) DHCP6ServerConfig(stateDir string) dhcp6serverconfig.Config {
 	c := s.DHCP6Server
-	return dhcp6serverconfig.Config{LogDHCP: c.LogDHCP, Resource: s.Name, Interface: c.Interface, StatePath: filepath.Join(stateDir, "leases", s.Name+".dhcp6-server-duid"), ServerDUID: c.ServerDUID, DNSServers: c.DNSServers, SNTPServers: c.SNTPServers, DomainSearch: c.DomainSearch, RefreshSeconds: c.RefreshSeconds}
+	return dhcp6serverconfig.Config{Pool: c.Pool, LogDHCP: c.LogDHCP, Resource: s.Name, Interface: c.Interface, StatePath: filepath.Join(stateDir, "leases", s.Name+".dhcp6-server-duid"), ServerDUID: c.ServerDUID, DNSServers: c.DNSServers, SNTPServers: c.SNTPServers, DomainSearch: c.DomainSearch, RefreshSeconds: c.RefreshSeconds}
 }
 
 func validateDHCP6Servers(services []Service) error {

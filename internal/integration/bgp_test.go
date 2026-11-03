@@ -456,10 +456,19 @@ func startFixtureDaemonConfigured(t *testing.T, doc config.Document, dir string,
 		t.Fatal(err)
 	}
 	for _, service := range plan.Native.Services {
+		role := ""
 		if service.DHCPServer != nil {
-			boot.Workers["dhcp_server"] = filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd-modules")
-			boot.Engines = map[string]string{"dhcp_server": filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "dnsmasq-engine.tar")}
-			break
+			role = "dhcp_server"
+		}
+		if service.DHCP6Server != nil && service.DHCP6Server.Pool != nil {
+			role = "dhcp6_server"
+		}
+		if role != "" {
+			boot.Workers[role] = filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd-modules")
+			if boot.Engines == nil {
+				boot.Engines = make(map[string]string)
+			}
+			boot.Engines[role] = filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "dnsmasq-engine.tar")
 		}
 	}
 

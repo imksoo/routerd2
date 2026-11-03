@@ -1,4 +1,4 @@
-// Package dhcp6serverconfig describes LAN DHCPv6 information service intent.
+// Package dhcp6serverconfig describes LAN DHCPv6 server intent.
 package dhcp6serverconfig
 
 import (
@@ -11,7 +11,17 @@ import (
 	"github.com/miekg/dns"
 )
 
+// Pool selects an address range served by the bundled dnsmasq engine.
+// Suffix ranges (::100 to ::1ff) follow the interface's advertised /64.
+type Pool struct {
+	Start        netip.Addr `json:"start"`
+	End          netip.Addr `json:"end"`
+	PrefixLength uint8      `json:"prefix_length,omitempty"`
+	LeaseSeconds uint32     `json:"lease_seconds,omitempty"`
+}
+
 type Config struct {
+	Pool           *Pool        `json:"pool,omitempty"`
 	LogDHCP        bool         `json:"log_dhcp,omitempty"`
 	Resource       string       `json:"resource"`
 	Interface      string       `json:"interface"`
@@ -48,6 +58,18 @@ type Snapshot struct {
 func Validate(c Config) error {
 	if c.Resource == "" || c.Interface == "" || len(c.Interface) > 15 || strings.ContainsAny(c.Interface, "/\x00 \t\r\n") || !filepath.IsAbs(c.StatePath) {
 		return errors.New("DHCPv6 server requires a resource, interface and private state path")
+	}
+	if c.Pool != nil {
+		bits := c.Pool.PrefixLength
+		if bits == 0 {
+			bits = 64
+		}
+		if bits < 64 || bits > 128 {
+			return errors.New("DHCPv6 pool prefix length must be between 64 and 128")
+		}
+		if !UsableAddress(c.Pool.Start) || !UsableAddress(c.Pool.End) || c.Pool.Start.Compare(c.Pool.End) > 0 || netip.PrefixFrom(c.Pool.Start, int(bits)).Masked() != netip.PrefixFrom(c.Pool.End, int(bits)).Masked() {
+			return errors.New("DHCPv6 pool requires an ordered IPv6 range within its prefix")
+		}
 	}
 	if c.RefreshSeconds != 0 && c.RefreshSeconds < 600 {
 		return errors.New("DHCPv6 information refresh must be at least 600 seconds")

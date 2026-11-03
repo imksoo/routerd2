@@ -27,6 +27,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dhcpevent"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpfingerprint"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
+	"github.com/imksoo/routerd2/internal/protocol/dnsmasqengine"
 	"golang.org/x/sys/unix"
 )
 
@@ -101,7 +102,7 @@ func startEngine(ctx context.Context, settings engineSettings, image *os.File, e
 	}
 	config := os.NewFile(uintptr(fd), "dnsmasq-config")
 	defer config.Close()
-	if err := json.NewEncoder(config).Encode(settings); err != nil {
+	if err := json.NewEncoder(config).Encode(dnsmasqengine.Settings{Config: dnsmasqConfig(settings), StateDirectory: filepath.Dir(settings.Intent.StatePath), EventSocket: settings.EventSocket}); err != nil {
 		return nil, err
 	}
 	if _, err := config.Seek(0, io.SeekStart); err != nil {

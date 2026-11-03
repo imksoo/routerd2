@@ -1,0 +1,34 @@
+# Isolated LAN example. Select the real LAN interface and an assigned IPv6 prefix.
+# Bind boot.engines.dhcp6_server to the bundled dnsmasq-engine.tar.
+# Routing/WAN and DNS resolution belong to the enclosing router configuration.
+schema_version: 2
+resources:
+  - id: interface/lan
+    interface: {name: lan0}
+  - id: address/lan
+    depends_on: [interface/lan]
+    address: {interface: lan0, cidr: '2001:db8:80::1/64'}
+  - id: service/lan-addresses
+    depends_on: [address/lan]
+    service:
+      name: lan-addresses
+      dhcp6_server:
+        interface: lan0
+        pool: {start: '::100', end: '::1ff', lease_seconds: 43200}
+        domain_search: [lan.test]
+  - id: service/lan-ra
+    depends_on: [address/lan]
+    service:
+      name: lan-ra
+      ra:
+        interface: lan0
+        managed: true
+        other_config: true
+        router_lifetime_seconds: 1800
+        dns_lifetime_seconds: 1800
+        prefixes:
+          - prefix: '2001:db8:80::/64'
+            on_link: true
+            autonomous: false
+            valid_lifetime_seconds: 7200
+            preferred_lifetime_seconds: 3600

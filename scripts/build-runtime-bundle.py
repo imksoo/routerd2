@@ -37,9 +37,12 @@ def main():
     for role, path in boot.get("engines", {}).items():
         image = Path(path).name
         source = image.removesuffix("-engine.tar") + "-sources.tar"
-        layout["engines"].append({"role": role, "artifact": role + "-engine", "sources": role + "-sources"})
+        stem = image.removesuffix("-engine.tar")
+        layout["engines"].append({"role": role, "artifact": stem + "-engine", "sources": stem + "-sources"})
         for kind, name in (("engine", image), ("sources", source)):
-            artifacts.append({"name": role + "-" + kind, "kind": "data", "file": str(engines / name)})
+            artifact = stem + "-" + kind
+            if not any(entry["name"] == artifact for entry in artifacts):
+                artifacts.append({"name": artifact, "kind": "data", "file": str(engines / name)})
     artifacts.append({"name": "ndpi-sources", "kind": "data", "file": str(engines / "ndpi-sources.tar")})
     output = args.output.absolute()
     output.parent.mkdir(parents=True, exist_ok=True)

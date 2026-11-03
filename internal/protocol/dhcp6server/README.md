@@ -1,4 +1,4 @@
-# LAN DHCPv6 information service
+# LAN DHCPv6 service
 
 `services[].dhcp6_server` owns one device-bound UDP6 socket on port 547.
 It answers Information-request with DNS (23), domain search (24), SNTP (31)
@@ -80,6 +80,43 @@ activation and DNS serving alongside synchronized PD and connection state. A
 direct UDP request targets the paused old node separately from the legitimate
 new master; multicast BusyBox responses cannot establish that distinction.
 
-Stateful address/prefix pools, Rapid Commit, DHCPv6 relay, client Reconfigure,
-legacy resource import (including its implicit RA), wider HA partition policy and full hardware qualification remain
-outside the implemented stateless path.
+Prefix delegation pools, DHCPv6 relay, client Reconfigure,
+wider HA partition policy and full hardware qualification remain
+outside the current implementation.
+
+
+## Address pools
+
+A `pool` on `dhcp6_server` selects the existing bundled dnsmasq engine for
+address assignment. Without a pool the native information service above remains
+in use. Bind `engines.dhcp6_server` to the same `dnsmasq-engine.tar` used for
+DHCPv4 in the boot configuration, or the corresponding signed catalog role.
+The factory boot configuration includes both role bindings. Packaging retains
+one copy of that engine and its corresponding sources and notices.
+
+```json
+{"name":"lan-addresses","dhcp6_server":{
+  "interface":"lan0",
+  "pool":{"start":"::100","end":"::1ff","lease_seconds":43200},
+  "dns_servers":["2001:db8:80::1"],"domain_search":["lan.test"]
+}}
+```
+
+Suffix ranges follow the usable prefix installed on the interface using
+routerd's established dnsmasq `constructor` behavior. Full IPv6 ranges select
+a fixed prefix. The prefix length defaults to 64; dnsmasq supports lengths
+64 through 128. Configure the interface, routing and RA separately: use the
+RA managed flag for DHCPv6 addresses, and enable autonomous prefixes as well
+when clients should use both DHCPv6 and SLAAC. This engine never emits RA.
+Learned options and serving permission retain their original deadlines; changes
+restart the external engine with its lease file retained. Allocation, renewal,
+release and lease persistence are owned by dnsmasq, not another Go allocator.
+The existing atomic DUID identity is installed in the engine's lease file
+before it serves and is retained through worker and daemon restart.
+
+`make check-dhcp6-server` exercises both paths with independent BusyBox clients,
+real product processes and packet capture. The address-pool check uses the
+client's actual assigned address for TCP/UDP, renewal and post-restart checks;
+it also compares the server identifier in actual packets with the persisted
+DUID. Stateful lease-to-DNS publication, lease synchronization, prefix change,
+Reconfigure and complete deployment qualification remain open.

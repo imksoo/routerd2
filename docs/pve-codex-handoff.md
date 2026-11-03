@@ -1,6 +1,16 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03 15:48 UTC。全体ゴールは継続中。
+更新: 2026-11-03 16:14 UTC。全体ゴールは継続中。
+
+## DHCPv6アドレス配布を既存engineへ接続
+
+旧routerdの`pkg/render/dnsmasq.go`、dnsmasq2.92rel2のconstructor/option/lease-DUID処理と現行callerを参照した。`dhcp6_server.pool`で既存bundled dnsmasqにアドレス配布を任せ、Goの新しいallocatorは作っていない。RAは既存serviceへ分離し、managed/autonomous指定でstateful/bothを構成する。情報配布型の既存Go経路はそのまま使う。DUIDを既存の原子的保存からengine leaseへ引き継ぎ、割当・更新・解放・lease保存はdnsmasqが所有する。学習options/配布権限は既存の元期限で更新・停止する。
+
+基準main `e58d695` + 本変更、通常build `e58d695dbac6`で、独立BusyBoxクライアントのDHCPv6割当/実Renew、配布DNS、割当アドレスからのTCP/UDP、worker SIGKILL/全daemon再起動後の同一割当とDUID保持を確認した。captureの実Advertise/Replyのserver identifierも保存DUIDと一致。既存Information-requestの実通信、共通engine起動処理を使うDHCPv4の7手順も終了0。`make check`（Race Detector/vet/Python36件）・通常static3実行物・設定例検証が通過。
+
+通常署名bundleを実publisherで生成し、receiverのstage/verifyが終了0。25 worker roles、6 engine bindings、15 artifactsで、DHCPv4/v6は同一dnsmasq engine/sourceを参照し二重収録しない。初回のbundle実行はローカルのPPPoE source archive不足で未生成となり、既存Makefileのengine準備後に最終確認を通した。
+
+今回のアドレス配布は隔離Linux kernelと独立クライアントでの受入。保存homertはstatelessのままで、そこへpoolは新設していない。stateful leaseのDNS連携/同期、prefix変更と期限、HA、全構成Internet/署名起動・更新、ONU/NIC/性能、全34 packageは残る。 再実行は`make check-dhcp6-server DOCKER='sudo -n docker'`、共通engineのDHCPv4は`python3 scripts/daemon-tests.py dhcp-server`。利用例は[dhcp6-stateful.yaml](../examples/dhcp6-stateful.yaml)、設定/engine bindingは[service説明](../internal/protocol/dhcp6server/README.md)。
 
 ## ローカル逆引きと保持障害の接続
 

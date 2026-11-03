@@ -1,5 +1,7 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
+DHCPv6のアドレス配布を旧routerdと同じbundled dnsmasqへ接続した。独立BusyBoxの実割当/更新、TCP/UDP、worker/daemon再起動後のDUIDと割当保持、既存stateless/DHCPv4、署名bundleの共有engine/sourceを確認した。保存homertのstateless構成は維持する。次はstateful leaseのDNS連携/同期とprefix変更・期限を、既存の配布/DNS所有者へ接続する。NET-06と全体ゴールは継続中。結果・再実行は[試験計画](test-plan.md)と[引き継ぎ](pve-codex-handoff.md)。
+
 通常LANの逆引きsuffixをnativeのzone sourceへ接続した。単体45-resourceの実HGW手順と、二台各54-resourceの両方向引継ぎ/逆引き/archive障害・復旧が終了0。公開先と固定WANへの既存TCP/UDP、通常通信と元intentへの復帰も確認した。製品Goの別実装は追加していない。次は残る保存DNS/運用意図、全構成の長時間動作と全34 work packageを進める。結果・限界は[試験計画](test-plan.md)末尾へ集約する。
 
 保存設定の二つのLAN /16とDHCP profileを単体44-resourceへ接続し、実netmask/割当/通信と全daemon再起動後が通過した。保存NAT除外も反映し、私設/機器用宛ての元sourceとInternet/管理/WAN内のSNATを実peerで確認。次は残る保存intentと実接続topologyを照合し、単体で受け入れた構成を二台profileへ接続する。詳細は[引き継ぎ](pve-codex-handoff.md)を参照する。

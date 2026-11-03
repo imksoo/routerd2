@@ -1,6 +1,6 @@
 //go:build linux
 
-// Package dhcp6server serves DHCPv6 information on a configured LAN interface.
+// Package dhcp6server serves DHCPv6 on a configured LAN interface.
 package dhcp6server
 
 import (
@@ -40,6 +40,9 @@ func Run(ctx context.Context, cfg dhcp6serverconfig.Config, initial dhcp6serverc
 	}
 	defer identity.lock.Close()
 	server := identity.duid
+	if cfg.Pool != nil {
+		return runStateful(ctx, cfg, server, initial, updates, report, ready)
+	}
 	iface, source, err := linklocal.Wait(ctx, cfg.Interface, netip.Addr{})
 	if err != nil {
 		return err

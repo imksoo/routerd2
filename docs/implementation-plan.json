@@ -991,6 +991,11 @@
           "result": "2026-11-03、基準main `69ecf22` + native設定/fixture変更、通常build `69ecf22aa39d`（製品Go不変）で、通常/機器用LANを別の/16にした単体44-resource実HGW手順が終了0。通常LANは198.18.0.0/16、機器用は198.19.0.0/16、管理は重複しない10.255.255.0/24。DHCP/BusyBox hookは実応答のnetmaskを使い、予約/通常/OUI/個別MACの割当・実prefix・gateway/DNS・Internet・Release/sticky再取得を確認した。通常LANから実機器用DHCP client2台の名前解決も確認。保存設定にあったRFC1918宛先のSNAT除外を反映し、benchmarkの両LANも内部宛先として除外。私設/機器用宛てには元のLAN sourceが届き、管理/WAN内宛ての明示SNATとInternet向けSNATは維持した。",
           "recovery": "全daemon再起動後にも両subnetのDHCP/prefix/通信、NAT/非NAT、経路/blackhole、DNS/NTP/管理/BGP/Tailscaleが通過。confirmed rollback期限切れ30.72秒/control再起動6.41秒、PD SIGKILL2.60秒/通常再起動5.33秒、全daemon後の全項目再確認111.50秒。これは転送断時間ではない。20秒の2巡回・自然PD更新0回。通常build・3実行物static link、make test-tools race vet・py_compileが通過。NTPの提供許可は保存設定どおり通常LANのみで、機器用LANへのNTP提供とは数えない。",
           "limit": "通常機能確認から毎回の上流障害注入を外し、既存の明示的なUPLINK_WAN_OUTAGE=1へまとめた。今回の最終版は健全な現用上流での実UDP/TCPを確認し、全段切替の再受入には数えない。追加の先行確認で0秒を指定し自然更新待ちに入った実行は明示終了し、合格に流用していない。最終版は20秒・全daemon再起動ありで終了0。二台設定への同構成の接続、全保存intent/実機資格と全34 packageは継続中。"
+        },
+        "stateful_dnsmasq_20261103": {
+          "implemented": "Native DHCPv6 address pool using the existing bundled dnsmasq; constructor-derived or fixed prefix; separate RA; persistent DUID and engine lease; learned option/authority lifetime handling; shared factory engine/source artifacts. No new allocator or package dependency.",
+          "verified": "基準main `e58d695` + 本変更、通常build `e58d695dbac6`で、独立BusyBoxクライアントのDHCPv6割当/実Renew、配布DNS、割当アドレスからのTCP/UDP、worker SIGKILL/全daemon再起動後の同一割当とDUID保持を確認した。captureの実Advertise/Replyのserver identifierも保存DUIDと一致。既存Information-requestの実通信、共通engine起動処理を使うDHCPv4の7手順も終了0。`make check`（Race Detector/vet/Python36件）・通常static3実行物・設定例検証が通過。",
+          "remaining": "Stateful lease-to-DNS publication/synchronization, prefix change/expiry and HA/complete-deployment acceptance."
         }
       }
     },
@@ -11248,7 +11253,7 @@
     "physical_target_profile": "homert02/03 are identified PVE guests with4vCPU/4GiB, three VirtIO NICs and VirtIO/SCSI disks. Matching isolated PVE product boot/recovery was exercised; actual WAN/LAN attachment, clean installation from a preconverted native configuration, measured load and any additional hardware/architecture qualification remain open.",
     "validation_reporting": "Use docs/test-plan.md for the concise current gate state. Detailed historical checkpoint ledgers are not acceptance authority; keep only current result, limits and repeatable procedure. Never claim unrun gates or partial homert profiles complete.",
     "current_acceptance": {
-      "as_of_utc": "2026-11-03T15:48:52Z",
+      "as_of_utc": "2026-11-03T16:14:35Z",
       "homert_source": "User-provided read-only working copies at chatty.lain.local:~/homert02; the current homert02 and homert03 files each contain 110 resources with matching kind counts. Do not publish configuration values or secrets.",
       "completed_gates": [
         "Go runtime checkpoint842c47e passed make check and final runtimeplan Race. This unchanged Go code plus the bundle producer passed normal build, test-tools/race/vet and actual publisher/receiver operations.",
@@ -11400,6 +11405,14 @@
         "command": "python3 scripts/uplink-ha.py --uplink ens18 --retention-check",
         "observed": "2026-11-03、通常build `7649acd44e52`（製品Go不変）、各54-resource実HGW二台手順が終了0。両方向で静的/実DHCP PTRの両IP UDP/TCP、設定期限切れ復元/confirm、通常通信・identity保持、archive障害/復旧と元の保持intentへの復帰を確認した。元ID/時刻の受信と期限削除はbでDNS/終了flow/firewall/fingerprint=10/10/4/3件、aで10/10/8/4件。公開TCP500応答/最大応答間隔15.77秒、UDP543応答/17期限超過/最大10.52秒、固定WAN TCP543応答/最大13.60秒、UDP549応答/11期限超過/最大9.51秒（UDP返信予算1秒）。TCPはいずれもSYN1回、同一socket/NAT tupleを維持。全項目128.03/82.84秒はNTP/保持確認を含み転送断時間ではない。",
         "limit": "短時間のLinux namespace/kernel・実HGW・独立peerでの受入であり、全110-resource intent、全private DNS、長時間安定性、物理ONU/NIC・性能と全34 packageの完成は残る。"
+      },
+      "latest_stateful_dhcp6_gate": {
+        "status": "address assignment, renew, worker/daemon restart and independent TCP/UDP passed; package remains in progress",
+        "source": "e58d695 plus stateful DHCPv6/shared dnsmasq/packaging changes",
+        "build_identity": "e58d695dbac6",
+        "observed": "基準main `e58d695` + 本変更、通常build `e58d695dbac6`で、独立BusyBoxクライアントのDHCPv6割当/実Renew、配布DNS、割当アドレスからのTCP/UDP、worker SIGKILL/全daemon再起動後の同一割当とDUID保持を確認した。captureの実Advertise/Replyのserver identifierも保存DUIDと一致。既存Information-requestの実通信、共通engine起動処理を使うDHCPv4の7手順も終了0。`make check`（Race Detector/vet/Python36件）・通常static3実行物・設定例検証が通過。",
+        "distribution": "通常署名bundleを実publisherで生成し、receiverのstage/verifyが終了0。25 worker roles、6 engine bindings、15 artifactsで、DHCPv4/v6は同一dnsmasq engine/sourceを参照し二重収録しない。初回のbundle実行はローカルのPPPoE source archive不足で未生成となり、既存Makefileのengine準備後に最終確認を通した。",
+        "remaining": "今回のアドレス配布は隔離Linux kernelと独立クライアントでの受入。保存homertはstatelessのままで、そこへpoolは新設していない。stateful leaseのDNS連携/同期、prefix変更と期限、HA、全構成Internet/署名起動・更新、ONU/NIC/性能、全34 packageは残る。"
       }
     }
   },

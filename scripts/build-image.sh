@@ -217,7 +217,7 @@ manifest = {
             "sources_file": name + "-sources.tar",
             "sources_sha256": hashlib.sha256((output / (name + "-sources.tar")).read_bytes()).hexdigest(),
         }
-        for role, name in (("pppoe", "pppoe"), ("dhcp_server", "dnsmasq"), ("vrrp", "conntrack"), ("tailscale", "tailscale"), ("ntp", "chrony"))
+        for role, name in (("pppoe", "pppoe"), ("dhcp_server", "dnsmasq"), ("dhcp6_server", "dnsmasq"), ("vrrp", "conntrack"), ("tailscale", "tailscale"), ("ntp", "chrony"))
     },
     "platform": boot["platform"],
     "kernel_modules": boot["kernel_modules"],
