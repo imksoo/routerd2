@@ -510,14 +510,12 @@ resources:
       priority: 10103
   when:
     fact: service.lan-ha.elected
-- id: service/dns
+- id: service/dns-core
   depends_on:
-  - interface/lan0
-  - address/lan
   - address/management
   - host-wan
   service:
-    name: dns
+    name: dns-core
     dns:
       query_log_retention:
         max_age_seconds: 604800
@@ -541,15 +539,6 @@ resources:
           addressFrom:
           - resource: Interface/mgmt0
             field: ipv4Addresses
-          port: 53
-        - name: lan-v4
-          port: 53
-          addressFrom:
-          - resource: VirtualAddress/lan-ha
-            field: address
-        - name: lan-v6
-          addressFrom:
-          - resource: IPv6DelegatedAddress/wan-pd/lan
           port: 53
         sources:
         - name: local
@@ -611,6 +600,41 @@ resources:
           dhcpDerived:
             sources:
             - DHCPv4Server/lan-leases
+  when:
+    fact: service.lan-ha.elected
+- id: service/dns
+  depends_on:
+  - interface/lan0
+  - address/lan
+  - service/dns-core
+  service:
+    name: dns
+    dns:
+      spec:
+        cache:
+          enabled: true
+          maxEntries: 1000
+          minTTL: 60s
+          maxTTL: 24h
+          negativeTTL: 30s
+        listen:
+        - name: lan-v4
+          port: 53
+          addressFrom:
+          - resource: VirtualAddress/lan-ha
+            field: address
+        - name: lan-v6
+          addressFrom:
+          - resource: IPv6DelegatedAddress/wan-pd/lan
+          port: 53
+        sources:
+        - name: core-resolver
+          kind: forward
+          match:
+          - .
+          upstreams:
+          - udp://127.0.0.1:53
+          queryTimeout: 3s
   when:
     fact: service.lan-ha.elected
 - id: service/time

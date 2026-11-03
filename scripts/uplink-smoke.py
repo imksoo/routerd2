@@ -335,7 +335,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             run(["ip", "-n", gateway, "address", "add", "198.18.0.253/24", "dev", "gateway-lan"])
             run(["ip", "-n", gateway, "link", "set", "gateway-lan", "up"])
             run(["ip", "link", "add", "link", uplink, "name", "gateway-wan", "netns", gateway, "type", "macvlan", "mode", "bridge"])
-            run(["ip", "-n", gateway, "link", "set", "gateway-wan", "address", "02:72:6f:75:74:04", "up"])
+            gateway_mac = (int(wan_mac.replace(":", ""), 16) + 1).to_bytes(6, "big")
+            run(["ip", "-n", gateway, "link", "set", "gateway-wan", "address", ":".join(f"{b:02x}" for b in gateway_mac), "up"])
             gateway_hook = stage / "gateway-dhcp-hook.sh"
             gateway_hook.write_text('#!/bin/sh\ncase "$1" in bound|renew)\n'
                 'ip address replace "$ip/$subnet" dev "$interface" || exit 1\n'
@@ -964,9 +965,9 @@ print(*s.getsockname())
                     assert answer.strip() == "192.0.2.78", "DNS suffix selected the wrong source: " + answer
                 answer = run(inside(client, ["dig", family, "@" + server, "www.example.net", "A", "+time=3", "+tries=1"]))
                 assert "status: NOERROR" in answer and re.search(r"\sIN\s+A\s+", answer), "WAN learned DNS did not resolve the public name: " + answer
-            wait(lambda: any(q["upstream"] == "wan-learned" and q["responseCode"] == "NOERROR" for q in query("control.sock", "/v1/services/service.dns/dns-history?name=www.example.net&limit=20")["queries"]))
+            wait(lambda: any(q["upstream"] == "wan-learned" and q["responseCode"] == "NOERROR" for q in query("control.sock", "/v1/services/service.dns-core/dns-history?name=www.example.net&limit=20")["queries"]))
             def doh_ready():
-                observed = query("services/dns.dns.sock", "/v1/status")["resources"][0]["observed"]["upstreams"]
+                observed = query("services/dns-core.dns.sock", "/v1/status")["resources"][0]["observed"]["upstreams"]
                 return all(endpoint + ":Healthy" in observed for endpoint in ("https://cloudflare-dns.com/dns-query", "https://dns.google/dns-query"))
             wait(doh_ready)
             print("PASS multiple conditional suffixes, nested source precedence, WAN-learned DNS answers and both independent public DoH upstream probes", flush=True)
@@ -1022,10 +1023,15 @@ print(*s.getsockname())
                 "-p", "2222", "admin@198.19.0.1", "show status",
             ])))
             assert status["ready"], "SSH reported the router unavailable"
-            history_path = "/v1/services/service.dns/dns-history?name=available.split.test.&limit=20"
+            # LAN and core caches have separate owners. Exercise the core's own
+            # loopback listener twice to observe a real core-cache hit in history.
+            for _ in range(2):
+                answer = run(inside(router, ["dig", "@127.0.0.1", "available.split.test", "A", "+nocookie", "+short", "+time=3", "+tries=1"]))
+                assert answer.strip() in {"192.0.2.77", "192.0.2.78"}, answer
+            history_path = "/v1/services/service.dns-core/dns-history?name=available.split.test.&limit=20"
             wait(lambda: any(q["cacheHit"] for q in query("control.sock", history_path)["queries"]))
             page = run(inside(client, ["curl", "--noproxy", "*", "--fail", "--max-time", "4", "-sS",
-                "http://198.19.0.1:8080/dns-queries?service=service.dns&name=available.split.test.&limit=20"]))
+                "http://198.19.0.1:8080/dns-queries?service=service.dns-core&name=available.split.test.&limit=20"]))
             assert 'data-query="' in page and any(address in page for address in ("192.0.2.77", "192.0.2.78")), "Web console omitted the recorded DNS answer"
             denied = subprocess.run(inside(client, ["curl", "--interface", "client0", "--noproxy", "*", "--max-time", "2", "-sS", "http://198.19.0.1:8080/"]), capture_output=True)
             assert denied.returncode != 0, "management console was reachable through the LAN interface"
@@ -1513,7 +1519,7 @@ print(*s.getsockname())
                 print("Failed uplink wire", packets, flush=True)
                 packets = run(["tcpdump", "-nn", "-tttt", "-r", str(path), "tcp port 443 or port 53"])
                 print("Failed uplink DNS/HTTPS packets", "\n".join(packets.splitlines()[-30:]), flush=True)
-            path = stage / "state/services/dns/dns-queries.db"
+            path = stage / "state/services/dns-core/dns-queries.db"
             if path.exists():
                 with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as database:
                     rows = database.execute("SELECT ts, question_name, question_type, response_code, upstream, duration_us FROM dns_queries ORDER BY id DESC LIMIT 10").fetchall()

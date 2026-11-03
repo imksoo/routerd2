@@ -1,14 +1,14 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
-更新: 2026-11-03 07:35 UTC。共通IPCの3秒打切り、AFTR並列入力取得、登録より古いsupervisor状態cacheを除去した。最終通常build `a0ec3ac167e8` + 本変更で実HGW二台手順が終了0（TCP245応答・最大応答間隔11.54秒、UDP260応答・19期限超過）。両方向の通信/管理/運用記録を確認し、観測中のAFTR409/BGP/VRRP timeoutは未再発。次は同じ変更を単体の自然PD更新/長時間動作で受け入れる。前checkpoint: 停止中workerの期限切れheartbeatが正常な兄弟の観測まで失効させる問題を実SIGSTOPで再現して修正した。正常workerの元の期限と停止対象の未準備状態は維持し、余分な状態・タイマーは追加していない。Race Detector/vet/通常static buildが通過。BGP/VRRP適用待ち全体の原因修正と長時間安定性は引き続き必要。通常build `85259c1a892c` + 本変更で実HGW二台の両方向手順も終了0（TCP SYN1回・228応答・最大応答間隔11.50秒、UDP246応答・17期限超過）。前checkpoint: 基準main `c144132` + 本変更、通常build `c14413250ebd`で実HGW二台profileの両方向HA手順が終了0。通常/特別DHCP scopeの更新・通信・Release/再取得、sticky割当、fresh nDPI/履歴/syslog/OTLP、DNS/DoH/BGP/NTP/Tailscale/管理を確認した。同一TCPはSYN1回・249応答・最大応答間隔10.82秒、UDPは287応答・15期限超過。元の選挙期限へVRRP待機を統一したが、cold startのBGP/VRRP適用timeoutは再発したため原因修正を続ける。全項目確認80.40/73.30秒はsamplingと再取得を含み、転送断時間ではない。実行条件・残る安定性/保持/配布/全34 packageの範囲は[引き継ぎ](pve-codex-handoff.md)と[試験計画](test-plan.md)を参照する。
+更新: 2026-11-03 08:31 UTC。基準main `9fe72fe` + 二段DNS設定、製品Go不変の通常build `df490351c3ff`で単体39-resource実HGW手順が終了0。LAN resolver（cache1000・queryLogなし）からcore resolver（cache10000・queryLogあり）へloopback UDP53で転送し、coreがzone/条件付き/学習DNS/DoHを所有する。実端末からの新しいqueryと同じIDのloopback往復・回答をcaptureで照合した。両IPのDNS/Internet、条件付き上流の停止/cache/SERVFAIL/復旧、coreのcache hit/履歴API/Web、DHCP各scope・sticky、BGP/NTP/Tailscale/運用記録が通過。PD SIGKILL3.16秒/通常再起動7.06秒、全daemon再起動後の全項目再確認103.15秒。後者は抑制/samplingを含み転送断時間ではない。自然PD更新0回・通信round2の短時間実行であり、長時間安定性や全homert private peerの受入には数えない。 同じ二段DNSの各48-resource二台profileも実HGWで終了0。両方向のDNS/DoH・履歴API/Web、DHCP更新/Release/再取得・sticky/fingerprint、PD identity、BGP/NTP/Tailscale/exitと運用記録を確認。同一TCPはSYN1回・209応答・最大応答間隔10.89秒、UDP239応答・19期限超過・最大応答間隔10.52秒（1秒返信予算）。全項目確認58.91/73.57秒はsampling/再取得を含み、転送断時間ではない。二台のprocess/namespace/stageは撤去済み。短時間の両方向受入であり、長時間安定性・全private DNS peer・実機資格は残る。全体範囲・残作業は下記と[試験計画](test-plan.md)を参照する。
 
-全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で9日20時間6分、記録済み期限から4日14時間38分経過した。34 work packageはin_progress22件/planned12件。部分受入を全体の完成に数えない。
+全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で9日21時間3分、記録済み期限から4日15時間35分経過した。34 work packageはin_progress22件/planned12件。部分受入を全体の完成に数えない。
 
 HA基盤の並行確認: 基準main `9fb64f4`の通常実行物、build ID `9fb64f4267e9`で`make check-ha-state`が終了0。独立Linux namespace/PID1の2 product processとclient/serverで、A→B/B→AのVRRP/NAT引継ぎ、同一TCP socketとUDP mapping、同期済みDHCP leaseの実Renew/ACK、worker/conntrack engine再起動を確認した。TCP再接続なし（captureのSYNは1回）、最大応答待ち1.665秒。UDPは50ms送信/200ms返信予算で3009送信・2942受信・67期限超過、最大無応答1.110秒（このfixture条件での測定）。同期断中の独立割当/更新と復帰、未設定証明書の拒否、実lease期限での失効、3日sticky期限を変えない再起動/引継ぎ、保持中の別client割当と元client再取得も通過。設定削除で同期workerを回収し、元のconntrack sysctlへ復元した。実HGWの38-resource全体を二台化した結果や、14-resource例・実homert二台の資格とは分ける。
 
 ## 現在の棚卸し
 
-- 現行の単体例は38 resources。DHCP/PD/RA、DNS/cache/history/DoH、DS-Lite/IPv6 Internet、管理、NTP、BGP 2 peers、Tailscale subnet/exitを同じ実daemonで接続し、独立peer/clientとの通信と全daemon restartを通過した。最新条件・結果・再実行手順は[試験計画](test-plan.md)に集約する。
+- 現行の単体例は39 resources。DHCP/PD/RA、DNS/cache/history/DoH、DS-Lite/IPv6 Internet、管理、NTP、BGP 2 peers、Tailscale subnet/exitを同じ実daemonで接続し、独立peer/clientとの通信と全daemon restartを通過した。最新条件・結果・再実行手順は[試験計画](test-plan.md)に集約する。
 - `make check`（Race Detector・vet）、通常static build、設定検証を通過。補助検査の成功を製品全体の完成とは扱わない。
 - 別checkpointで生成profileの自然PD T1、nativeのWAN遮断復旧、二WAN Health→PBR、Alpine/PID1の通信/署名更新/rollbackを確認済み。現在の全profileや実機資格への流用はせず、追加PVE/QEMU・PBR調査は行わない。
 - 保存中のhomert02/03設定は各110 resources、kind件数一致、DNSForwarder11件。両方のIPv6 host route table120、WAN /128 DS-Lite source、BGP広告、Tailscaleの運用を参照済み。実設定値・秘密は公開しない。

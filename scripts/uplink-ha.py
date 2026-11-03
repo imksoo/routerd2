@@ -237,7 +237,7 @@ def owner(stage, uplink):
             for server in (dns, dns6):
                 assert run(inside("client", ["dig", "@"+server, "www.cloudflare.com", "A", "+short", "+time=4", "+tries=1"])).strip()
             def doh_ready():
-                upstreams = api(node, "services/dns.dns.sock", "/v1/status")["resources"][0]["observed"]["upstreams"]
+                upstreams = api(node, "services/dns-core.dns.sock", "/v1/status")["resources"][0]["observed"]["upstreams"]
                 return all(endpoint+":Healthy" in upstreams for endpoint in ("https://cloudflare-dns.com/dns-query", "https://dns.google/dns-query"))
             wait(doh_ready)
             def bgp_ready():
@@ -307,9 +307,9 @@ def owner(stage, uplink):
             address = "198.19.0.2" if node == "a" else "198.19.0.3"
             for target, server in ((node, "127.0.0.1"), ("client", address)):
                 assert run(inside(target, ["dig", "@"+server, "router.home.arpa", "A", "+short", "+time=3", "+tries=1"])).strip() == "198.18.0.1"
-            history = api(node, "control.sock", "/v1/services/service.dns/dns-history?name=available.split.test.&limit=20")
+            history = api(node, "control.sock", "/v1/services/service.dns-core/dns-history?name=available.split.test.&limit=20")
             assert history.get("queries"), "actual DNS queries were not retained"
-            page = run(inside("client", ["curl", "--noproxy", "*", "--fail", "--max-time", "4", "-sS", "http://"+address+":8080/dns-queries?service=service.dns&name=available.split.test.&limit=20"]))
+            page = run(inside("client", ["curl", "--noproxy", "*", "--fail", "--max-time", "4", "-sS", "http://"+address+":8080/dns-queries?service=service.dns-core&name=available.split.test.&limit=20"]))
             assert 'data-query="' in page and any(answer in page for answer in ("192.0.2.77", "192.0.2.78")), "Web console omitted the real DNS answer"
             denied = subprocess.run(inside("client", ["curl", "--interface", "client0", "--noproxy", "*", "--max-time", "2", "-sS", "http://"+address+":8080/"]), capture_output=True)
             assert denied.returncode != 0, "management Web was reachable from the LAN"

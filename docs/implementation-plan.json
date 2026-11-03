@@ -11197,7 +11197,7 @@
     "physical_target_profile": "homert02/03 are identified PVE guests with4vCPU/4GiB, three VirtIO NICs and VirtIO/SCSI disks. Matching isolated PVE product boot/recovery was exercised; actual WAN/LAN attachment, clean installation from a preconverted native configuration, measured load and any additional hardware/architecture qualification remain open.",
     "validation_reporting": "Use docs/test-plan.md for the concise current gate state. Detailed historical checkpoint ledgers are not acceptance authority; keep only current result, limits and repeatable procedure. Never claim unrun gates or partial homert profiles complete.",
     "current_acceptance": {
-      "as_of_utc": "2026-11-03T08:13:30Z",
+      "as_of_utc": "2026-11-03T08:31:45Z",
       "product_code_checkpoint": "df490351c3ffb40f0d24ce3d7ba86f9c08e12351",
       "homert_source": "User-provided read-only working copies at chatty.lain.local:~/homert02; the current homert02 and homert03 files each contain 110 resources with matching kind counts. Do not publish configuration values or secrets.",
       "completed_gates": [
@@ -11206,16 +11206,16 @@
         "Earlier checkpoints passed actual supervisor/control/network/Health two-WAN PBR failover/recovery with independent peers, TCP/UDP and captures. This is not qualification of the latest full homert profile; no additional PBR investigation is planned."
       ],
       "active_actual_hgw_run": {
-        "as_of_utc": "2026-11-03T08:13:30Z",
+        "as_of_utc": "2026-11-03T08:31:45Z",
         "build_identity": "df490351c3ff",
         "product_code_checkpoint": "df490351c3ffb40f0d24ce3d7ba86f9c08e12351",
         "command": "python3 scripts/uplink-smoke.py --uplink ens18 --config examples/single-router-dslite-dhcp-dns.yaml --seconds 0 --wan-mac 02:72:6f:75:74:03 --full-restart --tailnet",
-        "status": "Live owner PID1120320 verified. Natural PD T1 at 2026-11-03T09:42:40Z and final restart/exit remain pending. Latest periodic observation: ready=true, all28 worker generations1.",
+        "status": "Live owner PID1120320 verified. 235 periodic communication rounds, ready=true and all28 worker generations1. Original38-resource profile; not qualification of the new39-resource two-stage DNS profile. Natural PD T1 at2026-11-03T09:42:40Z and final restart/exit pending.",
         "local_progress_log": "/tmp/routerd2-aftr-natural.log",
         "ownership": "Protect the live owner and its private stage until terminal. Independent DoH outage checks use a separate product node and do not change this router or its packet rules. Remove detailed output after concise results are recorded.",
         "limit": "Not full homert, HA long-duration, continuous existing sockets, direct ONU or target hardware qualification."
       },
-      "current_changes": "df49035 retains BGP/VRRP original request deadlines, gives AFTR input/publication one owner, and makes supervisor status requests run on its state owner. make check/Race/vet and normal static build passed. Final paired47-resource actual-HGW gate passed both handoffs; no AFTR409/BGP/VRRP timeout observed in inspected stop reasons. Long natural-PD stability remains running.",
+      "current_changes": "Two-stage DNS from actual homert intent is now native:LAN cache1000/no query log forwards to core cache10000/query log over loopback UDP53. Core owns zones/conditional/learned/public DoH sources. Actual39-resource single and48-resource paired profile gates exited0 on existing normal df49035 static binaries; production Go unchanged. Runner gateway MAC derives from the selected WAN MAC instead of colliding with the separate live natural-renewal trial.",
       "open_work_packages": 34,
       "unqualified_profiles": [
         "homert-single full input",
@@ -11225,17 +11225,17 @@
         "Kubernetes",
         "SAM/federation full path"
       ],
-      "tested_source_head": "b03debf15982 plus LAN distribution, sticky/fingerprint and bounded RA profile; product Go unchanged",
+      "tested_source_head": "9fe72fe plus two-stage DNS native examples and runner changes; production Go unchanged at df49035",
       "native_examples": {
-        "examples/single-router-dslite-dhcp-dns.yaml": 38,
-        "examples/homert02-native.yaml": 14,
-        "examples/homert03-native.yaml": 14,
+        "examples/single-router-dslite-dhcp-dns.yaml": 39,
+        "examples/homert02-native.yaml": 48,
+        "examples/homert03-native.yaml": 48,
         "full_homert_profile": "not present; the examples do not represent the complete current 110-resource intent"
       },
       "latest_native_profile_gate": {
-        "status": "38-resource real-HGW LAN-distribution integrated gate passed (exit 0)",
-        "observed": "38-resource native profile、基準main b03debf + LAN配布設定、build ID b03debf15982で実HGW統合gateが終了0。通常・予約・OUI・特定MACの独立端末5台で、通常gateway/DNS .1と特別gateway/DNS .253を実ACKから設定し、公開HTTPS/UDP DNSが往復した。通常/予約端末はNTP2アドレスとdomain-searchも取得。実Releaseで3日分の保持期限が保存され、端末IP撤去後も別MACの同アドレス要求には別leaseを配り、元MACには保持アドレスを再配布した。全daemon restart後も特別端末3台のRenew/ACK・通信とfingerprint APIが復旧した。LAN RAのhigh優先度/MTU1500/valid最大7200秒/preferred最大3600秒を実packetで確認。上流選択、4 DS-Lite、DNS/DoH、nDPI/計数/SNI、fresh syslog/OTLP、BGP/NTP/Tailscaleも通過。PD worker SIGKILL/通常再起動後の復旧2.96/5.85秒、全daemon restartから全確認102.76秒（60秒抑制と30秒sampling等を含む）。2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。自然T1・既存socket継続・3日/7日経過削除・全homert/HA/実機資格は今回の範囲外。",
-        "limit": "Actual 3-day hold creation/reacquisition, not elapsed 3/7-day expiry. Full-profile natural T1, continuous sockets, full homert/HA/ONU/target NIC remain open."
+        "status": "39-resource actual-HGW integrated two-stage DNS gate passed (exit0)",
+        "observed": "基準main `9fe72fe` + 二段DNS設定、製品Go不変の通常build `df490351c3ff`で単体39-resource実HGW手順が終了0。LAN resolver（cache1000・queryLogなし）からcore resolver（cache10000・queryLogあり）へloopback UDP53で転送し、coreがzone/条件付き/学習DNS/DoHを所有する。実端末からの新しいqueryと同じIDのloopback往復・回答をcaptureで照合した。両IPのDNS/Internet、条件付き上流の停止/cache/SERVFAIL/復旧、coreのcache hit/履歴API/Web、DHCP各scope・sticky、BGP/NTP/Tailscale/運用記録が通過。PD SIGKILL3.16秒/通常再起動7.06秒、全daemon再起動後の全項目再確認103.15秒。後者は抑制/samplingを含み転送断時間ではない。自然PD更新0回・通信round2の短時間実行であり、長時間安定性や全homert private peerの受入には数えない。",
+        "limit": "Short run:2 rounds,0 natural PD renewals. Whole-daemon103.15s is full-check duration. Full homert private DNS, long-duration39-resource stability and hardware qualification remain open."
       },
       "upstream_selection_correction": "Existing LAN static gateway, not ens20. Implemented and verified group weights 120 -> 80 -> 60 -> 120 with 60s hysteresis, actual Health workers, both LAN clients TCP/UDP, conntrack marks and kernel next hops. No new WAN NIC or site IP allocation prerequisite.",
       "latest_ha_foundation_gate": {
@@ -11274,48 +11274,40 @@
         "open_observation": "One initial bring-up had BGP/VRRP effect acknowledgement timeout and worker restart; review full-profile coordinator/application and shutdown ordering."
       },
       "latest_full_profile_ha_continuity_gate": {
-        "as_of_utc": "2026-11-03T06:10:00Z",
-        "status": "passed_exit_0",
-        "build_identity": "875dfa6f1f84 plus current patch",
-        "resources_per_node": 47,
-        "command": "make check-uplink-ha DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18",
-        "recovery_seconds": [
-          36.82,
-          36.13
-        ],
+        "as_of_utc": "2026-11-03T08:31:45Z",
+        "status": "passed, exit0; short bidirectional two-stage DNS/profile acceptance",
+        "build_identity": "df490351c3ff",
+        "source": "9fe72fe plus two-stage native DNS configuration/runner changes; production Go unchanged",
+        "resources_per_node": 48,
+        "command": "python3 scripts/uplink-ha.py --uplink ens18",
+        "full_check_seconds": {
+          "a_to_b": 58.91,
+          "b_to_a": 73.57,
+          "meaning": "Includes sampling/reacquisition; not forwarding outage duration"
+        },
+        "failed_probe_rounds": {
+          "a_to_b": 3,
+          "b_to_a": 2
+        },
         "tcp": {
-          "responses": 117,
           "syn_count": 1,
-          "maximum_reply_gap_seconds": 11.676069043576717
+          "received": 209,
+          "maximum_reply_gap_seconds": 10.889459074474871,
+          "reconnected": false
         },
         "udp": {
-          "responses": 126,
-          "missed": 17,
+          "received": 239,
+          "missed": 19,
           "reply_budget_seconds": 1,
-          "maximum_reply_gap_seconds": 9.515961443074048
+          "maximum_reply_gap_seconds": 10.51876228582114
         },
-        "observed": "Previous DNS/DoH/BGP/NTP and Internet paths plus independent Tailscale LAN-to-peer IPv4/IPv6 and peer-to-LAN IPv4 TCP/UDP after both takeovers/rejoins. Automatic subnet selection without manual route changes; elected-node explicit IPv4/IPv6 exit HTTPS/UDP DNS. Both-node SSH/key retention, active loopback/management DNS/Web query history and LAN management rejection. Same public TCP/UDP/NAT tuple, PD identity and real DHCP renewal preserved.",
-        "fixes": [
-          "Source-scoped PD checkpoint ordering",
-          "ARP identity on IPv6-only macvlan siblings",
-          "Remove DHCP peer-availability startup fence",
-          "RA DNS lifetime and fixed B4/shared-VIP SNAT limited to forwarded clients",
-          "Serving-owner BGP advertisement for symmetric client traffic",
-          "Acknowledge an already unpublished standby/preparing VIP without waiting for unrelated preparation",
-          "Remove route dump sorting from kernel reconciliation",
-          "Elected-owner Tailscale advertisements with independent pre-approved fixture control policy",
-          "Remove the separate BGP effect timeout; preserve the original observation expiry through RIB walk and effect wait"
-        ],
+        "observed": "同じ二段DNSの各48-resource二台profileも実HGWで終了0。両方向のDNS/DoH・履歴API/Web、DHCP更新/Release/再取得・sticky/fingerprint、PD identity、BGP/NTP/Tailscale/exitと運用記録を確認。同一TCPはSYN1回・209応答・最大応答間隔10.89秒、UDP239応答・19期限超過・最大応答間隔10.52秒（1秒返信予算）。全項目確認58.91/73.57秒はsampling/再取得を含み、転送断時間ではない。二台のprocess/namespace/stageは撤去済み。短時間の両方向受入であり、長時間安定性・全private DNS peer・実機資格は残る。",
         "not_qualified": [
-          "Uninterrupted/lossless traffic",
-          "Unknown DHCP allocations lost during asynchronous replication outage",
-          "All two-node DNS/DoH/BGP/Tailscale/scopes/history/telemetry paths and stability",
-          "Physical ONU/NIC qualification"
-        ],
-        "open_observation": "Outages remain (TCP max gap11.68s). BGP effect calls now use original observation authority instead of a shorter2s limit; single long-term stability needs reacceptance. VRRP effect timeouts and initial AFTR409 remain. Paired special scopes, nDPI/flow/firewall history, syslog/OTLP and full deployment qualification remain open.",
-        "failed_probe_rounds": [
-          1,
-          3
+          "long-duration48-resource stability",
+          "all homert private DNS peers",
+          "full110-resource intent",
+          "physical ONU/NIC/performance",
+          "remaining34 work packages"
         ]
       },
       "full_profile_natural_renewal_gate": {

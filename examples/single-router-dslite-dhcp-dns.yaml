@@ -220,10 +220,10 @@ resources:
         - {service: service.internet1, priority: 10101}
         - {service: service.internet2, priority: 10102}
         - {service: service.internet3, priority: 10103}
-  - id: service/dns
-    depends_on: [interface/lan0, address/lan, address/management, host-wan]
+  - id: service/dns-core
+    depends_on: [address/management, host-wan]
     service:
-      name: dns
+      name: dns-core
       dns:
         query_log_retention: {max_age_seconds: 604800, interval_seconds: 86400, vacuum: true}
         spec:
@@ -233,11 +233,6 @@ resources:
             - {name: loopback, addresses: [127.0.0.1], port: 53}
             - name: management
               addressFrom: [{resource: Interface/mgmt0, field: ipv4Addresses}]
-              port: 53
-            - {name: lan-v4, addresses: [198.18.0.1], port: 53}
-            - name: lan-v6
-              addressFrom:
-                - {resource: IPv6DelegatedAddress/wan-pd/lan}
               port: 53
           sources:
             - name: local
@@ -276,6 +271,25 @@ resources:
                   ipv6From: {resource: IPv6DelegatedAddress/wan-pd/lan, field: address}
               dhcpDerived:
                 sources: [DHCPv4Server/lan-leases]
+  - id: service/dns
+    depends_on: [interface/lan0, address/lan, service/dns-core]
+    service:
+      name: dns
+      dns:
+        spec:
+          cache: {enabled: true, maxEntries: 1000, minTTL: 60s, maxTTL: 24h, negativeTTL: 30s}
+          listen:
+            - {name: lan-v4, addresses: [198.18.0.1], port: 53}
+            - name: lan-v6
+              addressFrom:
+                - {resource: IPv6DelegatedAddress/wan-pd/lan}
+              port: 53
+          sources:
+            - name: core-resolver
+              kind: forward
+              match: ["."]
+              upstreams: [udp://127.0.0.1:53]
+              queryTimeout: 3s
   - id: service/time
     depends_on: [address/lan]
     service:
