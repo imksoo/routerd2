@@ -24,7 +24,9 @@ it is not a conversion of either 110-resource homert file. The isolated profile
 uses primary `198.18.0.0/16` and legacy-device `198.19.0.0/16` networks on the
 same LAN interface, plus management `10.255.255.0/24`. DHCP profiles select their
 own subnet, gateway and DNS; private and internal destinations retain client
-addresses while Internet paths use their declared source NAT. Current actual-HGW,
+addresses while Internet paths use their declared source NAT. BGP shares `wan0`;
+the isolated example adds a secondary benchmark subnet there instead of a
+dedicated BGP NIC. Current actual-HGW,
 independent-client results and qualification limits are in
 [the acceptance plan](test-plan.md).
 

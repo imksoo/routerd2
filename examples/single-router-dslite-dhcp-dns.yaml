@@ -13,11 +13,10 @@ resources:
     interface: {name: lan0}
   - id: interface/mgmt0
     interface: {name: mgmt0}
-  - id: interface/bgp0
-    interface: {name: bgp0}
+  # The isolated BGP/collector subnet shares WAN; no dedicated NIC is needed.
   - id: address/bgp
-    depends_on: [interface/bgp0]
-    address: {interface: bgp0, cidr: 192.0.2.1/24}
+    depends_on: [interface/wan0]
+    address: {interface: wan0, cidr: 192.0.2.1/24}
   - id: interface/peer0
     interface: {name: peer0}
   - id: address/tailnet-underlay
@@ -63,8 +62,6 @@ resources:
         - {from: tailscale0, to: wan0}
         - {from: lan0, to: tailscale0}
         - {from: lan0, to: mgmt0}
-        - {from: lan0, to: bgp0}
-        - {from: bgp0, to: lan0}
         - {from: lan0, to: lan0}
         - {from: lan0, to: dslite0}
         - {from: lan0, to: dslite1}
@@ -353,25 +350,25 @@ resources:
             listenAddresses: [192.0.2.1]
             listenPort: 179
             families: [ipv4-unicast]
-            importPolicy: {allowedPrefixes: [203.0.113.0/24], nextHopRewrite: peer-address}
+            importPolicy: {allowedPrefixes: [10.42.0.0/24, 10.64.0.0/12, 10.128.0.0/16, 192.168.64.0/24], nextHopRewrite: peer-address}
             gracefulRestart: {enabled: true, restartTime: 120, staleRoutesTime: 360}
           peers:
             192.0.2.2:
               address: 192.0.2.2
               asn: 64512
-              importPolicy: {allowedPrefixes: [203.0.113.0/24], nextHopRewrite: peer-address}
+              importPolicy: {allowedPrefixes: [10.42.0.0/24, 10.64.0.0/12, 10.128.0.0/16, 192.168.64.0/24], nextHopRewrite: peer-address}
               exportPolicyName: lan
               exportPolicy: {allowedPrefixes: [198.18.0.0/16]}
             192.0.2.3:
               address: 192.0.2.3
               asn: 64512
-              importPolicy: {allowedPrefixes: [203.0.113.0/24], nextHopRewrite: peer-address}
+              importPolicy: {allowedPrefixes: [10.42.0.0/24, 10.64.0.0/12, 10.128.0.0/16, 192.168.64.0/24], nextHopRewrite: peer-address}
               exportPolicyName: lan
               exportPolicy: {allowedPrefixes: [198.18.0.0/16]}
           paths:
             - {source: routerd-static, prefix: 198.18.0.0/16}
-        bind_interface: bgp0
-        fib_interface: bgp0
+        bind_interface: wan0
+        fib_interface: wan0
   - id: service/tailnet
     depends_on: [address/tailnet-underlay, address/lan]
     service:
@@ -435,7 +432,7 @@ resources:
       in_interface: lan0
       hysteresis_millis: 60000
       sources: [198.18.0.0/16]
-      exclude_destinations: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 198.18.0.0/16, 198.19.0.0/16, 192.0.2.0/24, 203.0.113.0/24, 100.64.0.0/10]
+      exclude_destinations: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 198.18.0.0/16, 198.19.0.0/16, 192.0.2.0/24, 100.64.0.0/10]
       groups:
         - name: dslite-pd-balanced
           weight: 120

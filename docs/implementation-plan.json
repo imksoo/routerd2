@@ -1040,7 +1040,13 @@
           "One IPv4 user TCP dial timed out at 300 ms after default BFD was paused; capture contains SYN/SYN-ACK/ACK at the end of that attempt. Later traced and untraced executions passed. The cause remains unproven, and client/protocol deadlines were not extended."
         ],
         "standard_communities": "2026-10-30: 18f36d4 accepts deployed communities.send:standard and retains old effective SendCommunity=3. Four actual independent-FRR BGP/IPIP/DHCPv4-IPIP/two-peer forwarding fixtures passed. Not full BGP surface or physical qualification.",
-        "single_owner_aftr_and_registration": "2026-11-03: common IPC no longer cuts BGP/VRRP application ACKs at3s before original protocol deadlines. Existing application-receipt test verifies the original context deadline. Final paired47 HGW both-handoff gate passed (same TCP245 replies,maxgap11.54s; UDP260 replies,19 one-second misses). No BGP/VRRP deadline failure in inspected stop reasons; latest single long-run acceptance remains pending. See CORE-03 and docs/pve-codex-handoff.md."
+        "single_owner_aftr_and_registration": "2026-11-03: common IPC no longer cuts BGP/VRRP application ACKs at3s before original protocol deadlines. Existing application-receipt test verifies the original context deadline. Final paired47 HGW both-handoff gate passed (same TCP245 replies,maxgap11.54s; UDP260 replies,19 one-second misses). No BGP/VRRP deadline failure in inspected stop reasons; latest single long-run acceptance remains pending. See CORE-03 and docs/pve-codex-handoff.md.",
+        "single_wan_shared_bgp": {
+          "source": "ac0b1a0; normal buildac0b1a0980ed; Go unchanged",
+          "result": "2026-11-03、基準main `ac0b1a0` + native設定/fixture変更、通常build `ac0b1a0980ed`（製品Go不変）で、BGPを保存設定と同じ既存WAN共有へ接続した単体43-resource実HGW手順が終了0。専用bgp0と相互forwardルールを削除し、BGP用benchmark addressをwan0へ設定。独立FRR2台も同じ既存uplink上の隔離peerへ接続した。4つの私設prefix（/24・/12・/16・/24）の実kernel gateway/interface、peerの通常LAN /16受信、両LAN clientの各prefixへのNATなしTCP/UDPを照合した。10/8 blackholeと192.168/16 on-linkより具体的なBGP routeが使われることも確認。",
+          "recovery": "各peer停止/再加入後に残るpeerで全prefixの通信が成功し、再確認まで0.88秒/1.13秒。全daemon再起動後も全経路と通信を再確認。既存captureのwan0 In/OutでBGP179と私設アプリTCP/UDPを照合した。通常DHCP/DNS/NTP/Internet、管理、NAT/非NAT、Tailscale/運用記録も通過。confirmed rollback期限切れ29.90秒/control再起動6.26秒、PD SIGKILL2.96秒/通常再起動5.92秒、全daemon後の全項目再確認111.26秒。全項目時間は転送断時間ではない。20秒の2巡回・自然PD更新0回。通常build・3実行物static link、make test-tools race vet・py_compileが通過。",
+          "limit": "検証peerは独立FRRであり、実サイトのBGP peerへの接続ではない。WANには試験用192.0.2/24の副アドレスを使い、実サイトIPとの競合を避けた。物理NIC、BGP大量経路/長時間GR、二台の同構成は未受入。新規router WAN・host route・PVE/QEMU・追加PBR調査は行っていない。"
+        }
       }
     },
     {
@@ -11237,7 +11243,7 @@
     "physical_target_profile": "homert02/03 are identified PVE guests with4vCPU/4GiB, three VirtIO NICs and VirtIO/SCSI disks. Matching isolated PVE product boot/recovery was exercised; actual WAN/LAN attachment, clean installation from a preconverted native configuration, measured load and any additional hardware/architecture qualification remain open.",
     "validation_reporting": "Use docs/test-plan.md for the concise current gate state. Detailed historical checkpoint ledgers are not acceptance authority; keep only current result, limits and repeatable procedure. Never claim unrun gates or partial homert profiles complete.",
     "current_acceptance": {
-      "as_of_utc": "2026-11-03T13:43:44Z",
+      "as_of_utc": "2026-11-03T14:06:38Z",
       "homert_source": "User-provided read-only working copies at chatty.lain.local:~/homert02; the current homert02 and homert03 files each contain 110 resources with matching kind counts. Do not publish configuration values or secrets.",
       "completed_gates": [
         "Go runtime checkpoint842c47e passed make check and final runtimeplan Race. This unchanged Go code plus the bundle producer passed normal build, test-tools/race/vet and actual publisher/receiver operations.",
@@ -11254,18 +11260,18 @@
         "Kubernetes",
         "SAM/federation full path"
       ],
-      "tested_source_head": "69ecf22 plus dual /16 LAN configuration, saved NAT exemptions and actual-client checks; runtime Go unchanged",
+      "tested_source_head": "ac0b1a0 plus WAN-shared BGP, four private-prefix declarations and actual FRR/client checks; runtime Go unchanged",
       "native_examples": {
-        "examples/single-router-dslite-dhcp-dns.yaml": 44,
+        "examples/single-router-dslite-dhcp-dns.yaml": 43,
         "examples/homert02-native.yaml": 48,
         "examples/homert03-native.yaml": 48,
         "full_homert_profile": "not present; the examples do not represent the complete current 110-resource intent"
       },
       "latest_native_profile_gate": {
-        "status": "44-resource dual IPv4 LAN /16, DHCP profile, private non-NAT and whole-daemon restart passed (exit0)",
-        "source": "69ecf22; normal build69ecf22aa39d; Go unchanged",
-        "observed": "2026-11-03、基準main `69ecf22` + native設定/fixture変更、通常build `69ecf22aa39d`（製品Go不変）で、通常/機器用LANを別の/16にした単体44-resource実HGW手順が終了0。通常LANは198.18.0.0/16、機器用は198.19.0.0/16、管理は重複しない10.255.255.0/24。DHCP/BusyBox hookは実応答のnetmaskを使い、予約/通常/OUI/個別MACの割当・実prefix・gateway/DNS・Internet・Release/sticky再取得を確認した。通常LANから実機器用DHCP client2台の名前解決も確認。保存設定にあったRFC1918宛先のSNAT除外を反映し、benchmarkの両LANも内部宛先として除外。私設/機器用宛てには元のLAN sourceが届き、管理/WAN内宛ての明示SNATとInternet向けSNATは維持した。",
-        "limit": "20-second observation/2 rounds/0 natural PD renewals. Full checks111.50s is not forwarding outage. NTP allow remains primary LAN only. Paired integration and full saved intent remain open."
+        "status": "43-resource WAN-shared BGP/private non-NAT and whole-daemon restart passed (exit0)",
+        "source": "ac0b1a0; normal buildac0b1a0980ed; Go unchanged",
+        "observed": "2026-11-03、基準main `ac0b1a0` + native設定/fixture変更、通常build `ac0b1a0980ed`（製品Go不変）で、BGPを保存設定と同じ既存WAN共有へ接続した単体43-resource実HGW手順が終了0。専用bgp0と相互forwardルールを削除し、BGP用benchmark addressをwan0へ設定。独立FRR2台も同じ既存uplink上の隔離peerへ接続した。4つの私設prefix（/24・/12・/16・/24）の実kernel gateway/interface、peerの通常LAN /16受信、両LAN clientの各prefixへのNATなしTCP/UDPを照合した。10/8 blackholeと192.168/16 on-linkより具体的なBGP routeが使われることも確認。",
+        "limit": "20-second observation/2 rounds/0 natural PD renewals. Full checks111.26s is not forwarding outage. Real site BGP peers, paired integration and hardware qualification remain open."
       },
       "upstream_selection_correction": "Existing LAN static gateway, not ens20. Implemented and verified group weights 120 -> 80 -> 60 -> 120 with 60s hysteresis, actual Health workers, both LAN clients TCP/UDP, conntrack marks and kernel next hops. No new WAN NIC or site IP allocation prerequisite.",
       "latest_ha_foundation_gate": {
@@ -11388,7 +11394,7 @@
     {
       "stage": 1,
       "profile": "homert-single-implementation",
-      "next": "Compare remaining saved single-router interface, static WAN and BGP peer placement/intent with the actual production path; remove fixture-only topology differences where they conceal interoperability. Dual /16 LAN/DHCP and saved private-destination NAT exemptions now passed. Then carry the accepted complete single-router intent into paired profiles and real HA acceptance. Do not add WAN NICs, PVE/QEMU or PBR investigations; do not repeat natural-renewal or unrelated suites without a changed premise. All34 packages and physical/deployment gates remain in scope.",
+      "next": "Carry the accepted dual /16 LAN, private NAT exemptions, routes/local redirects and WAN-shared BGP into paired homert native profiles, preserving role-dependent advertisements and stateful return paths. Compare remaining saved static WAN/identity intent during that work. Use actual non-PVE Linux/HGW peers and both recovery directions; do not extend this BGP check into a separate large-route/GR campaign. No new router WAN NIC, PVE/QEMU or PBR investigations; all34 packages remain in scope.",
       "acceptance": "Cold-start the complete single-router profile with an independent WAN peer and Linux client. Verify WAN/LAN DHCPv4 scopes and reservations, DHCPv6-PD/Information identity and natural renew, RA/DAD/SLAAC, local/conditional/DoH DNS, all DS-Lite paths and IPv6, Health/PBR, NAT/MTU/MSS, BGP/NTP/Tailscale/management where configured, and worker/daemon restart and recovery from actual packets, client results, kernel routes and firewall state. Keep ONU/physical-NIC qualification separate."
     },
     {

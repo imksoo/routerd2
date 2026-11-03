@@ -383,6 +383,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
 
         if config_path is not None:
             bgp_peers, bgp_processes = [], {}
+            bgp_networks = (("10.42.0.0/24", "10.42.0.1"), ("10.64.0.0/12", "10.64.0.1"),
+                ("10.128.0.0/16", "10.128.0.1"), ("192.168.64.0/24", "192.168.64.1"))
             echo = runpy.run_path(str(stage / "peer-fixture.py"))
             gateway_addresses = json.loads(run(["ip", "-n", gateway, "-j", "-4", "address", "show", "dev", "gateway-wan"]))
             wan_local_peer = next(a["local"] for link in gateway_addresses for a in link["addr_info"] if a["family"] == "inet")
@@ -405,16 +407,13 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                 run(["ip", "netns", "add", namespace])
                 namespaces.append(namespace)
                 run(["ip", "-n", namespace, "link", "set", "lo", "up"])
-                if index == 0:
-                    run(["ip", "link", "add", "bgp0", "netns", router, "type", "veth", "peer", "name", "underlay0", "netns", namespace])
-                    peer_interface = "underlay0"
-                else:
-                    peer_interface = "peer0"
-                    run(inside(bgp_peers[0][0], ["ip", "link", "add", "link", "underlay0", "name", peer_interface,
-                        "netns", namespace, "type", "macvlan", "mode", "bridge"]))
+                peer_interface = "bgp-wan"
+                run(["ip", "link", "add", "link", uplink, "name", peer_interface,
+                    "netns", namespace, "type", "macvlan", "mode", "bridge"])
                 run(["ip", "-n", namespace, "address", "add", address + "/24", "dev", peer_interface])
                 run(["ip", "-n", namespace, "link", "set", peer_interface, "up"])
-                run(["ip", "-n", namespace, "address", "add", "203.0.113.1/24", "dev", "lo"])
+                for prefix, host in bgp_networks:
+                    run(["ip", "-n", namespace, "address", "add", host + "/" + prefix.split("/")[1], "dev", "lo"])
                 # FRR drops privileges. Its public test config lives in the
                 # owner's private /run mount, outside the private key stage.
                 root = Path("/run/routerd-bgp-peer" + str(index))
@@ -424,16 +423,17 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                 (root / "bgpd.conf").write_text(
                     "hostname independent\nlog stdout\nrouter bgp 64512\n bgp router-id " + address + "\n"
                     " no bgp ebgp-requires-policy\n neighbor 192.0.2.1 remote-as 64500\n"
-                    " address-family ipv4 unicast\n  network 203.0.113.0/24\n  neighbor 192.0.2.1 activate\n exit-address-family\n"
+                    " address-family ipv4 unicast\n" + "".join("  network " + prefix + "\n" for prefix, _ in bgp_networks) + "  neighbor 192.0.2.1 activate\n exit-address-family\n"
                 )
                 start(namespace, ["/usr/lib/frr/zebra", "-u", "frr", "-g", "frr", "-z", str(root / "zserv.api"),
                     "--vty_socket", str(root), "-i", str(root / "zebra.pid"), "-f", str(root / "zebra.conf"), "--log", "stdout"], "bgp-zebra-" + address)
                 wait(lambda: (root / "zserv.api").exists())
                 bgp_processes[address] = start_bgp(namespace, address, root)
                 bgp_peers.append((namespace, address, root))
-                name = "bgp-echo-" + address
-                start(namespace, ["python3", "-u", "-c", echo["ECHO_SERVER"], "203.0.113.1"], name)
-                wait(lambda: "READY" in (stage / (name + ".log")).read_text())
+                for _, host in bgp_networks:
+                    name = "bgp-echo-" + address + "-" + host
+                    start(namespace, ["python3", "-u", "-c", echo["ECHO_SERVER"], host], name)
+                    wait(lambda name=name: "READY" in (stage / (name + ".log")).read_text())
 
         if config_path is not None:
             log_peer = bgp_peers[0][0]
@@ -879,6 +879,50 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             check_special_clients()
             print("PASS actual DHCP release created a 3-day hold; another MAC requesting that address received a different lease, and the original MAC recovered its held address", flush=True)
 
+        def bgp_peer_states():
+            snapshot = query("control.sock", "/v1/services/service.routing").get("snapshot", {})
+            return {p["address"]: p["state"] for p in snapshot.get("peers", [])}
+
+        def selected_bgp_peer():
+            paths = json.loads(run(["ip", "-n", router, "-j", "route", "show", bgp_networks[0][0]]))
+            return next((r.get("gateway", "") for r in paths if r.get("dev") == "wan0"), "")
+
+        def bgp_traffic():
+            for namespace, interface in ((client, "client0"), (automatic, "client1")):
+                addresses = json.loads(run(["ip", "-n", namespace, "-j", "-4", "address", "show", "dev", interface]))
+                source = next(a["local"] for link in addresses for a in link["addr_info"] if a["local"] != dns_peer_address)
+                for _, destination in bgp_networks:
+                    run(inside(namespace, ["python3", "-c", echo["ECHO_CLIENT"], destination, source, source]))
+
+        def check_bgp():
+            wait(lambda: bgp_peer_states() == {p[1]: "SESSION_STATE_ESTABLISHED" for p in bgp_peers})
+            wait(lambda: selected_bgp_peer() in bgp_processes)
+            routes = json.loads(run(["ip", "-n", router, "-j", "-4", "route", "show"]))
+            for prefix, _ in bgp_networks:
+                assert any(r.get("dst") == prefix and r.get("dev") == "wan0" and r.get("gateway") in bgp_processes for r in routes), (prefix, routes)
+            for namespace, address, root in bgp_peers:
+                wait(lambda: any(r.get("gateway") == "192.0.2.1" for r in json.loads(run(["ip", "-n", namespace, "-j", "route", "show", "198.18.0.0/16"]))))
+                peer_view = json.loads(run(inside(namespace, ["vtysh", "--vty_socket", str(root), "-d", "bgpd", "-c", "show bgp ipv4 unicast 198.18.0.0/16 json"])))
+                assert peer_view.get("paths"), "independent FRR did not receive the LAN advertisement: " + address
+            bgp_traffic()
+            print("PASS two independent FRR peers received LAN routes; BGP selected a learned kernel path and both LAN clients completed TCP/UDP without NAT", flush=True)
+
+        def check_bgp_peer_recovery():
+            for namespace, address, root in bgp_peers:
+                other = next(p[1] for p in bgp_peers if p[1] != address)
+                stopped_at = time.monotonic()
+                bgp_processes[address].terminate()
+                bgp_processes[address].wait(timeout=5)
+                def remaining_ready():
+                    states = bgp_peer_states()
+                    return states.get(address) != "SESSION_STATE_ESTABLISHED" and states.get(other) == "SESSION_STATE_ESTABLISHED" and selected_bgp_peer() == other
+                wait(remaining_ready, 30)
+                bgp_traffic()
+                print("PASS BGP peer stopped; remaining peer carried both clients' TCP/UDP; seconds", round(time.monotonic() - stopped_at, 2), flush=True)
+                bgp_processes[address] = start_bgp(namespace, address, root)
+                check_bgp()
+            print("PASS each independent BGP peer stopped and rejoined with routes and client traffic restored", flush=True)
+
         def check_local_devices():
             wan = query("control.sock", "/v1/services/service.wan4")["snapshot"]
             source = json.loads(run(["ip", "-n", automatic, "-j", "route", "get", "198.19.0.253"]))[0]["prefsrc"]
@@ -940,6 +984,7 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
             check_local_devices()
             check_static_routes()
             check_lan_distribution()
+            check_bgp()
         if tailnet:
             def tailnet_observation():
                 return query("control.sock", "/v1/services/service.tailnet").get("snapshot", {})
@@ -1136,46 +1181,6 @@ print(*s.getsockname())
             wait(doh_ready)
             print("PASS multiple conditional suffixes, nested source precedence, WAN-learned DNS answers and all configured public DoH upstream probes", flush=True)
 
-        def bgp_peer_states():
-            snapshot = query("control.sock", "/v1/services/service.routing").get("snapshot", {})
-            return {p["address"]: p["state"] for p in snapshot.get("peers", [])}
-
-        def selected_bgp_peer():
-            paths = json.loads(run(["ip", "-n", router, "-j", "route", "show", "203.0.113.0/24"]))
-            return next((r.get("gateway", "") for r in paths if r.get("dev") == "bgp0"), "")
-
-        def bgp_traffic():
-            for namespace, interface in ((client, "client0"), (automatic, "client1")):
-                addresses = json.loads(run(["ip", "-n", namespace, "-j", "-4", "address", "show", "dev", interface]))
-                source = next(a["local"] for link in addresses for a in link["addr_info"] if a["local"] != dns_peer_address)
-                run(inside(namespace, ["python3", "-c", echo["ECHO_CLIENT"], "203.0.113.1", source, source]))
-
-        def check_bgp():
-            wait(lambda: bgp_peer_states() == {p[1]: "SESSION_STATE_ESTABLISHED" for p in bgp_peers})
-            wait(lambda: selected_bgp_peer() in bgp_processes)
-            for namespace, address, root in bgp_peers:
-                wait(lambda: any(r.get("gateway") == "192.0.2.1" for r in json.loads(run(["ip", "-n", namespace, "-j", "route", "show", "198.18.0.0/16"]))))
-                peer_view = json.loads(run(inside(namespace, ["vtysh", "--vty_socket", str(root), "-d", "bgpd", "-c", "show bgp ipv4 unicast 198.18.0.0/16 json"])))
-                assert peer_view.get("paths"), "independent FRR did not receive the LAN advertisement: " + address
-            bgp_traffic()
-            print("PASS two independent FRR peers received LAN routes; BGP selected a learned kernel path and both LAN clients completed TCP/UDP without NAT", flush=True)
-
-        def check_bgp_peer_recovery():
-            for namespace, address, root in bgp_peers:
-                other = next(p[1] for p in bgp_peers if p[1] != address)
-                stopped_at = time.monotonic()
-                bgp_processes[address].terminate()
-                bgp_processes[address].wait(timeout=5)
-                def remaining_ready():
-                    states = bgp_peer_states()
-                    return states.get(address) != "SESSION_STATE_ESTABLISHED" and states.get(other) == "SESSION_STATE_ESTABLISHED" and selected_bgp_peer() == other
-                wait(remaining_ready, 30)
-                bgp_traffic()
-                print("PASS BGP peer stopped; remaining peer carried both clients' TCP/UDP; seconds", round(time.monotonic() - stopped_at, 2), flush=True)
-                bgp_processes[address] = start_bgp(namespace, address, root)
-                check_bgp()
-            print("PASS each independent BGP peer stopped and rejoined with routes and client traffic restored", flush=True)
-
         def check_management():
             for namespace, server in ((router, "127.0.0.1"), (client, "10.255.255.1")):
                 answer = run(inside(namespace, ["dig", "@" + server, "router." + lan_domain, "A", "+short", "+time=3", "+tries=1"]))
@@ -1270,7 +1275,6 @@ print(*s.getsockname())
         if config_path is not None:
             check_dns_sources()
             check_management()
-            check_bgp()
             check_bgp_peer_recovery()
             check_operations()
             check_time()

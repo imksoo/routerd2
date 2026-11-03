@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 13:44 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 14:06 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 実行原則
 
@@ -223,3 +223,11 @@ blackholeは実clientからTCP/UDPを送り、timeout、kernel blackhole route�
 通常機能の実行は健全な現用上流を使い、上流の全段障害注入は明示した`UPLINK_WAN_OUTAGE=1`だけで行う。自然更新を再測定しない短時間確認には正の秒数を指定する。`--seconds 0`は自然PD更新まで待つ指定である。
 
 2026-11-03: 通常build `69ecf22aa39d`、44-resourceの最終20秒/全daemon再起動手順は終了0。両/16の実DHCPと通信、NAT除外、再起動後を確認。全項目再確認111.50秒は転送断時間ではない。自然PD更新0回。詳細と未受入範囲は[引き継ぎ](pve-codex-handoff.md)へ記録した。
+
+## WAN共有のBGP
+
+保存設定のBGP peerは既存WAN側にあり、専用BGP NICを条件にしない。単体例は試験用192.0.2/24をwan0の副subnetとして使う。独立FRR2台は既存uplinkの隔離peer interfaceで接続し、siteの稼働IPは使わない。
+前項の`make check-uplink ... UPLINK_SECONDS=20 UPLINK_FULL_RESTART=1 UPLINK_TAILNET=1`で、4つのimport prefixごとに実gatewayとwan0を確認し、両clientのTCP/UDPとpeer観測sourceを照合する。LAN /16の広告は両FRRのRIBとkernelで確認する。各peerを停止/再加入し、残るpeerの全prefixの通信と復帰、全daemon再起動後を確認する。WANからの新規LAN接続を広く許可するルールは追加しない。
+既存のbounded captureを、live ownerのmount/network namespaceでtcpdumpのstdinへ読み、wan0 In/OutのBGP179と私設TCP18080/UDP18081を照合する。単に広いon-link routeで届いたことを合格にせず、具体的なBGP next hopも確認する。
+
+2026-11-03: 通常build `ac0b1a0980ed`、43-resourceの上記手順は終了0。peer停止後0.88/1.13秒で全prefix通信を再確認し、全daemon再起動後も通過した。111.26秒の全項目再確認は転送断時間ではない。詳細・未受入範囲は[引き継ぎ](pve-codex-handoff.md)を参照する。

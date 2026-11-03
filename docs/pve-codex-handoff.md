@@ -1,6 +1,14 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03 13:44 UTC。全体ゴールは継続中。
+更新: 2026-11-03 14:06 UTC。全体ゴールは継続中。
+
+## BGPを既存WANへ接続
+
+2026-11-03、基準main `ac0b1a0` + native設定/fixture変更、通常build `ac0b1a0980ed`（製品Go不変）で、BGPを保存設定と同じ既存WAN共有へ接続した単体43-resource実HGW手順が終了0。専用bgp0と相互forwardルールを削除し、BGP用benchmark addressをwan0へ設定。独立FRR2台も同じ既存uplink上の隔離peerへ接続した。4つの私設prefix（/24・/12・/16・/24）の実kernel gateway/interface、peerの通常LAN /16受信、両LAN clientの各prefixへのNATなしTCP/UDPを照合した。10/8 blackholeと192.168/16 on-linkより具体的なBGP routeが使われることも確認。
+
+各peer停止/再加入後に残るpeerで全prefixの通信が成功し、再確認まで0.88秒/1.13秒。全daemon再起動後も全経路と通信を再確認。既存captureのwan0 In/OutでBGP179と私設アプリTCP/UDPを照合した。通常DHCP/DNS/NTP/Internet、管理、NAT/非NAT、Tailscale/運用記録も通過。confirmed rollback期限切れ29.90秒/control再起動6.26秒、PD SIGKILL2.96秒/通常再起動5.92秒、全daemon後の全項目再確認111.26秒。全項目時間は転送断時間ではない。20秒の2巡回・自然PD更新0回。通常build・3実行物static link、make test-tools race vet・py_compileが通過。
+
+検証peerは独立FRRであり、実サイトのBGP peerへの接続ではない。WANには試験用192.0.2/24の副アドレスを使い、実サイトIPとの競合を避けた。物理NIC、BGP大量経路/長時間GR、二台の同構成は未受入。新規router WAN・host route・PVE/QEMU・追加PBR調査は行っていない。 再実行は[試験計画](test-plan.md)の「WAN共有のBGP」。
 
 ## 二つのLAN subnetと保存NAT除外の接続
 

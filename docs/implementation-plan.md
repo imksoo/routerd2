@@ -1,5 +1,7 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
+BGPを保存設定と同じ既存WANへ接続し、専用bgp0を削除した43-resourceの実通信が終了0。独立FRRの4つの私設prefix、両clientのNATなしTCP/UDP、各peer停止/再加入と全daemon再起動後を確認。次は単体で受け入れた構成を二台profileへ接続し、残る保存WAN intentを照合する。詳細は[引き継ぎ](pve-codex-handoff.md)を参照する。
+
 保存設定の二つのLAN /16とDHCP profileを単体44-resourceへ接続し、実netmask/割当/通信と全daemon再起動後が通過した。保存NAT除外も反映し、私設/機器用宛ての元sourceとInternet/管理/WAN内のSNATを実peerで確認。次は残る保存intentと実接続topologyを照合し、単体で受け入れた構成を二台profileへ接続する。詳細は[引き継ぎ](pve-codex-handoff.md)を参照する。
 
 保存IPv4経路4件を単体native例へ接続した43-resource実HGW手順が終了0。実TCP/UDPとblackholeのLAN ingress/egressを起動時・全daemon再起動後に確認した。次は、保存設定の二つのLAN subnet/DHCP profileと、単体例の同一subnet・別poolの構成差を解消する。詳細は[引き継ぎ](pve-codex-handoff.md)を参照する。
