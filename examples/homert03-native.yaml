@@ -944,6 +944,8 @@ resources:
       insecure: true
       service_name: routerd2
       service_namespace: routerd
+      attributes:
+        routerd.node: homert03
       min_level: info
       signals:
       - logs

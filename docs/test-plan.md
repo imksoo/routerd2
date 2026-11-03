@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 06:10 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 06:50 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 実行原則
 
@@ -16,6 +16,8 @@
 
 二台47-resource profileは両方向の同一TCP/UDP/NAT tuple・PD identity・DHCP更新・再加入が一回通過した。その後、条件付きDNS/DoH・BGPを含む再試験で待機側へ戻るBGP通信の破棄、effect ACK timeout、既存TCP断を再現した。常時両側からLANを広告する設定と不要な処理/待ちを修正し、条件付きDNS/DoH・BGPを含む両方向の拡張手順も終了0。Tailscale双方向/exitと管理SSH/Web履歴も含む最新手順は終了0、全項目復旧36.82/36.13秒、TCP最大応答間隔11.68秒。断の短縮と長時間安定性は残作業。一度の合格を安定性へ読み替えない。
 
+最新の`c144132` + 本変更（通常build `c14413250ebd`）では、特別scope3端末の更新/通信・Release/再取得/sticky同一割当と、各現用機のfresh nDPI/履歴/syslog/OTLPまで両方向で終了0。同一TCPはSYN1回・249応答・最大応答間隔10.82秒、UDPは287応答・15期限超過。80.40/73.30秒の全項目確認はsampling/再取得を含む。cold startのBGP/VRRP適用待ち再起動は再発しており、原因修正と長時間安定性の受入が必要。
+
 保存中homert02/03は各110 resources。件数一致ではなく実際の意図を照合する。全意図と34 work packageは未完了。ens18/ens20はvirtioであり、NTT ONU直結・対象NIC・実機性能・arm64・cloud/Kubernetesの資格へ読み替えない。
 
 ## 再実行と隔離
@@ -29,7 +31,7 @@ make check-uplink DOCKER='sudo -n docker' \
 
 必要setup: 許可済み実HGW uplink、sudo/root、iproute2、BusyBox、dhcpcd、dnsmasq、curl/dig/tcpdump、OpenSSL/SSH、FRR8.4.4/Zebra/vtysh、公式otelcol-contrib0.151.0（`/usr/local/bin/otelcol-contrib`）。Makefileが通常buildとchecksum-pinned Headscale/Tailscale1.104.2 peerを準備する。Makefile build済み実行物でrunnerだけを再実行する場合は同じ引数を`python3 scripts/uplink-smoke.py`へ渡し、実行build IDを記録する。
 
-専用macvlan MACとnamespaceを使い、hostの管理address/default route/時計/trust storeを変更しない。LAN198.18.0.0/24、管理198.19.0.0/24、BGP192.0.2.0/24、tailnet underlay198.51.100.0/24へ隔離する。router側のlink/address/forward/NAT/serviceはnative設定が所有する。ens20や新規site IPは前提にしない。低優先候補は既存LAN上のgatewayであり、別WANのDHCPではない。
+専用macvlan MACとnamespaceを使い、hostの管理address/default route/時計/trust storeを変更しない。LAN198.18.0.0/24、管理198.19.0.0/24、BGP192.0.2.0/24、tailnet underlay198.51.100.0/24へ隔離する。router側のlink/address/forward/NAT/serviceはnative設定が所有する。保存設定のens20（homert02）/eth2（homert03）は管理interfaceであり、追加WANではない。上流は設定された候補の優先順位と疎通状態で選び、NIC追加を条件にしない。低優先候補は既存LAN上のgatewayであり、別WANのDHCPではない。保存設定の実際の順序はDS-Lite 3本（weight120）→別DS-Lite（80）→LAN静的gateway（60）で、PPPoE候補はない。
 
 WAN/tailnet captureは各最大8MB、PD captureはudp546と実行時間で限定する。ownerは全peer/process/namespaceを撤去する。長時間用syslog受信は直近8MB、公式Collector file exporterは8MB×現行/backup1へ制限する（公式`validate`通過）。受信資料はraw archiveとして残さない。
 
@@ -58,11 +60,11 @@ WAN/tailnet captureは各最大8MB、PD captureはudp546と実行時間で限定
 
 隔離: private mountと専用namespace/bridgeを用い、ens18へ専用macvlanで接続する。共有WAN MACは`02:00:5e:00:01:43`、静的gateway用HGW接続は`02:72:6f:75:74:06`。自然更新ownerのMAC/protocol/stateへ触れない。hostの管理address/default route/時計は変更しない。各実行は最大600秒、peer/productのstdoutと状態はprivate stageのみとし、終了時にprocess/namespace/key/stageを撤去する。失敗の原因と必要な修正は簡潔に残す。
 
-再実行手順: 同じ設定で現用停止→待機側への復旧→旧現用の再加入を両方向へ進める。独立Python標準ライブラリのclientから公開HTTPSへTCP接続を一度だけ張り、公開DNSへ同じUDP socketで送信し続ける。TCPの再接続を禁止し、両nodeの実conntrack reply tupleとclient captureのSYNを照合する。UDPは1秒の返信期限で欠落と最大応答間隔を記録する。これは無損失条件ではない。DUID/IAID/prefixと同期済みDHCP leaseの実Renew/ACK、再加入後の非preemptも確認する。
+再実行手順: 同じ設定で現用停止→待機側への復旧→旧現用の再加入を両方向へ進める。独立Python標準ライブラリのclientから公開HTTPSへTCP接続を一度だけ張り、公開DNSへ同じUDP socketで送信し続ける。TCPの再接続を禁止し、両nodeの実conntrack reply tupleとclient captureのSYNを照合する。UDPは1秒の返信期限で欠落と最大応答間隔を記録する。これは無損失条件ではない。DUID/IAID/prefixと同期済みDHCP leaseの実Renew/ACK、再加入後の非preemptも確認する。 OUI端末1台と特定MAC端末2台も別namespaceで実割当し、配布された特別gateway/DNSだけで公開通信を行う。通常・特別端末のlease全てが待機側へ同期した後に停止し、両方向の引継ぎで実Renew/ACK・同一割当・通信を確認する。続いて実Release/再取得でsticky割当の保持と新しい現用機のfingerprintを確認する。dnsmasqの通常Renew通知には要求options等がなく、fingerprint同期もないため、Renewだけで新しい現用機に識別記録ができることを前提にしない。新しい公開通信のnDPI計数/SNI、管理拒否履歴、現用node識別付きのfresh syslog/OTLP logs/metrics/tracesは記録時刻で過去の結果と分ける。
 
 DHCPの現用権はVRRPが決める。元現用が停止しても、同期済みの保存leaseから配布を再開して実Renew/ACKを返す。同期は旧routerdと同じ非同期のため、未受信の新規割当を失った場合の重複回避までは保証しない。`--peer-loss`の既存namespace手順も、元現用不在中の既知lease更新と、同期復帰後の新規割当を確認する契約へ更新する。
 
-残作業: 特別scope、nDPI/通信・firewall履歴、syslog/OTLP全経路と再起動後の安定性を同じ二台profileで受け入れる。複数回、BGP/VRRP effect ACK待ちのtimeoutでworker再起動を観測したため、全機能時の適用/停止順序も次の確認対象とする。
+残作業: 今回通過した特別scope・nDPI/履歴・syslog/OTLPに続き、保持期限/archive障害・cold start/再起動後の安定性を同じprofileで受け入れる。複数回、BGP/VRRP effect ACK待ちのtimeoutでworker再起動を観測したため、全機能時の適用/停止順序も次の確認対象とする。
 
 ## 自然更新と残る全体受入
 

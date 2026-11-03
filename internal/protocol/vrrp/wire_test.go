@@ -170,7 +170,7 @@ func TestValidateRefusesAmbiguousOrUnsafeIdentity(t *testing.T) {
 		func(c *Config) { c.Addresses = nil }, func(c *Config) { c.Addresses = []string{"192.0.2.1"} },
 		func(c *Config) { c.Addresses = []string{"192.0.2.1/24", "192.0.2.1/32"} },
 		func(c *Config) { c.SourceAddress = "0.0.0.0" }, func(c *Config) { c.AdvertIntervalCentiseconds = 4096 },
-		func(c *Config) { c.EffectTimeoutMilliseconds = -1 }, func(c *Config) { c.Resource = strings.Repeat("x", 257) },
+		func(c *Config) { c.Resource = strings.Repeat("x", 257) },
 	}
 	for i, change := range mutations {
 		c := config4()

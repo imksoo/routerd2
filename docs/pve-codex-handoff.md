@@ -1,6 +1,14 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03 06:10 UTC。全体ゴールは継続中。
+更新: 2026-11-03 06:50 UTC。全体ゴールは継続中。
+
+最新実行: 基準main `c144132` + 本変更、通常Makefile build ID `c14413250ebd`、各47-resource profileで `python3 scripts/uplink-ha.py --uplink ens18` が終了0。実HGW、独立BusyBox端末4台、FRR2台、chronyd、Headscale/Tailscale、syslog受信機、公式Collectorを使用。両方向の停止・再加入で、通常/特別scopeの実Renew/ACK・DNS/公開HTTPS、特別3端末のRelease/再取得とsticky同一割当、再取得した現用機のfingerprintを確認した。新規公開通信の双方向nDPI計数/TLS SNI、実管理拒否の履歴、元の記録時刻とnode識別を照合したfresh syslog/OTLP logs/metrics/tracesも初期・両方向の切替後に通過した。
+
+同一TCPはSYN1回、249応答、最大応答間隔10.82秒。同一UDPは287応答・15期限超過・最大応答間隔8.52秒（1秒返信予算）。両方向のNAT tuple/mark、DUID/IAID/prefix、再加入/同期/非preempt、DNS/DoH/BGP/NTP/Tailscale/管理を維持した。全項目確認まで80.40/73.30秒には30秒sampling待ちと特別端末のRelease/再取得を含み、転送断時間とは区別する。
+
+VRRPの余分な2秒適用待ち設定を削除し、元の選挙期限の残り時間へ統一した。期限切れ判定とwithdrawalは維持する。ただし今回のcold startでもBGP/VRRPの適用待ちtimeoutと依存workerの再起動を観測したため、これだけで起動安定性が解決したとは扱わない。次はcoordinatorの実適用待ちと依存worker停止の時間関係を観測し、待ち時間を延ばす対処ではなく原因を直す。
+
+切替後fingerprint待ちの先行失敗はrunnerの前提誤り。配布用dnsmasq2.92_p2と独立BusyBoxの実割当→再起動→Renewで、ACK後も`DNSMASQ_DATA_MISSING=1`・要求optionsなしの通知を再現した。upstream helper/lease/rfc2131実装も照合し、通常Renewには取得時metadataがないことを確認した。データのない通知からfresh記録を捏造せず、実Renew/通信と実Release/再取得/fingerprintを別に確認する。fingerprintはlease同期の対象ではない。保存設定も再読し、ens20（homert02）/eth2（homert03）は管理用、上流順序はDS-Lite群120→別DS-Lite80→LAN静的gateway60、PPPoE候補なしと確認した。
 
 通常Makefile build ID `875dfa6f1f84` + 本変更で、実HGWへ接続した二台47-resource profileの拡張手順が終了0。条件付きDNS/DoH・BGP・NTP・両IP Internetに加え、独立Headscale/Tailscale端末とのLAN→peer IPv4/IPv6、peer→LAN IPv4のTCP/UDPを両方向の現用停止・再加入後に確認した。LAN subnet routeは独立端末で手動変更せず切り替わった。最後に現用nodeを明示選択したIPv4/IPv6 exit HTTPS/UDP DNSも通過（同一exit node IDの自動引継ぎの受入ではない）。両nodeへのSSH鍵認証・保持host key、現用側のloopback/管理DNS・Webの実DNS履歴、LANからの管理拒否も通過した。
 
@@ -9,6 +17,8 @@
 TailscaleのLAN通信は、両側で常時広告していた旧二台例で実際に失敗した。現用からtailscale0へ出るSYNをpacketで確認し、広告を現用権に合わせた設定へ修正した。独立制御サーバーの明示policyは試験userのLAN/exit広告だけを事前許可し、切替後の手動承認を合格条件にしない。各nodeの保持鍵・名称は別のまま再利用する。
 
 BGPは観測の元の5秒期限より短い2秒で適用待ちを切っていた。余分な`effect_timeout_milliseconds`設定をBGPのproducer/consumerから削除し、RIB走査に使った時間も差し引いた元の残り期限で待つ。期限を更新して待ち直す処理は追加しない。Race Detector・vet・Python補助検査36件・通常build・3実行物のstatic linkが通過。短時間の二台通信は確認済みだが、単体の長時間BGP安定性は再受入が必要。VRRPの適用待ち再起動と初期AFTR HTTP409も残る。
+
+今回の補助検査: `make check`（Race Detector/vetを含む）、通常Makefile build、3実行物のstatic link確認が通過。最初の同時実行ではstorage guestの150ms診断待ちが一度失敗し、実通信終了後の無変更再実行は終了0。期限や期待値は変更していない。終了した実通信ownerはnamespace/process/key/stageを撤去済み。
 
 ## 今回の自然更新とHA修正
 
@@ -38,8 +48,8 @@ NTPのワイルドカード待受を許可する製品修正`19682da`はmainへp
 
 ## 次の作業
 
-1. BGPの元の期限へ統一した変更を単体の長時間実通信で再受入し、残るVRRPの適用待ち再起動と二台の切替断を直す。初期AFTRのHTTP409/restartも残る。
-2. 二台の特別DHCP scope、nDPI/通信履歴・firewall履歴・syslog/OTLP全経路、保持期限と再起動後を実peerで受け入れる。今回確認したTailscale/管理/DNS/DoH/BGP経路と長時間安定性を分ける。
+1. cold startで再現したBGP/VRRP適用待ち・依存worker再起動の原因を直し、同じ単体/二台profileで起動と長時間安定性を受け入れる。初期AFTRのHTTP409/restartと切替断も残る。
+2. 今回通過した二台の特別scope・nDPI/履歴・syslog/OTLPに続き、未確認の保持期限・archive障害/復旧と長時間動作を実peerで受け入れる。短時間通信の通過と安定性を分ける。
 3. 保存homert全意図と保持dataset、MTU/期限/更新/配布、残る34 work packageを完了する。対象ONU/NIC・実機性能・arm64・cloud等は未受入。各実通信の直前に[試験計画](test-plan.md)全体を読む。PVE/QEMUと追加PBR調査は実行しない。
 
-全体開始から9日18時間41分、記録済み期限から4日13時間13分経過（06:10 UTC）。全体ゴールは継続中。終了したstage/key/capture/log/重複build outputを撤去し、次の観測で必要な実行物・pinned peerだけを残す。
+全体開始から9日19時間21分、記録済み期限から4日13時間53分経過（06:50 UTC）。全体ゴールは継続中。終了したstage/key/capture/log/重複build outputを撤去し、次の観測で必要な実行物・pinned peerだけを残す。

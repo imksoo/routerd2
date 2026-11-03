@@ -53,7 +53,6 @@ type Config struct {
 	VirtualRouterID            int                     `json:"virtual_router_id"`
 	Priority                   int                     `json:"priority,omitempty"`
 	AdvertIntervalCentiseconds int                     `json:"advert_interval_centiseconds,omitempty"`
-	EffectTimeoutMilliseconds  int                     `json:"effect_timeout_milliseconds,omitempty"`
 	Addresses                  []string                `json:"addresses"`
 	Preempt                    *bool                   `json:"preempt,omitempty"`
 	AddressOwner               bool                    `json:"address_owner,omitempty"`
@@ -148,9 +147,6 @@ func Normalize(c Config) Config {
 	if c.AdvertIntervalCentiseconds == 0 {
 		c.AdvertIntervalCentiseconds = 100
 	}
-	if c.EffectTimeoutMilliseconds == 0 {
-		c.EffectTimeoutMilliseconds = 2000
-	}
 	if c.VIPInterface == "" {
 		sum := sha256.Sum256([]byte(c.Resource + "\x00" + c.Interface + "\x00" + c.Family))
 		family := 4
@@ -233,9 +229,6 @@ func Validate(c Config) error {
 				return errors.New("VRRP auth_password must contain printable ASCII bytes")
 			}
 		}
-	}
-	if c.EffectTimeoutMilliseconds < 10 || c.EffectTimeoutMilliseconds > 10000 {
-		return errors.New("VRRP effect timeout must be 10..10000 milliseconds")
 	}
 	if len(c.Addresses) == 0 || len(c.Addresses) > 255 {
 		return errors.New("VRRP requires 1..255 virtual host CIDRs of one family")

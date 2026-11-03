@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run paired native homert profiles against a real HGW and independent peers."""
 import argparse
+from datetime import datetime
 import ipaddress
 import json
 import os
@@ -313,6 +314,82 @@ def owner(stage, uplink):
             assert denied.returncode != 0, "management Web was reachable from the LAN"
             print("PASS HA management SSH, retained host keys, loopback/management DNS, Web query history and LAN access restriction", flush=True)
         check_management()
+        def check_operations():
+            node = elected()
+            since = time.time_ns()
+            def fresh(stamp):
+                return datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp() >= since/1e9
+            run(inside("client", ["curl", "-4", "--noproxy", "*", "--fail", "--max-time", "8", "--resolve", "one.one.one.one:443:1.1.1.1", "-sS", "-I", "https://one.one.one.one/"]))
+            assert run(inside("client", ["dig", "@1.1.1.1", "example.net", "A", "+short", "+time=3", "+tries=1"])).strip()
+            def classified():
+                rows = api(node, "control.sock", "/v1/services/service.flows/traffic-history?client="+client_address+"&peer=1.1.1.1&limit=100")["flows"] or []
+                rows = [r for r in rows if fresh(r["tsStarted"])]
+                return any(r.get("engine") == "ndpi" and r.get("source") == "libndpi" and r.get("accounting") and r.get("bytesOut", 0) > 0 and r.get("bytesIn", 0) > 0 for r in rows) and any(r.get("tlsSNI") == "one.one.one.one" for r in rows)
+            wait(classified)
+            management = "198.19.0.2" if node == "a" else "198.19.0.3"
+            denied = subprocess.run(inside("client", ["curl", "--interface", "client0", "--noproxy", "*", "--max-time", "2", "-sS", "http://"+management+":8080/"]), capture_output=True)
+            assert denied.returncode != 0
+            def recorded_drop():
+                rows = api(node, "control.sock", "/v1/services/service.packets/firewall-history?action=drop&limit=100")["entries"] or []
+                return any(fresh(r["ts"]) and r.get("srcAddress") == client_address and r.get("dstPort") == 8080 and r.get("inIface") in ("lan0", "vip0") for r in rows)
+            wait(recorded_drop)
+            source = "192.0.2.10" if node == "a" else "192.0.2.11"
+            def received_syslog():
+                for line in (stage / "syslog.jsonl").read_text().splitlines(keepends=True):
+                    if not line.endswith("\n"):
+                        continue
+                    row = json.loads(line)
+                    message = row.get("message", "")
+                    stamp = re.search(r"timestamp=(\S+)", message)
+                    if row.get("peer", [None])[0] == source and "health probe completed" in message and stamp and fresh(stamp[1]):
+                        return True
+                return False
+            wait(received_syslog)
+            label = "homert02" if node == "a" else "homert03"
+            def ours(resource):
+                return any(a["key"] == "routerd.node" and a["value"].get("stringValue") == label for a in resource["resource"].get("attributes", []))
+            def received_otlp():
+                path = stage / "otlp.jsonl"
+                if not path.exists():
+                    return False
+                batches = [json.loads(line) for line in path.read_text().splitlines(keepends=True) if line.endswith("\n")]
+                logs = [r for b in batches for resource in b.get("resourceLogs", []) if ours(resource) for scope in resource.get("scopeLogs", []) for r in scope.get("logRecords", [])]
+                metrics = [m for b in batches for resource in b.get("resourceMetrics", []) if ours(resource) for scope in resource.get("scopeMetrics", []) for m in scope.get("metrics", [])]
+                spans = [s for b in batches for resource in b.get("resourceSpans", []) if ours(resource) for scope in resource.get("scopeSpans", []) for s in scope.get("spans", [])]
+                return (any(int(r.get("timeUnixNano", 0)) >= since and r.get("body", {}).get("stringValue") == "health probe completed" for r in logs)
+                    and any(m.get("name") == "routerd.healthcheck.probes" and any(int(p.get("timeUnixNano", 0)) >= since for p in m.get("sum", {}).get("dataPoints", [])) for m in metrics)
+                    and any(s.get("name") == "healthcheck.probe" and int(s.get("startTimeUnixNano", 0)) >= since for s in spans))
+            wait(received_otlp)
+            print("PASS HA fresh native nDPI counters/TLS SNI, firewall history, syslog and OTLP logs/metrics/traces from", label, flush=True)
+        check_operations()
+        special_clients = []
+        for index, mac in enumerate(("02:77:00:00:00:04", "02:77:01:00:00:05", "02:77:01:00:00:06")):
+            key = "special"+str(index)
+            names[key] = prefix+"-"+key
+            run(["ip", "netns", "add", names[key]])
+            namespaces.append(names[key])
+            run(inside(key, ["ip", "link", "set", "lo", "up"]))
+            run(inside("client", ["ip", "link", "add", "link", "client0", "name", "special0", "netns", names[key], "type", "macvlan", "mode", "bridge"]))
+            run(inside(key, ["ip", "link", "set", "special0", "address", mac, "up"]))
+            lease_file = stage / (key+".lease")
+            hook = stage / (key+".sh")
+            hook.write_text('#!/bin/sh\ncase "$1" in deconfig) ip -4 address flush dev "$interface"; ip -4 route flush dev "$interface";; bound|renew) ip address replace "$ip/$subnet" dev "$interface"; ip route replace default via "$router" dev "$interface"; printf "%s %s %s\\n" "$ip" "$router" "$dns" > "'+str(lease_file)+'";; esac\n')
+            hook.chmod(0o500)
+            process = start(key, ["busybox", "udhcpc", "-f", "-i", "special0", "-s", str(hook), "-p", str(stage / (key+".pid")), "-x", "hostname:"+key], key)
+            wait(lease_file.exists)
+            special_clients.append((key, process, lease_file, lease_file.read_text().split()[0], mac))
+        def check_special_clients(fingerprints=False):
+            for key, process, lease_file, original, mac in special_clients:
+                assert process.poll() is None, "independent DHCP client exited"
+                address, gateway, dns = lease_file.read_text().split()
+                assert address == original and gateway == dns == "198.18.0.253", (key, address, gateway, dns)
+                assert ipaddress.IPv4Address("198.18.0.32") <= ipaddress.IPv4Address(address) <= ipaddress.IPv4Address("198.18.0.63"), address
+                assert run(inside(key, ["dig", "@"+dns, "example.net", "A", "+short", "+time=3", "+tries=1"])).strip()
+                run(inside(key, ["curl", "-4", "--noproxy", "*", "--fail", "--max-time", "8", "--resolve", "one.one.one.one:443:1.1.1.1", "-sS", "-I", "-o", "/dev/null", "https://one.one.one.one/"]))
+                if fingerprints:
+                    wait(lambda: bool(api(elected(), "control.sock", "/v1/services/service.lan-leases/dhcp-fingerprints?mac="+mac+"&limit=10").get("entries")))
+            print("PASS HA OUI and exact-MAC scopes retained their real leases and used the independent gateway/DNS", flush=True)
+        check_special_clients(fingerprints=True)
         neighbor = json.loads(run(inside("client", ["ip", "-j", "neigh", "show", "to", "198.18.0.1", "dev", "client0"])))
         assert len(neighbor) == 1 and neighbor[0].get("lladdr") == "00:00:5e:00:01:2a", neighbor
         print("PASS client learned the IPv4 VIP MAC rather than its IPv6 sibling", flush=True)
@@ -357,7 +434,8 @@ def owner(stage, uplink):
                 return False
             sync = pd.get("sync", {})
             leases = stage / node / "state/services/lan-leases/dnsmasq.leases"
-            mirrored = leases.exists() and any(line.split()[2] == original_address for line in leases.read_text().splitlines() if len(line.split()) >= 3)
+            wanted = {original_address, *(c[3] for c in special_clients)}
+            mirrored = leases.exists() and wanted <= {line.split()[2] for line in leases.read_text().splitlines() if len(line.split()) >= 3}
             return pd.get("state") == "standby" and sync.get("epoch", 0) > 0 and not sync.get("error") and dhcp.get("standby") and mirrored
         for _ in range(2):
             previous = elected()
@@ -381,6 +459,7 @@ def owner(stage, uplink):
                     print("HA recovery probe failed", round(time.monotonic()-handoff_started, 2), str(error), flush=True)
                     return False
             wait(recovered)
+            check_operations()
             counts = {mode: progress(mode)["received"] for mode in flow_processes}
             wait(lambda: all(progress(mode)["received"] > counts[mode] for mode in flow_processes))
             for mode in flow_processes:
@@ -391,6 +470,21 @@ def owner(stage, uplink):
             dhcp_client.send_signal(signal.SIGUSR1)
             wait(lambda: lease.stat().st_mtime_ns > renewed_before)
             assert lease.read_text().split()[0] == original_address
+            for _, process, lease_file, _, _ in special_clients:
+                before = lease_file.stat().st_mtime_ns
+                process.send_signal(signal.SIGUSR1)
+                wait(lambda: lease_file.stat().st_mtime_ns > before)
+            check_special_clients()
+            # dnsmasq supplies fingerprint metadata on acquisition, not renewal.
+            # Exercise a real release/reacquisition on the new owner as well.
+            for key, process, lease_file, _, _ in special_clients:
+                process.send_signal(signal.SIGUSR2)
+                wait(lambda: not any(link.get("addr_info") for link in json.loads(run(inside(key, ["ip", "-j", "-4", "address", "show", "dev", "special0"])))))
+                before = lease_file.stat().st_mtime_ns
+                process.send_signal(signal.SIGUSR1)
+                wait(lambda: lease_file.stat().st_mtime_ns > before)
+            check_special_clients(fingerprints=True)
+            print("PASS HA special-client Release/reacquisition retained sticky addresses and recorded fingerprints on the new owner", flush=True)
             print("PASS full native HA handoff", previous, "->", survivor,
                   "elapsed", round(time.monotonic()-handoff_started, 2), "failed probes", failed_probes,
                   "same TCP/UDP NAT tuples, PD identity and real DHCP renewal", flush=True)

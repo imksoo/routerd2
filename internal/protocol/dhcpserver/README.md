@@ -41,6 +41,16 @@ rows cannot undo a later removal. A real subsequent request clears the hold.
 The original request, removal and hold times survive transfer and restart;
 no acquisition timestamp is reconstructed from a configured lease duration.
 
+Fingerprint collection uses acquisition metadata from the same direct hook.
+The pinned dnsmasq discards that metadata after notification; a normal renewal
+can carry `DNSMASQ_DATA_MISSING=1` too, even after replying to a real request.
+This flag is not proof that an event came only from startup. Such notifications
+do not create fingerprint records or fresh request history. Lease renewal still
+updates the authoritative lease file. Fingerprint history is local to each node,
+not part of lease replication; a client acquisition on the new owner supplies
+its own metadata. Verify renewal/forwarding separately from reacquisition and
+fingerprint collection.
+
 The old routerd `RecordLeaseEvent` and host-reservation path supply the sticky
 behavior. Explicit reservations win over held history. Released or expired
 bindings remain reserved until their original hold deadline; reacquisition

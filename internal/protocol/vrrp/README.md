@@ -13,8 +13,9 @@ err := vrrp.Run(ctx, config, effects, ready)
 
 `Config` is JSON serializable. `Validate` checks semantic boundaries and
 `Normalize` supplies priority 100, preemption enabled, a one-second
-advertisement interval, a two-second effect timeout, and a deterministic virtual
-interface name when omitted. Example IPv4 instance:
+advertisement interval and a deterministic virtual interface name when omitted.
+Effect waits and active-device verification use the original election deadline;
+a separate shorter timeout cannot tear down a still-current election. Example IPv4 instance:
 
 ```json
 {

@@ -68,7 +68,7 @@ func applyActions(ctx context.Context, m *machine, a actions, device transport, 
 	}
 
 	if m.published && (a.advertise || a.notify) {
-		operation, cancel := context.WithTimeout(ctx, time.Duration(m.config.EffectTimeoutMilliseconds)*time.Millisecond)
+		operation, cancel := context.WithDeadline(ctx, m.validUntil)
 		err := device.VerifyActive(operation, m.snapshot())
 		cancel()
 		if err != nil {
@@ -108,19 +108,17 @@ func publishOwnership(ctx context.Context, m *machine, effects Effects) error {
 		return err
 	}
 	m.activationStatus(clock)
-	operation, cancel := context.WithTimeout(ctx, time.Duration(m.config.EffectTimeoutMilliseconds)*time.Millisecond)
+	wait := inactiveObservationLifetime
+	if m.state != StateInitialize {
+		wait = time.Duration(m.expiresNanos - uint64(clock.BoottimeNanoseconds))
+	}
+	deadline := time.Now().Add(wait)
+	operation, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
-	var deadline time.Time
-	if m.state == StateActive {
-		deadline = time.Now().Add(time.Duration(m.expiresNanos - uint64(clock.BoottimeNanoseconds)))
-		if m.published {
-			m.validUntil = deadline
-		} else {
-			m.validUntil = time.Time{}
-		}
-		leased, cancelLease := context.WithDeadline(operation, deadline)
-		defer cancelLease()
-		operation = leased
+	if m.state == StateActive && m.published {
+		m.validUntil = deadline
+	} else {
+		m.validUntil = time.Time{}
 	}
 	decision, err := effects.Apply(operation, m.snapshot())
 	if err != nil {
@@ -202,7 +200,7 @@ func minTime(a, b time.Time) time.Time {
 }
 
 func withdraw(m *machine, device transport, effects Effects) error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(m.config.EffectTimeoutMilliseconds)*time.Millisecond+250*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), inactiveObservationLifetime+250*time.Millisecond)
 	defer cancel()
 	var sendErr error
 	if m.state == StateActive && m.advertisements != 0 {
