@@ -66,6 +66,9 @@ resources:
           - {match: {protocol: tcp, destination_ports: [{start: 2222}, {start: 8080}]}, action: drop, log: {group: 1, copy_range: 2048, prefix: management-deny}}
           - {match: {in_interface: wan0, protocol: udp, destination_ports: [{start: 53}]}, action: drop}
           - {match: {in_interface: wan0, protocol: tcp, destination_ports: [{start: 53}]}, action: drop}
+      forward_chain:
+        policy: drop
+        log: {group: 1, copy_range: 2048, prefix: forward-deny}
       forward:
         - {from: tailscale0, to: lan0}
         - {from: tailscale0, to: mgmt0}

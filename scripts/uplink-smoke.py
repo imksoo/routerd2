@@ -13,6 +13,7 @@ retains the test router's identity and WAN leases. This is not NIC qualification
 
 import argparse
 import copy
+from datetime import datetime
 import ipaddress
 import json
 import os
@@ -1027,36 +1028,40 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
                     peers = json.loads(run(inside(remote, peer_cli + ["status", "--json"]))).get("Peer", {}).values()
                     return any(set(advertised_routes).issubset(p.get("PrimaryRoutes", [])) for p in peers)
                 wait(subnet_routes_ready)
+                flows = []
                 if config_path is not None:
                     for destination in ("10.42.0.1", "172.20.1.1", "192.168.64.1", "198.19.0.253", "10.255.255.2"):
                         route = json.loads(run(inside(remote, ["ip", "-j", "route", "get", destination])))[0]
                         assert route["dev"] == "tailscale0", (destination, route)
                         local_route = json.loads(run(inside(router, ["ip", "-j", "route", "get", destination])))[0]
-                        run(inside(remote, ["python3", "-c", echo["ECHO_CLIENT"], destination, local_route["prefsrc"]]))
-                    print("PASS Tailscale advertised private routes reached independent BGP, static, legacy LAN and management devices over TCP/UDP with exit disabled", flush=True)
+                        flows.append((remote, destination, local_route["prefsrc"]))
                 for family, address in ((4, auto4), (6, auto6)):
                     # homert advertises IPv4 LANs only. Exit routes deliberately
                     # exclude unadvertised local LANs in upstream Tailscale.
                     source = next(a for a in product_ips if ipaddress.ip_address(a).version == 6) if family == 6 else address
-                    flows = [(automatic, peer_ips[family], source)]
+                    flows.append((automatic, peer_ips[family], source))
                     if family == 4:
                         # Upstream defaults to SNAT for traffic entering an advertised
                         # subnet; old routerd's tailscale up kept that default.
                         flows.append((remote, address, "198.18.0.1"))
-                    for ns, destination, source in flows:
-                        try:
-                            run(inside(ns, ["python3", "-c", echo["ECHO_CLIENT"], destination, source]))
-                        except RuntimeError:
-                            print("Failed tailnet direction", "peer-to-LAN" if ns == remote else "LAN-to-peer", "family", family, flush=True)
-                            for target in (remote, router, automatic):
-                                print("Failed tailnet routes", target, run(inside(target, ["ip", "-6" if family == 6 else "-4", "route", "show", "table", "all"])), flush=True)
-                            status = json.loads(run(inside(remote, peer_cli + ["status", "--json"])))
-                            print("Failed tailnet peer state", {k: status.get(k) for k in ("BackendState", "Health")},
-                                  [{k: p.get(k) for k in ("HostName", "ExitNode", "ExitNodeOption", "AllowedIPs", "PrimaryRoutes", "RxBytes", "TxBytes")} for p in status.get("Peer", {}).values()], flush=True)
-                            for path in (*stage.glob("wan.pcap*"), *stage.glob("peer.pcap*")):
-                                print("Failed tailnet packets", run(["tcpdump", "-nn", "-r", str(path), ("ip6" if family == 6 else "ip") + " and (tcp port 18080 or udp port 18081)"]).splitlines()[-40:], flush=True)
-                            print("Failed tailnet peer log", "\n".join((stage / "tailnet-peer.log").read_text().splitlines()[-20:]), flush=True)
-                            raise
+                for ns, destination, source in flows:
+                    family = ipaddress.ip_address(destination).version
+                    try:
+                        run(inside(ns, ["python3", "-c", echo["ECHO_CLIENT"], destination, source]))
+                    except RuntimeError:
+                        print("Failed tailnet direction", "peer-to-LAN" if ns == remote else "LAN-to-peer", "family", family, flush=True)
+                        for target in (remote, router, automatic):
+                            print("Failed tailnet routes", target, run(inside(target, ["ip", "-6" if family == 6 else "-4", "route", "show", "table", "all"])), flush=True)
+                        status = json.loads(run(inside(remote, peer_cli + ["status", "--json"])))
+                        print("Failed tailnet peer state", {k: status.get(k) for k in ("BackendState", "Health")},
+                              [{k: p.get(k) for k in ("HostName", "ExitNode", "ExitNodeOption", "AllowedIPs", "PrimaryRoutes", "RxBytes", "TxBytes", "LastHandshake", "CurAddr", "Relay", "Active")} for p in status.get("Peer", {}).values()], flush=True)
+                        print("Failed tailnet firewall", run(inside(router, ["nft", "list", "ruleset"])), flush=True)
+                        print("Failed tailnet drops", query("control.sock", "/v1/services/service.packets/firewall-history?action=drop&limit=20"), flush=True)
+                        for path in (*stage.glob("wan.pcap*"), *stage.glob("peer.pcap*")):
+                            print("Failed tailnet packets", run(["tcpdump", "-nn", "-r", str(path), "host " + destination + " and (tcp port 18080 or udp port 18081)"]).splitlines()[-40:], flush=True)
+                        print("Failed tailnet peer log", "\n".join((stage / "tailnet-peer.log").read_text().splitlines()[-20:]), flush=True)
+                        raise
+                print("PASS Tailscale configured subnet routes and LAN/peer TCP/UDP with exit disabled", flush=True)
                 run(inside(remote, peer_cli + ["set", "--exit-node=" + product_ips[0], "--exit-node-allow-lan-access=true"]))
                 for family, address in (("-4", "1.1.1.1"), ("-6", "[2606:4700:4700::1111]")):
                     response = run(inside(remote, ["curl", family, "--noproxy", "*", "--max-time", "8", "--resolve", "one.one.one.one:443:" + address, "-sS", "-I", "-o", "/dev/null", "-w", "%{http_code}", "https://one.one.one.one/"]))
@@ -1233,6 +1238,16 @@ print(*s.getsockname())
 
         def check_operations():
             since = time.time_ns()
+            peer_namespace, peer_address, _ = bgp_peers[0]
+            run(inside(peer_namespace, ["python3", "-c", echo["BLOCKED_CLIENT"], str(auto_address)]))
+            def recorded_forward_denials():
+                rows = query("control.sock", "/v1/services/service.packets/firewall-history?action=drop&limit=100")["entries"] or []
+                return {(r["protocol"].lower(), r.get("dstPort")) for r in rows
+                    if datetime.fromisoformat(r["ts"].replace("Z", "+00:00")).timestamp() >= since/1e9
+                    and r.get("srcAddress") == peer_address and r.get("dstAddress") == str(auto_address)
+                    and r.get("inIface") == "wan0" and r.get("outIface") == "lan0"} >= {("tcp", 18080), ("udp", 18081)}
+            wait(recorded_forward_denials)
+            print("PASS unsolicited WAN-to-LAN TCP/UDP were dropped and recorded through actual NFLOG", flush=True)
             run(inside(automatic, ["curl", "-4", "--noproxy", "*", "--fail", "--max-time", "8", "--resolve",
                 "one.one.one.one:443:1.1.1.1", "-sS", "-I", "https://one.one.one.one/"]))
             answer = run(inside(automatic, ["dig", "@1.1.1.1", "example.net", "A", "+short", "+time=3", "+tries=1"]))
@@ -1253,7 +1268,11 @@ print(*s.getsockname())
                 spans = [span for batch in batches for resource in batch.get("resourceSpans", []) for scope in resource.get("scopeSpans", []) for span in scope.get("spans", [])]
                 return (any(int(record.get("timeUnixNano", 0)) >= since and record.get("body", {}).get("stringValue") == "health probe completed" for record in logs)
                     and any(metric.get("name") == "routerd.healthcheck.probes" and any(int(point.get("timeUnixNano", 0)) >= since for point in metric.get("sum", {}).get("dataPoints", [])) for metric in metrics)
-                    and any(span.get("name") == "healthcheck.probe" and int(span.get("startTimeUnixNano", 0)) >= since for span in spans))
+                    and any(span.get("name") == "healthcheck.probe" and int(span.get("startTimeUnixNano", 0)) >= since for span in spans)
+                    and any(int(record.get("timeUnixNano", 0)) >= since and record.get("body", {}).get("stringValue") == "firewall packet"
+                        and any(a["key"] == "routerd.attributes"
+                            and {"key": "rule", "value": {"stringValue": "forward-deny"}} in a["value"]["kvlistValue"]["values"]
+                            for a in record.get("attributes", [])) for record in logs))
             wait(signals_received)
             print("PASS public peer traffic has measured counters, native nDPI classification and TLS SNI; LAN denial persisted; actual product syslog and OTLP logs/metrics/traces reached independent receivers", flush=True)
 

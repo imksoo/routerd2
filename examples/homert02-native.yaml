@@ -114,6 +114,9 @@ resources:
           destination_ports:
           - start: 53
         action: drop
+    forward_chain:
+      policy: drop
+      log: {group: 1, copy_range: 2048, prefix: forward-deny}
     forward:
     - from: tailscale0
       to: lan0

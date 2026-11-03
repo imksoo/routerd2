@@ -1,5 +1,7 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
+保存homertの転送拒否ログをnative三例の既存NFLOG/履歴/OTLP経路へ接続した。基準main `f5ddd4a` + 設定/runner変更・通常build `f5ddd4a91ace`で、単体全daemon再起動と二台両方向HAの実TCP/UDP拒否・新しい記録/転送が通過。試験の共有L2アドレス重複、OTLP属性の誤った照合と設定読取期限を修正した。直列実行と具体的な結果・残作業は[試験計画](test-plan.md)・[引き継ぎ](pve-codex-handoff.md)へ記載する。次は配布image builderで未同梱のkernel対応sourceと、独立kernel/時計での全構成起動・更新受入を進める。
+
 保存homertのTailscale私設IPv4広告と転送許可を単体・二台例へ接続した。通常build `3f5c5aced7be`で、exit未選択の独立peerからBGP/静的経路/旧LAN/管理へのTCP/UDP、単体全daemon再起動と両方向HAを通過。初回の二台通信で物理WAN側への許可欠落を検出して修正した。NTP品質立上りの5照会timeoutと自然復旧を含む測定値・残作業は[引き継ぎ](pve-codex-handoff.md)へ記載する。
 
 保存homertのB4 IPv4に合わせ、単体・二台例の4 DS-Liteを192.0.0.2/.3/.4/.5（各/29）と対応するSNAT・health送信元へ修正した。旧routerdのlocalAddressFrom経路と明示的な重複許可を参照した。通常build `cbde1604b383`・変更後の単体45-resource例で、実HGW・独立LAN端末との4本のHTTPS/UDP DNS、両IP Internet/DNS、設定rollback、PD再起動と全daemon再起動を通過した。Linuxの各アドレスと内側TCP往復をcaptureで確認。全daemon後の全項目再確認111.87秒は転送断時間ではない。2巡回、自然PD更新0回。通常build `3f5c5aced7be`の二台例も両方向の引継ぎ・再加入、新規端末と同一TCP/UDP接続を通過した。直接ONU・対象NIC資格、同一TCP継続は今回の範囲外。

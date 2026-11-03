@@ -90,7 +90,7 @@ def owner(stage, uplink, retention_check):
             time.sleep(.2)
         raise RuntimeError("full native HA readiness deadline")
     def api(node, socket, path, body=None):
-        seconds = 35 if body is not None else 4
+        seconds = 35 if body is not None or path == "/v1/config" else 4
         command = ["curl", "--fail-with-body", "--max-time", str(seconds), "-sS", "--unix-socket", str(stage / node / "run" / socket), "http://localhost" + path]
         if body is not None:
             command += ["-H", "Content-Type: application/json", "--data-binary", json.dumps(body)]
@@ -514,6 +514,15 @@ def owner(stage, uplink, retention_check):
                 rows = api(node, "control.sock", "/v1/services/service.packets/firewall-history?action=drop&limit=100")["entries"] or []
                 return any(fresh(r["ts"]) and r.get("srcAddress") == client_address and r.get("dstPort") == 8080 and r.get("inIface") in ("lan0", "vip0") for r in rows)
             wait(recorded_drop)
+            run(inside("bgp0", ["python3", "-c", echo["BLOCKED_CLIENT"], client_address]))
+            forward_interface = json.loads(run(inside(node, ["ip", "-j", "route", "get", client_address])))[0]["dev"]
+            def recorded_forward_denials():
+                rows = api(node, "control.sock", "/v1/services/service.packets/firewall-history?action=drop&limit=100")["entries"] or []
+                return {(r["protocol"].lower(), r.get("dstPort")) for r in rows
+                    if fresh(r["ts"]) and r.get("srcAddress") == "192.0.2.2" and r.get("dstAddress") == client_address
+                    and r.get("inIface") == "wan0" and r.get("outIface") == forward_interface} >= {("tcp", 18080), ("udp", 18081)}
+            wait(recorded_forward_denials)
+            print("PASS HA unsolicited WAN-to-LAN TCP/UDP were dropped and recorded through actual NFLOG via", node, flush=True)
             source = "192.0.2.10" if node == "a" else "192.0.2.11"
             def received_syslog():
                 for line in (stage / "syslog.jsonl").read_text().splitlines(keepends=True):
@@ -539,7 +548,11 @@ def owner(stage, uplink, retention_check):
                 spans = [s for b in batches for resource in b.get("resourceSpans", []) if ours(resource) for scope in resource.get("scopeSpans", []) for s in scope.get("spans", [])]
                 return (any(int(r.get("timeUnixNano", 0)) >= since and r.get("body", {}).get("stringValue") == "health probe completed" for r in logs)
                     and any(m.get("name") == "routerd.healthcheck.probes" and any(int(p.get("timeUnixNano", 0)) >= since for p in m.get("sum", {}).get("dataPoints", [])) for m in metrics)
-                    and any(s.get("name") == "healthcheck.probe" and int(s.get("startTimeUnixNano", 0)) >= since for s in spans))
+                    and any(s.get("name") == "healthcheck.probe" and int(s.get("startTimeUnixNano", 0)) >= since for s in spans)
+                    and any(int(r.get("timeUnixNano", 0)) >= since and r.get("body", {}).get("stringValue") == "firewall packet"
+                        and any(a["key"] == "routerd.attributes"
+                            and {"key": "rule", "value": {"stringValue": "forward-deny"}} in a["value"]["kvlistValue"]["values"]
+                            for a in r.get("attributes", [])) for r in logs))
             wait(received_otlp)
             print("PASS HA fresh native nDPI counters/TLS SNI, firewall history, syslog and OTLP logs/metrics/traces from", label, flush=True)
         check_operations()

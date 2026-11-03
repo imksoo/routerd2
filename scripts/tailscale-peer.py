@@ -98,7 +98,7 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
  try:
   s.connect((host,port));s.sendall(b'blocked-connection\n' if kind==socket.SOCK_STREAM else b'blocked-connection');s.recv(4096)
  except socket.timeout:pass
- else:raise AssertionError('shields-up accepted a new inbound connection')
+ else:raise AssertionError('firewall accepted a new inbound connection')
  finally:s.close()
 """
 

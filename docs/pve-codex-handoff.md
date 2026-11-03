@@ -26,6 +26,20 @@ main `3f5c5ac`・通常build `3f5c5aced7be`、各54-resource二台例で`make ch
 
 `make check`（Race Detector・vet/Python）、fmt-check、3設定検証、通常3実行物のstatic linkが通過。製品Goの変更は不要だった。再実行は試験計画の通常単体/二台手順。実サイトcontrol/identity、public bootstrap・物理二台・直接ONU/NICは別に受け入れる。owner/namespace/stageと今回のraw資料は結果集約後に撤去する。
 
+## homertの転送拒否を履歴・OTLPへ接続
+
+両保存設定のFirewallPolicy.logDeny=trueとFirewallEventLog（NFLOG group1/dropSampleRate1/copyRange2048）を再読した。旧routerdのnftables rendererは転送chainの終端dropも記録する。native三例には管理拒否の記録だけがあり、転送拒否の記録が欠けていた。既存の`forward_chain.log`を接続し、kernel→NFLOG→既存履歴/OTLPへ渡す。設定変更で既存の処理経路を使用した。
+
+基準main `f5ddd4a` + 設定/runner変更、通常build `f5ddd4a91ace`。独立FRR側からLAN実割当へ未要求のTCP18080/UDP18081を送り、socket timeout、実NFLOGの送信元/宛先/port・入出interface・新しい時刻・dropを照合する。通常LAN/Tailscaleからの通信とestablished/relatedは同じ実機能手順で確認する。独立Collectorの実OTLPにも新しい`firewall packet`・forward-deny属性が届くことを確認する。
+
+二台本体は2026-11-03 23:38:27 UTCに起動し、先行する単体ownerの終了後に受入を実行した。通常`make check-uplink-ha`が終了0。初期a・切替先b・逆方向aで上記の拒否/履歴/OTLPを確認し、設定timeout/confirm、全サービス、新規端末と両方向再加入も通過。全項目再確認61.84/73.70秒。公開TCP358応答/maxgap16.31秒、UDP398応答/16期限超過/maxgap9.51秒。固定WAN TCP394/max13.78秒、UDP404/10期限超過/max9.51秒。TCP各SYN1回、同一socket/NAT tuple。設定timeout復帰31.93/31.73秒、confirm4.00/4.41秒、WAN/VRRP/BGP workerは継続。今回のNTP照会timeoutは0回。
+
+単体もHA終了後に単独で通常`make check-uplink`を実行して終了0。全daemon再起動の前後にWAN→LANのTCP/UDP拒否と同じNFLOG履歴・OTLP到達を確認し、Tailscaleの全広告経路、DHCP各scope、両IP DNS/Internet、4 DS-Lite/BGP/NTP/管理/運用も通過した。PD SIGKILL1.98秒/通常再起動5.24秒、設定timeout30.71秒/control再起動6.42秒、全daemon後の全項目再確認111.54秒、2巡回/自然PD更新0回。`make check`（Race/vet/Python）、fmt-check、3設定検証と通常3実行物のstatic linkが通過。owner/process/namespace/stageは撤去済み。対象ONU/NIC・物理二台・長時間品質と配布受入は継続する。
+
+先行試験で二つの試験側の誤りを修正した。OTLP属性は`routerd.attributes`のkvlistであり、平坦なrule属性を期待した照合を実producer/受信形式へ修正した。設定読取りはcontrolのatomic適用と同じlockを待つため、HA runnerの4秒制限を既存の設定操作と同じ35秒へそろえた。設定の確認期限30秒、元intentと通信への復帰、無関係なworkerの継続を確認する。
+
+単体・二台の並行実行では同じ実WAN L2へ同じ試験BGPアドレスを置いてしまった。単体TailscaleからのSYNは正しいSNATでWANへ出ていたが返信がなく、転送drop履歴にも該当しなかった。試験peerのアドレス重複による干渉を除くため、全fixtureを直列に実行する手順へ修正した。元の受入条件で再確認する。Tailscaleの既存診断を全subnet通信へ共用し、再発時に該当packet/peer/kernel状態を取得できるようにした。
+
 ## 現行単体構成の自然PD更新・再起動
 
 main `f60b3d2`・通常build `f60b3d2789cb`の45-resource単体構成で、実HGWとの自然PD Renew/Reply 1組・期限更新と652巡回の両IP Internet/DNS・Tailscale通信が終了0。109回の周期観測で29 workerの世代は同一、全てReady=trueを維持した。PD SIGKILL3.25秒・通常再起動5.20秒、全daemon後の全項目再確認111.86秒も通過した。 111.86秒には抑制・sampling等を含み、転送断時間を表さない。実行は2026-11-03 19時台〜21:58 UTC。初期の設定rollback後から自然更新後まで同じ世代を保った。実captureのRenew/Replyと再起動時のRebind/Reply、DUID/IAID/prefix保持、正常停止のzero-lifetime RA・kernel撤去・上流Releaseなしをrunnerが照合した。
