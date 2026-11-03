@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 14:56 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 15:18 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 実行原則
 
@@ -199,7 +199,7 @@ DoH確認は固定provider名ではなく、実configに設定されたHTTPS上�
 
 ## LANから管理側・WAN内機器への送信元NAT
 
-単体native例は、保存homertのRFC1918宛先除外とLAN→管理側forward/SNATを設定する。WAN内SNATは単体の現用DHCPアドレスを使うmasqueradeで表し、宛先subnetは接続するHGWのネットワークへ設定する。HAのWAN VIPを使う固定SNATとは範囲を分ける。
+現行の固定WANアドレス/SNATは末尾の「固定共有WAN IPv4とSNAT」を使う。以下は旧39-resourceのDHCP/masqueradeによる受入記録であり、現行の固定SNATの合格へ流用しない。
 前項と同じ`make check-uplink`（`UPLINK_FULL_RESTART=1`）で、既存管理peerと既存WAN gateway namespaceの実DHCPアドレスに汎用TCP/UDP peerを起動する。管理peerのnamespaceとは別の自動LAN clientから通信し、peerがOS socketから得た送信元を、設定した管理アドレス/実WAN leaseと比較する。管理peer自身からの自己宛て通信で合格にしない。
 通常の管理SSH/WebとLANからの管理console拒否、公開Internet/DNS/NTP、設定rollbackを維持し、全daemon再起動後にも両peerのTCP/UDP・観測sourceを再確認する。物理HGWの管理UIやHAのWAN VIP切替を検証したことにはしない。新規WAN/NIC・host routeは追加しない。
 
@@ -243,3 +243,11 @@ blackholeは実clientからTCP/UDPを送り、timeout、kernel blackhole route�
 二台運転中の設定変更は同じHA手順の各引継ぎ前に現用機で行う。実control APIから現行intent/revisionを読み、coreのrouter AとLAN cacheを一つの30秒候補へ変更する。独立LAN端末から両IP UDP/TCPの候補回答と公開HTTPSを確認し、無確認の自然期限切れ、元intent全体と回答への復帰、rolled_back_timeout eventを照合する。再適用した候補を実confirm APIで確定し、通常commitで元のintentへ戻す。両caseで現用機とWAN DHCPv4/RA/PD・VRRP・BGPのPIDを維持する。既存TCP/UDPは設定変更中から両方向のdaemon停止/再加入まで継続させる。これは各nodeへの設定変更であり、node間の設定自動同期や更新中のcontrol交換を合格に含めない。
 
 2026-11-03: 基準main `b9d4d14` + 無変更workerの反映待ち修正、通常build ID `b9d4d14bc85b`の最終手順が終了0。両nodeの設定変更/期限切れ/confirmと、設定変更中からの同一TCP/UDP・両方向の引継ぎを確認した。結果・限界は[引き継ぎ](pve-codex-handoff.md)を参照する。
+
+## 固定共有WAN IPv4とSNAT
+
+単体/二台例の`address/wan-nat`はbenchmark `192.0.2.100/32`、`wan-local-nat`は通常LANから同じWAN subnet `192.0.2.0/24`への固定SNATを設定する。保存homertのWAN固定VIP/宛先subnetをこの隔離subnetへ対応づけ、サイトの稼働IPは使わない。単体はwan0、二台は既存wan-haの共通MACへ固定アドレスを置く。DHCPアドレスを使う旧WAN内masqueradeは削除する。
+上記の単体`make check-uplink ... UPLINK_SECONDS=20 UPLINK_FULL_RESTART=1 UPLINK_TAILNET=1`で、既存WAN上の独立peer `192.0.2.2`へのTCP/UDP、peer観測source、固定/32と再起動後を確認する。HGW subnetの既存peerはNAT選外となるため、peerのnamespace内にだけ対称な戻りhost routeを一時設定して元のLAN sourceを確認し、finallyで撤去する。hostの経路は変更しない。
+同じbuildで`python3 scripts/uplink-ha.py --uplink ens18`を実行し、現用側だけの固定/32、peerが学習した共有MAC、各引継ぎ後のsourceを確認する。公開TCP/UDPに加えて、固定WANへのTCP接続/UDP socketを設定変更前から維持し、両方向の停止/再加入後に同一NAT tupleと通信の再開を照合する。captureはSYNの再送を許容し、各TCP接続の初期sequenceが一つであることを確認する。固定WAN peerはPython標準socketの独立processであり、物理HGWの管理機能や本番回線の既存sessionの資格とは分ける。
+
+2026-11-03: 通常build `d92b0b2a894e`（製品Go不変）、単体45-resourceと二台各54-resourceの上記手順が両方終了0。固定source、所有権と共有MAC、起動/再起動後と両方向切替後の同一TCP/UDP・NAT tupleを確認した。詳細・限界は[引き継ぎ](pve-codex-handoff.md)を参照する。

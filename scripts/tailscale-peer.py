@@ -58,11 +58,12 @@ ECHO_SERVER = r"""import json,socket,sys,threading,time
 host=sys.argv[1];family=socket.AF_INET6 if ':' in host else socket.AF_INET
 t=socket.socket(family,socket.SOCK_STREAM);t.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);t.bind((host,18080));t.listen()
 def reply(c,a):
- with c:
-  body=c.recv(1024)
-  print("TCP received",time.time_ns(),a,len(body),flush=True)
-  c.sendall(json.dumps({'source':a[0],'payload':body.decode()}).encode())
-  print("TCP sent",time.time_ns(),a,flush=True)
+ with c, c.makefile('rb') as stream:
+  for line in stream:
+   body=line.removesuffix(b'\n')
+   print("TCP received",time.time_ns(),a,len(body),flush=True)
+   c.sendall(json.dumps({'source':a[0],'payload':body.decode()}).encode()+b'\n')
+   print("TCP sent",time.time_ns(),a,flush=True)
 def tcp():
  while True:
   c,a=t.accept()
@@ -78,7 +79,10 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
  s=socket.socket(family,kind);s.settimeout(2)
  if bind:s.bind((bind[0],0))
  try:
-  s.connect((host,port));s.sendall(b'actual-network');data=json.loads(s.recv(4096))
+  s.connect((host,port));s.sendall(b'actual-network\n' if kind==socket.SOCK_STREAM else b'actual-network')
+  if kind==socket.SOCK_STREAM:
+   with s.makefile('rb') as stream:data=json.loads(stream.readline())
+  else:data=json.loads(s.recv(4096))
  except OSError as error:
   raise RuntimeError(f'{"TCP" if kind==socket.SOCK_STREAM else "UDP"} {source} -> {host}:{port}: {error}') from error
  assert data['payload']=='actual-network',data
@@ -92,7 +96,7 @@ host=sys.argv[1];family=socket.AF_INET6 if ':' in host else socket.AF_INET
 for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
  s=socket.socket(family,kind);s.settimeout(1)
  try:
-  s.connect((host,port));s.sendall(b'blocked-connection');s.recv(4096)
+  s.connect((host,port));s.sendall(b'blocked-connection\n' if kind==socket.SOCK_STREAM else b'blocked-connection');s.recv(4096)
  except socket.timeout:pass
  else:raise AssertionError('shields-up accepted a new inbound connection')
  finally:s.close()
@@ -666,7 +670,7 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
  with socket.socket(family,kind) as connection:
   connection.settimeout(1)
   try:
-   connection.connect((host,port));connection.sendall(b'withdrawn-exit');reply=connection.recv(4096)
+   connection.connect((host,port));connection.sendall(b'withdrawn-exit\n' if kind==socket.SOCK_STREAM else b'withdrawn-exit');reply=connection.recv(4096)
   except OSError:continue
   assert not reply, 'withdrawn product exit still forwarded application data'
 """

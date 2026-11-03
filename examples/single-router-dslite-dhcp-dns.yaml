@@ -17,6 +17,16 @@ resources:
   - id: address/bgp
     depends_on: [interface/wan0]
     address: {interface: wan0, cidr: 192.0.2.1/24}
+  # Static WAN-local SNAT uses the declared address, independently of DHCP.
+  - id: address/wan-nat
+    depends_on: [interface/wan0]
+    address: {interface: wan0, cidr: 192.0.2.100/32}
+  - id: wan-local-nat
+    depends_on: [address/wan-nat]
+    nat:
+      - type: snat
+        address: 192.0.2.100
+        match: {family: 4, source: 198.18.0.0/16, destination: 192.0.2.0/24, out_interface: wan0}
   - id: interface/peer0
     interface: {name: peer0}
   - id: address/tailnet-underlay
@@ -89,10 +99,6 @@ resources:
       - type: snat
         address: 10.255.255.1
         match: {family: 4, source: 198.18.0.0/16, destination: 10.255.255.0/24, out_interface: mgmt0}
-      # Single-WAN mode uses its current DHCP address. Set the local subnet
-      # to the attached HGW's network before deployment.
-      - type: masquerade
-        match: {family: 4, source: 198.18.0.0/16, destination: 192.168.1.0/24, out_interface: wan0}
       - type: snat
         address: 198.19.0.1
         match: {family: 4, source: 198.18.0.0/16, in_interface: lan0, out_interface: lan0, exclude_destinations: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 198.18.0.0/16, 198.19.0.0/16]}

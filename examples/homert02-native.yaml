@@ -25,6 +25,26 @@ resources:
   address:
     interface: wan0
     cidr: 192.0.2.10/24
+# The existing shared WAN VMAC keeps this static identity across owners.
+- id: address/wan-nat
+  depends_on:
+  - interface/wan-ha
+  when:
+    fact: service.lan-ha.elected
+  address:
+    interface: wan-ha
+    cidr: 192.0.2.100/32
+- id: wan-local-nat
+  depends_on:
+  - address/wan-nat
+  nat:
+  - type: snat
+    address: 192.0.2.100
+    match:
+      family: 4
+      source: 198.18.0.0/16
+      destination: 192.0.2.0/24
+      out_interface: wan0
 - id: interface/peer0
   interface:
     name: peer0
@@ -317,12 +337,6 @@ resources:
       source: 198.18.0.0/16
       destination: 10.255.255.0/24
       out_interface: mgmt0
-  - type: masquerade
-    match:
-      family: 4
-      source: 198.18.0.0/16
-      destination: 192.168.1.0/24
-      out_interface: wan-ha
   - type: snat
     address: 198.19.0.2
     match:

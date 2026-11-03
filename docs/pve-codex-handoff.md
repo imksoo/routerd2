@@ -1,6 +1,16 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03 14:56 UTC。全体ゴールは継続中。
+更新: 2026-11-03 15:18 UTC。全体ゴールは継続中。
+
+## 固定共有WAN IPv4と固定SNAT
+
+保存homertのVirtualAddress/wan-nat-v4とその参照SNATを再読し、native例のDHCPアドレスによるWAN内masqueradeを削除した。既存WANのbenchmark subnetに固定`192.0.2.100/32`と宛先`192.0.2.0/24`へのSNATを設定し、独立peer `192.0.2.2`で確認する。単体はwan0、二台は既存の共有MACを持つwan-haで現用側だけが固定アドレスを所有する。アドレスとSNATは既存Address/NATの依存・条件・単一kernel writerへ接続し、新しいworkerや状態は追加していない。サイトの稼働アドレスは流用していない。
+
+2026-11-03、基準main `d92b0b2` + 設定/fixture変更、通常Makefile build `d92b0b2a894e`（製品Go不変）で、単体45-resourceと各54-resourceの二台手順が両方終了0。単体の起動時・全daemon再起動後に、peer観測の固定sourceとTCP/UDP、管理NAT/私設網の非NAT・通常Internet/DNSを確認。全項目再確認111.76秒は転送断時間ではない。二台では各方向の停止/再加入とDNS編集/rollback/confirm後にも、現用側だけの固定/32、peerが学習した共有MAC、同じ固定sourceが成立した。packetでもLANの元source→wan0の固定source→wan-haへの応答→LANを照合した。
+
+固定WANへの同一TCPは484応答・最大応答間隔13.91秒、同一UDP socketは491応答・11期限超過・最大間隔11.01秒（返信予算1秒）。NAT tupleを両方向で保持し、公開回線への既存TCP/UDP、PD identity、DHCP・管理・運用記録・Tailscaleも通過。両TCPのcaptureはそれぞれSYN1 packet/初期sequence1個だった。確認側はSYN再送を許容してsequenceを照合する。全項目113.76/68.79秒はNTP品質待ちと再取得等を含み、転送断時間ではない。echo TCPの行形式と受信側を統一し、到達可能peerに対して拒否/撤去確認が誤合格しないことも実通信で確認した。make test-tools race vet・fmt-check、通常buildと3実行物static linkが通過。
+
+再実行は[試験計画](test-plan.md)末尾。これは実HGW接続下の隔離Linuxでの固定SNAT/共有アドレス受入であり、物理HGW管理機能、本番回線の既存session、ONU/NIC/性能、全private DNS、HA保持障害、全34 packageの完成は残る。次は保存DNSZoneの逆引き等、残るDNS/保持の実運用差へ進める。
 
 ## 無関係な設定変更でHAの現用権を失わない
 

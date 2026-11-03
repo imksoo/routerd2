@@ -430,7 +430,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                 wait(lambda: (root / "zserv.api").exists())
                 bgp_processes[address] = start_bgp(namespace, address, root)
                 bgp_peers.append((namespace, address, root))
-                for _, host in bgp_networks:
+                for host in (address, *(host for _, host in bgp_networks)):
                     name = "bgp-echo-" + address + "-" + host
                     start(namespace, ["python3", "-u", "-c", echo["ECHO_SERVER"], host], name)
                     wait(lambda name=name: "READY" in (stage / (name + ".log")).read_text())
@@ -924,9 +924,10 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             print("PASS each independent BGP peer stopped and rejoined with routes and client traffic restored", flush=True)
 
         def check_local_devices():
-            wan = query("control.sock", "/v1/services/service.wan4")["snapshot"]
+            addresses = json.loads(run(["ip", "-n", router, "-j", "-4", "address", "show", "dev", "wan0"]))
+            assert any(a["local"] == "192.0.2.100" and a["prefixlen"] == 32 for link in addresses for a in link["addr_info"]), addresses
             source = json.loads(run(["ip", "-n", automatic, "-j", "route", "get", "198.19.0.253"]))[0]["prefsrc"]
-            for destination, translated in (("10.255.255.2", "10.255.255.1"), (wan_local_peer, wan["currentAddress"]), ("198.19.0.253", source)):
+            for destination, translated in (("10.255.255.2", "10.255.255.1"), ("192.0.2.2", "192.0.2.100"), ("198.19.0.253", source)):
                 # The other LAN namespace owns the management peer. Use the
                 # automatic client so packets actually traverse the router.
                 run(inside(automatic, ["python3", "-c", echo["ECHO_CLIENT"], destination, translated]))
@@ -944,7 +945,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             # symmetric return path for this exchange, then restore the LAN path.
             run(["ip", "-n", gateway, "route", "replace", source + "/32", "via", wan, "dev", "gateway-wan"])
             try:
-                run(inside(automatic, ["python3", "-c", echo["ECHO_CLIENT"], "192.168.50.1", source]))
+                for destination in ("192.168.50.1", wan_local_peer):
+                    run(inside(automatic, ["python3", "-c", echo["ECHO_CLIENT"], destination, source]))
             finally:
                 run(["ip", "-n", gateway, "route", "del", source + "/32"])
             blackholes = json.loads(run(["ip", "-n", router, "-j", "route", "show", "type", "blackhole", "10.0.0.0/8"]))

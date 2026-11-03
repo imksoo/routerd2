@@ -15,6 +15,47 @@ import tarfile
 import time
 
 
+
+WAN_FLOW = r"""import json,signal,socket,sys,time
+from pathlib import Path
+mode=sys.argv[1];path=Path(sys.argv[2]);running=True
+def stop(*_):
+ global running
+ running=False
+signal.signal(signal.SIGTERM,stop)
+kind=socket.SOCK_STREAM if mode=='wan-tcp' else socket.SOCK_DGRAM
+with socket.socket(socket.AF_INET,kind) as wire:
+ wire.settimeout(60 if mode=='wan-tcp' else 1)
+ wire.connect(('192.0.2.2',18080 if mode=='wan-tcp' else 18081))
+ endpoint=wire.getsockname();stream=wire.makefile('rb') if mode=='wan-tcp' else None
+ received=missed=sequence=0;maximum_gap=0;last_reply=time.monotonic()
+ while running:
+  sequence+=1;payload=str(sequence);matched=False
+  try:
+   wire.sendall(payload.encode()+(b'\n' if stream else b''))
+   if stream:
+    reply=json.loads(stream.readline());matched=reply['payload']==payload
+   else:
+    deadline=time.monotonic()+1
+    while time.monotonic()<deadline:
+     wire.settimeout(max(.001,deadline-time.monotonic()))
+     reply=json.loads(wire.recv(4096))
+     if reply['payload']==payload:
+      matched=True;break
+  except OSError:
+   if stream:raise
+  if matched:
+   assert reply['source']=='192.0.2.100',reply
+   now=time.monotonic();maximum_gap=max(maximum_gap,now-last_reply);last_reply=now;received+=1
+  else:
+   if stream:raise RuntimeError('persistent WAN TCP reply changed')
+   missed+=1
+  report={'endpoint':endpoint,'received':received,'missed':missed,'maximum_reply_gap_seconds':maximum_gap}
+  temporary=path.with_suffix('.tmp');temporary.write_text(json.dumps(report));temporary.replace(path)
+  time.sleep(.5)
+"""
+
+
 def run(command, timeout=15):
     p = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
     if p.returncode:
@@ -130,7 +171,7 @@ def owner(stage, uplink):
             start(key, ["/usr/lib/frr/zebra", "-u", "frr", "-g", "frr", "-z", str(root / "zserv.api"), "--vty_socket", str(root), "-i", str(root / "zebra.pid"), "-f", str(root / "zebra.conf")], key + "-zebra")
             wait(lambda: (root / "zserv.api").exists())
             start(key, ["/usr/lib/frr/bgpd", "-S", "-z", str(root / "zserv.api"), "--vty_socket", str(root), "-i", str(root / "bgpd.pid"), "-f", str(root / "bgpd.conf")], key + "-bgpd")
-            for _, host in bgp_networks:
+            for host in (address, *(host for _, host in bgp_networks)):
                 name = key + "-echo-" + host
                 start(key, ["python3", "-u", "-c", echo["ECHO_SERVER"], host], name)
                 wait(lambda name=name: "READY" in (stage / (name + ".log")).read_text())
@@ -281,9 +322,21 @@ def owner(stage, uplink):
                 run(inside("client", ["python3", "-c", echo["ECHO_CLIENT"], host, address, address]))
             wan_source = api(node, "control.sock", "/v1/services/service.wan4")["snapshot"]["currentAddress"]
             management = "10.255.255.2" if node == "a" else "10.255.255.3"
-            for destination, expected in (("10.255.255.254", management), (wan_device, wan_source),
+            for destination, expected in (("10.255.255.254", management), ("192.0.2.2", "192.0.2.100"),
                     ("198.19.0.253", address), ("192.168.100.1", address), ("172.20.1.1", address)):
                 run(inside("client", ["python3", "-c", echo["ECHO_CLIENT"], destination, expected, address]))
+            owners = []
+            for candidate in ("a", "b"):
+                addresses = json.loads(run(inside(candidate, ["ip", "-j", "-4", "address", "show"])))
+                owners += [(candidate, link["ifname"]) for link in addresses for a in link["addr_info"] if a["local"] == "192.0.2.100" and a["prefixlen"] == 32]
+            assert owners == [(node, "wan-ha")], ("shared WAN address ownership", owners)
+            neighbor = json.loads(run(inside("bgp0", ["ip", "-j", "neigh", "show", "to", "192.0.2.100"])))
+            assert any(n.get("lladdr") == "02:00:5e:00:01:43" for n in neighbor), neighbor
+            run(inside("gateway", ["ip", "route", "replace", address + "/32", "via", wan_source, "dev", "wan0"]))
+            try:
+                run(inside("client", ["python3", "-c", echo["ECHO_CLIENT"], wan_device, address, address]))
+            finally:
+                run(inside("gateway", ["ip", "route", "del", address + "/32"]))
             membership = {r["name"]: r for r in api(node, "network.sock", "/v1/address-sets")["sets"]}
             dns_members = [ipaddress.ip_address(a) for a in membership["public-dns"]["addresses"]]
             for family in (4, 6):
@@ -500,9 +553,11 @@ def owner(stage, uplink):
         membership = api(elected(), "network.sock", "/v1/address-sets")["sets"]
         assert all("9.9.9.10" not in row.get("addresses", []) for row in membership), "WAN UDP peer is selected for local interception"
         flow_processes = {}
-        capture = start("client", ["tcpdump", "-n", "-Z", "root", "-U", "-i", "client0", "-c", "256", "-w", str(stage / "flow.pcap"), "host 1.1.1.1 and tcp and tcp[tcpflags] & (tcp-syn | tcp-fin | tcp-rst) != 0"], "flow-capture")
+        capture = start("client", ["tcpdump", "-n", "-Z", "root", "-U", "-i", "client0", "-c", "256", "-w", str(stage / "flow.pcap"), "(host 1.1.1.1 or host 192.0.2.2) and tcp and tcp[tcpflags] & (tcp-syn | tcp-fin | tcp-rst) != 0"], "flow-capture")
         for mode in ("tcp", "udp"):
             flow_processes[mode] = start("client", ["python3", "-I", str(stage / "internet-flow.py"), mode, "--progress", str(stage / (mode + ".json"))], mode + "-flow")
+        for mode in ("wan-tcp", "wan-udp"):
+            flow_processes[mode] = start("client", ["python3", "-u", "-c", WAN_FLOW, mode, str(stage / (mode + ".json"))], mode + "-flow")
         def progress(mode):
             if flow_processes[mode].poll() is not None:
                 raise RuntimeError((stage / (mode + "-flow.log")).read_text())
@@ -512,17 +567,21 @@ def owner(stage, uplink):
         initial_flows = {mode: progress(mode) for mode in flow_processes}
         def nat_mapping(node, mode):
             address, port = initial_flows[mode]["endpoint"]
-            output = run(inside(node, ["conntrack", "-L", "-p", mode, "--orig-src", address, "--orig-dst", "1.1.1.1" if mode == "tcp" else "9.9.9.10", "--sport", str(port), "--dport", "443" if mode == "tcp" else "53"]))
+            protocol = mode.removeprefix("wan-")
+            destination, peer_port = {"tcp": ("1.1.1.1", 443), "udp": ("9.9.9.10", 53),
+                "wan-tcp": ("192.0.2.2", 18080), "wan-udp": ("192.0.2.2", 18081)}[mode]
+            output = run(inside(node, ["conntrack", "-L", "-p", protocol, "--orig-src", address, "--orig-dst", destination, "--sport", str(port), "--dport", str(peer_port)]))
             tuples = re.findall(r"src=(\S+) dst=(\S+) sport=(\d+) dport=(\d+)", output)
             mark = re.search(r"\bmark=(\d+)", output)
-            assert len(tuples) == 2 and mark, output
-            return {"reply": tuples[1], "mark": int(mark[1])}
+            assert len(tuples) == 2, output
+            return {"reply": tuples[1], "mark": int(mark[1]) if mark else 0}
         mappings = {mode: nat_mapping(elected(), mode) for mode in flow_processes}
-        assert all(mapping["mark"] in {272, 273, 274} for mapping in mappings.values()), mappings
+        assert all(mappings[mode]["mark"] in {272, 273, 274} for mode in ("tcp", "udp")), mappings
+        assert all(mappings[mode]["reply"][1] == "192.0.2.100" for mode in ("wan-tcp", "wan-udp")), mappings
         def pd_identity(node):
             s = api(node, "control.sock", "/v1/services/service.wan-pd")["snapshot"]
             return s["client_duid"], s["iaid"], {ipaddress.ip_network(p["prefix"]) for p in s.get("prefixes", [])}
-        print("Initial public NAT tuples", mappings, flush=True)
+        print("Initial public and fixed-WAN NAT tuples", mappings, flush=True)
         original_pd = pd_identity(elected())
         original_address = lease.read_text().split()[0]
         def standby_synced(node):
@@ -598,10 +657,14 @@ def owner(stage, uplink):
             print("PASS rejoined member synchronized without preemption", previous, flush=True)
         capture.send_signal(signal.SIGINT)
         capture.wait(timeout=5)
-        tcp_port = initial_flows["tcp"]["endpoint"][1]
-        packets = run(["tcpdump", "-nn", "-r", str(stage / "flow.pcap"), f"src port {tcp_port} and dst port 443 and tcp[tcpflags] & tcp-syn != 0"])
-        assert len(packets.splitlines()) == 1, packets
-        print("PASS one TCP SYN through both handoffs", {mode: progress(mode) for mode in flow_processes}, flush=True)
+        for mode, peer_port in (("tcp", 443), ("wan-tcp", 18080)):
+            tcp_port = initial_flows[mode]["endpoint"][1]
+            destination = "1.1.1.1" if mode == "tcp" else "192.0.2.2"
+            packets = run(["tcpdump", "-nn", "-S", "-r", str(stage / "flow.pcap"), f"src port {tcp_port} and dst host {destination} and dst port {peer_port} and tcp[tcpflags] & tcp-syn != 0"])
+            sequences = set(re.findall(r"\bseq (\d+)\b", packets))
+            assert len(sequences) == 1, (mode, packets)
+            print("PASS persistent TCP sequence space", mode, "SYN packets", len(packets.splitlines()), flush=True)
+        print("PASS public and fixed-WAN TCP/UDP through both handoffs", {mode: progress(mode) for mode in flow_processes}, flush=True)
         node = elected()
         address = next(a for a in tailnet_snapshot(node)["addresses"] if ipaddress.ip_address(a).version == 4)
         run(inside("tail", peer_cli + ["set", "--exit-node="+address, "--exit-node-allow-lan-access=true"]))
@@ -618,7 +681,7 @@ def owner(stage, uplink):
         packets = stage / "flow.pcap"
         if packets.exists():
             print("HA flow flags", run(["tcpdump", "-nn", "-tt", "-r", str(packets)]), flush=True)
-        for mode in ("tcp", "udp"):
+        for mode in ("tcp", "udp", "wan-tcp", "wan-udp"):
             flow = stage / (mode + ".json")
             if not flow.exists():
                 continue
@@ -628,7 +691,7 @@ def owner(stage, uplink):
                 if names[node] not in namespaces:
                     continue
                 address, port = details["endpoint"]
-                result = subprocess.run(inside(node, ["conntrack", "-L", "-p", mode, "--orig-src", address, "--sport", str(port)]), capture_output=True, text=True)
+                result = subprocess.run(inside(node, ["conntrack", "-L", "-p", mode.removeprefix("wan-"), "--orig-src", address, "--sport", str(port)]), capture_output=True, text=True)
                 print("HA flow NAT", node, mode, result.stdout, flush=True)
         capture = stage / "client-ra.log"
         if capture.exists():
