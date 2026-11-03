@@ -347,6 +347,9 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 		if err := r.manager.Reconcile(ctx, keep); err != nil {
 			return false, err
 		}
+		// Stopping a link owner invalidates the status used above. Observe
+		// the stopped/stopping identity before projecting its kernel effects.
+		return false, nil
 	}
 	r.mu.Lock()
 	if !r.configured {
@@ -365,7 +368,7 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 	}
 	// Stopping consumers still protect resource removal. Existing owners can
 	// renew the same resources using their original protocol deadlines.
-	if (retire || blocked) && (r.applied.network == nil || !networkCovered(*r.applied.network, latest.network)) {
+	if blocked && (r.applied.network == nil || !networkCovered(*r.applied.network, latest.network)) {
 		r.mu.Unlock()
 		return false, nil
 	}
@@ -426,7 +429,7 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 			return false, err
 		}
 	}
-	if retire || blocked {
+	if blocked {
 		r.mu.Unlock()
 		return false, nil
 	}

@@ -747,6 +747,7 @@
     },
     {
       "id": "NET-04",
+      "factory_runtime_acceptance": "2026-11-03 b3a0053 + current fixes, normal build b3a0053f24c6: complete factory catalog (25 roles/5 engines) signed, staged/initialized and booted as actual Linux namespace PID1. Independent RP-PPPoE/ISC/Linux LAN PAP and CHAP both exit0: DNS and both-family TCP/UDP, natural Renew, expiry/reacquisition, DUID retention, stale rejection, confirmed rollback, MTU reconfiguration, operator/control restart and poweroff. Capture confirms local zero-lifetime RA before PADT for MTU/operator/control restarts, without PD Release. Fixed pre-retirement status reused after stopping a link owner; operator restart now uses the existing configuration dependency drain. Removed custom fixture catalog/signing and obsolete PPP reporting-deadline route-expiry assertion. Actual ISP, physical NIC, full homert signed update/fallback and complete package qualification remain open.",
       "title": "PPPoE の engine 選定と session 運用",
       "milestone": "M2",
       "track": "network",
@@ -1624,6 +1625,7 @@
     },
     {
       "id": "DIST-01",
+      "factory_runtime_acceptance": "2026-11-03 b3a0053 + current fixes, normal build b3a0053f24c6: complete factory catalog (25 roles/5 engines) signed, staged/initialized and booted as actual Linux namespace PID1. Independent RP-PPPoE/ISC/Linux LAN PAP and CHAP both exit0: DNS and both-family TCP/UDP, natural Renew, expiry/reacquisition, DUID retention, stale rejection, confirmed rollback, MTU reconfiguration, operator/control restart and poweroff. Capture confirms local zero-lifetime RA before PADT for MTU/operator/control restarts, without PD Release. Fixed pre-retirement status reused after stopping a link owner; operator restart now uses the existing configuration dependency drain. Removed custom fixture catalog/signing and obsolete PPP reporting-deadline route-expiry assertion. Actual ISP, physical NIC, full homert signed update/fallback and complete package qualification remain open.",
       "title": "イメージ展開・boot 選択・SSH 更新・state 移行",
       "milestone": "M6",
       "track": "platform",

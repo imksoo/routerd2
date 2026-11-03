@@ -1,6 +1,16 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03 09:54 UTC。全体ゴールは継続中。
+更新: 2026-11-03 10:37 UTC。全体ゴールは継続中。
+
+## 通常署名bundleの実PID 1・PPP/PD受入
+
+2026-11-03、基準main `b3a0053` + 本変更の通常build `b3a0053f24c6`で、全25役割・5 engineの署名bundleを実receiverでstage/initializeし、Linux namespaceの実PID 1から起動した。独立RP-PPPoE/ISC DHCPv6/Linux LAN端末とのPAP・CHAPが両方終了0。DNS UDP/TCP、両IP TCP/UDP、自然Renew、server停止によるPD期限切れ/再取得、worker交換/DUID保持/古い通知拒否、confirmed rollback、PD/RA削除復元、PPP MTU変更、手動/control再起動、正常poweroffが通過。captureでMTU変更・手動/control再起動のRA zero-lifetime通知がPADTより前であり、上流Releaseなしと確認した。
+
+実通信で検出した2件を修正した。停止指示前のReady状態で消滅したPPP linkへ経路を追加する競合は、停止指示後に次のowner巡回で現在状態を取得してから適用する。手動再起動の一斉停止は既存の設定変更用dependency drainへ統一し、PD/RAをPPPより先に撤去する。待ち時間延長・追加retry・新しい状態は入れていない。試験専用catalog/不正bundle生成を削除し、通常配布入口を使用する。旧「通知期限で生きたPPP routeを消す」要求と、PD削除時に参照RAを残す試験設定も修正した。
+
+最終`make check`（Go/Race Detector/vet/Python36件）、変更後のruntimeplan Race、通常Makefile buildと3実行物のstatic linkが通過。試験用process/namespace/key/展開storeは終了済み。次は同じ通常配布経路で全homert profileの更新・復旧を確認する。
+
+実行物SHA256: `routerd`=`01b1ec3c511766b0ead2a363856901a17f8ad775364bfe3ea79e1f4c244f7271`、`routerd-modules`=`0fd2f8e8cf0c71825179bd79f48de37f861dfa9cef2807de1a8b64f279b6fb93`。再実行は試験計画の「通常署名bundleのPID 1起動とPPPoE/PD」。これは実kernel/PID 1と独立peerでの配布boot・PPP/PD復旧の受入。ISPのPPPoE、ONU/NIC実機、全homert profileの署名更新/rollback、全34 packageの完成は残る。homert上流候補へPPPoEや追加NICは導入していない。
 
 終了0（2026-11-03 07:42〜09:46 UTC）: source/build `df49035`/`df490351c3ff`、単体38-resource profileで実HGWとの自然Renew/Reply1組と期限更新、623巡回の両IP HTTPS・UDP/TCP DNSを確認した。自然更新後の619巡回時点まで全28 worker generation1/Ready=trueを観測。PD SIGKILL2.90秒/通常再起動5.92秒、全daemon後の全項目再確認105.73秒も通過し、identityと両端末/Tailscale通信、停止時のRA撤去を確認した。105.73秒は抑制/samplingを含む全項目時間で、転送断時間ではない。owner/process/namespace/stageは撤去済み。二段DNS・候補設定修正の別受入、既存socket継続、全homert/実機資格とは範囲を区別する。
 

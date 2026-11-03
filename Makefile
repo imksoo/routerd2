@@ -207,11 +207,11 @@ check-dslite-pmtu: build pppoe-engine
 check-dual-wan-bridge: build pppoe-engine
 	$(PYTHON) scripts/dual-wan-peer.py --bridge-wan --output dist/dual-wan-bridge
 
-check-pppoe: build build-publisher pppoe-engine
+check-pppoe: build build-publisher pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine chrony-engine
 	$(PYTHON) scripts/pppoe-peer.py
 
 .PHONY: check-pppoe-pd
-check-pppoe-pd: build build-publisher pppoe-engine
+check-pppoe-pd: build build-publisher pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine chrony-engine
 	$(PYTHON) scripts/pppoe-peer.py --dhcp6-server '$(DHCP6_SERVER)' --output dist/pppoe-pd
 
 .PHONY: pppoe-engine

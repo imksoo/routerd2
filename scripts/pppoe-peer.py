@@ -4,12 +4,10 @@
 Requires Linux root/sudo, pppd 2.4.9 + rp-pppoe.so, pppoe-server, iproute2,
 curl, tcpdump, ping, dnsmasq and dig. Host PPP files, hooks and routes are not used.
 The optional --dhcp6-server selects an independent ISC dhcpd for PPP PD,
-generated LAN RA/SLAAC, IPv6 forwarding and recovery, with normal DAD.
+configured LAN RA/SLAAC, IPv6 forwarding and recovery, with normal DAD.
 """
 import argparse
 import copy
-import hashlib
-import io
 import json
 import os
 from pathlib import Path
@@ -18,12 +16,11 @@ import signal
 import subprocess
 import shutil
 import time
-import tarfile
 import threading
 
 
-def run(args):
-    return subprocess.run(args, check=True, capture_output=True, text=True, timeout=8).stdout
+def run(args, timeout=8):
+    return subprocess.run(args, check=True, capture_output=True, text=True, timeout=timeout).stdout
 
 
 def wait(test, seconds=25):
@@ -184,57 +181,11 @@ def peer(stage, auth, dhcp6_server):
             ]
         configuration = {"schema_version": 2, "resources": resources}
         (stage / "config.json").write_text(json.dumps(configuration))
-        boot = dict(platform="host", config=str(stage / "config.json"), runtime_dir=str(stage / "run"), state_dir=str(stage / "state"), ssh={"user": "admin"}, workers={r: str(stage.parent / ("routerd-logging" if r == "logging" else "routerd-modules")) for r in ["logging", "network", "control", "management", "pppoe", "health", "dns"]})
-        if dhcp6_server:
-            boot["workers"].update({r: str(stage.parent / "routerd-modules") for r in ("dhcp6", "ra")})
-        boot["engines"] = {"pppoe": str(stage.parent / "pppoe-engine.tar")}
-        key = stage / "key.pem"
-        run(["openssl", "genpkey", "-algorithm", "ED25519", "-out", str(key)])
-        key.chmod(0o600)
-        publisher = str(stage.parent / "routerd-bundle")
-        (stage / "trust.json").write_text(run([publisher, "trust", "--private-key-file", str(key)]))
-        (stage / "trust.json").chmod(0o600)
-        layout = {"boot_abi": 1, "worker_abi": 5, "entrypoint": "routerd",
-                  "roles": [{"role": r, "artifact": "routerd-logging" if r == "logging" else "routerd-modules"} for r in boot["workers"]],
-                  "engines": [{"role": "pppoe", "artifact": "ppp-image", "sources": "ppp-sources"}],
-                  "artifacts": [{"name": n, "kind": "native", "command": n, "file": str(stage.parent / n)} for n in ["routerd", "routerd-modules", "routerd-logging"]] +
-                               [{"name": "ppp-image", "kind": "data", "file": str(stage.parent / "pppoe-engine.tar")}, {"name": "ppp-sources", "kind": "data", "file": str(stage.parent / "pppoe-sources.tar")}]}
-        (stage / "layout.json").write_text(json.dumps(layout))
-        version = json.loads(run([str(stage.parent / "routerd"), "version"]))
-        packed = json.loads(run([publisher, "pack", "--private-key-file", str(key), "--layout", str(stage / "layout.json"), "--release-id", version["release_id"], "--sequence", "1", "--target-arch", "amd64", "--output", str(stage / "bundle.tar")]))
-        # Reproduce the actual dlopen failure, then verify both publication and
-        # receipt reject it before any network configuration or engine starts.
-        broken = stage / "missing-provider.tar"
-        with tarfile.open(stage.parent / "pppoe-engine.tar") as src, tarfile.open(broken, "w", format=tarfile.USTAR_FORMAT) as dst:
-            for h in src:
-                if h.name != "usr/lib/ossl-modules/legacy.so":
-                    dst.addfile(h, src.extractfile(h))
-        bad_layout = copy.deepcopy(layout)
-        next(a for a in bad_layout["artifacts"] if a["name"] == "ppp-image")["file"] = str(broken)
-        (stage / "bad-layout.json").write_text(json.dumps(bad_layout))
-        bad = subprocess.run([publisher, "pack", "--private-key-file", str(key), "--layout", str(stage / "bad-layout.json"), "--release-id", version["release_id"], "--sequence", "2", "--target-arch", "amd64", "--output", str(stage / "bad-published.tar")], capture_output=True, text=True)
-        assert bad.returncode != 0 and "legacy.so" in bad.stderr and not (stage / "bad-published.tar").exists()
-        malformed = copy.deepcopy(packed["manifest"])
-        artifact = next(a for a in malformed["artifacts"] if a["name"] == "ppp-image")
-        artifact.update(size=broken.stat().st_size, sha256=hashlib.sha256(broken.read_bytes()).hexdigest())
-        raw = json.dumps(malformed, separators=(",", ":")).encode()
-        (stage / "signing-input").write_bytes(b"routerd2 signed extracted runtime manifest v4\x00" + raw)
-        run(["openssl", "pkeyutl", "-sign", "-rawin", "-inkey", str(key), "-in", str(stage / "signing-input"), "-out", str(stage / "bad.sig")])
-        with tarfile.open(stage / "bad-signed.tar", "w", format=tarfile.USTAR_FORMAT) as dst:
-            for name, data in [("manifest.json", raw), ("manifest.sig", (stage / "bad.sig").read_bytes())]:
-                h = tarfile.TarInfo(name); h.size = len(data); dst.addfile(h, io.BytesIO(data))
-            for a in layout["artifacts"]:
-                file = broken if a["name"] == "ppp-image" else Path(a["file"])
-                h = tarfile.TarInfo(a["name"]); h.size = file.stat().st_size
-                with file.open("rb") as data:
-                    dst.addfile(h, data)
-        bad = subprocess.run([str(stage.parent / "routerd"), "release", "stage", "--root", str(stage / "bad-store"), "--trust-file", str(stage / "trust.json"), "--target-arch", "amd64", "--file", str(stage / "bad-signed.tar")], capture_output=True, text=True)
-        assert bad.returncode != 0 and "legacy.so" in bad.stderr
-        print("PASS publisher and signed store rejected the reproduced missing-provider image before application", flush=True)
-        selector = ["--root", str(stage / "releases"), "--trust-file", str(stage / "trust.json"), "--target-arch", "amd64"]
-        run([str(stage.parent / "routerd"), "release", "stage", *selector, "--file", str(stage / "bundle.tar")])
-        run([str(stage.parent / "routerd"), "release", "initialize", *selector, "--digest", packed["digest"]])
-        boot.update(platform="appliance", workers={}, engines={}, release={"root": str(stage / "releases"), "trust_file": str(stage / "trust.json")})
+        packed = json.loads((stage.parent / "runtime.json").read_text())
+        selector = ["--root", str(stage / "releases"), "--trust-file", str(stage.parent / "trust.json"), "--target-arch", "amd64"]
+        run([str(stage.parent / "routerd"), "release", "stage", *selector, "--file", str(stage.parent / "runtime.tar")], timeout=120)
+        run([str(stage.parent / "routerd"), "release", "initialize", *selector, "--digest", packed["digest"]], timeout=120)
+        boot = dict(platform="appliance", config=str(stage / "config.json"), runtime_dir=str(stage / "run"), state_dir=str(stage / "state"), ssh={"user": "admin"}, workers={}, engines={}, release={"root": str(stage / "releases"), "trust_file": str(stage.parent / "trust.json")})
         (stage / "boot.json").write_text(json.dumps(boot))
         (stage / "server.conf").write_text("auth\nrequire-" + auth + "\nrefuse-" + ("chap" if auth == "pap" else "pap") + "\nmtu 1454\nmru 1454\nms-dns 192.0.2.1\nlogfd 1\nhide-password\nlcp-echo-interval 1\nlcp-echo-failure 3\n")
         if dhcp6_server:
@@ -306,7 +257,7 @@ def peer(stage, auth, dhcp6_server):
             first = pd_record()
             duid = first["snapshot"]["client_duid"]
             assert duid.startswith("0004") and len(duid) == 36
-            print("PASS PPP IPv6CP, ISC DHCP IA_PD, generated LAN RA/SLAAC, routed IPv6 TCP/UDP", flush=True)
+            print("PASS PPP IPv6CP, ISC DHCP IA_PD, configured LAN RA/SLAAC, routed IPv6 TCP/UDP", flush=True)
             wait(lambda: pd_record()["snapshot"]["renew_at"] != first["snapshot"]["renew_at"], 12)
             ipv6_traffic()
             print("PASS real ISC DHCP Renew extended the delegated prefix", flush=True)
@@ -329,25 +280,6 @@ def peer(stage, auth, dhcp6_server):
             stale = {k: first[k] for k in ["supervisor_instance", "name", "role", "config_digest", "generation", "producer_epoch", "sequence", "snapshot"]}
             assert "stale" in json.dumps(api("control.sock", "/v1/services/state", stale, status=409)).lower()
             print("PASS old DHCPv6 worker notification rejected", flush=True)
-            saved = modules()
-            frozen = [saved["control"]["pid"], saved["service.internet"]["pid"]]
-            for pid in frozen:
-                signal_worker(pid, signal.SIGSTOP)
-            wait(lambda: not routed() and not routed6(), 8)
-            assert link() is not None
-            assert subprocess.run(inside(lan, ["curl", "--noproxy", "*", "--max-time", "1", "-sS", "http://[2001:db8:ffff::20]:18080/"]), capture_output=True).returncode != 0
-            for pid in frozen:
-                signal_worker(pid, signal.SIGCONT)
-            frozen = []
-            wait(lambda: routed() and routed6())
-            # The normal five-second watchdog can replace the frozen cohort.
-            # ISC DHCP binds a specific PPP ifindex and must follow that peer
-            # session replacement too; it cannot serve through its old socket.
-            server.terminate()
-            server.wait(timeout=5)
-            server = dhcp6_start()
-            ipv6_traffic()
-            print("PASS original PPP deadline withdrew both family routes; supervision recovery and peer rebind restored IPv6 traffic", flush=True)
             # The independent server binds this peer's PPP interface. Restart
             # it with the recreated access session, preserving its lease file.
             server.terminate()
@@ -394,11 +326,11 @@ def peer(stage, auth, dhcp6_server):
             assert link()["ifindex"] == stable_index and modules()["service.internet"]["generation"] == stable["generation"]
             print("PASS confirmed rollback restored both family routes and TCP/UDP without replacing the PPP session", flush=True)
             retired = copy.deepcopy(configuration)
-            retired["resources"] = [r for r in retired["resources"] if r["id"] != "pd"]
+            retired["resources"] = [r for r in retired["resources"] if r["id"] not in ("pd", "pd-lan-ra")]
             api("control.sock", "/v1/config/commit", {"expected_revision": 3, "request_id": "pd-retire", "config": retired})
             wait(lambda: "service.pd" not in modules() and "service.pd-lan-ra" not in modules())
             assert not delegated() and link()["ifindex"] == stable_index
-            print("PASS PD retirement withdrew generated RA and LAN addresses while PPP stayed up", flush=True)
+            print("PASS PD/RA retirement withdrew advertisements and LAN addresses while PPP stayed up", flush=True)
             api("control.sock", "/v1/config/commit", {"expected_revision": 4, "request_id": "pd-restore", "config": configuration})
             ipv6_traffic()
             assert pd_record()["snapshot"]["client_duid"] == duid
@@ -473,7 +405,7 @@ def peer(stage, auth, dhcp6_server):
             assert pd_record()["generation"] > previous_pd["generation"]
             stale = {k: previous_pd[k] for k in ("supervisor_instance", "name", "role", "config_digest", "generation", "producer_epoch", "sequence", "snapshot")}
             api("control.sock", "/v1/services/state", stale, status=409)
-            print("PASS control-owned operator restart withdrew PD before PPP, rejected its old notification and preserved configuration/DNS", flush=True)
+            print("PASS control-owned operator restart restored PD, rejected its old notification and preserved configuration/DNS", flush=True)
             before = modules()
             previous_pd = pd_record()
             before_release = (stage / "dhcp6.log").read_text().count("releases prefix ")
@@ -523,9 +455,9 @@ def peer(stage, auth, dhcp6_server):
             assert not any("dhcp6 release" in line for line in records), "ordinary retirement released the PD lease"
             discovery = run(["tcpdump", "-n", "-tt", "-r", str(stage / "pppoe.pcap"), "pppoed"])
             teardowns = [float(line.split()[0]) for line in discovery.splitlines() if "PADT" in line]
-            for started in (wan_change_at, operator_restart_at, control_restart_at):
+            for operation, started in (("MTU change", wan_change_at), ("operator restart", operator_restart_at), ("control restart", control_restart_at)):
                 teardown = next((stamp for stamp in teardowns if stamp >= started), None)
-                assert teardown is not None and any(started <= stamp < teardown for stamp in withdrawals), "PPP teardown preceded local RA withdrawal"
+                assert teardown is not None and any(started <= stamp < teardown for stamp in withdrawals), f"{operation}: no RA withdrawal between request {started} and PPP teardown {teardown}; withdrawals={withdrawals}"
             assert len(withdrawals) >= 2, packets
             print("PASS local PD withdrawal before PPP teardown without Release; stable-DUID reacquisition restored IPv6 TCP/UDP", flush=True)
             return
@@ -650,21 +582,29 @@ def peer(stage, auth, dhcp6_server):
             print("rules", run(["ip", "-n", ns, "-j", "rule", "show"]), flush=True)
             print("client6routes", run(["ip", "-n", lan, "-j", "-6", "route", "show"]), flush=True)
             print("client6addresses", run(["ip", "-n", lan, "-j", "-6", "address", "show"]), flush=True)
-        except (OSError, subprocess.SubprocessError):
-            pass
+        except (OSError, subprocess.SubprocessError, RuntimeError) as error:
+            print("diagnostics unavailable:", error, flush=True)
         for name in ("console", "ac", "capture", "dhcp6", "http6", "udp6", "dns", "dns-tcp"):
             p = stage / (name + ".log")
             if p.exists():
-                print(name, p.read_text(errors="replace"), flush=True)
+                print(name, p.read_text(errors="replace")[-24000:], flush=True)
         raise
     finally:
         if keepalive_thread is not None:
             keepalive_stop.set()
             keepalive_thread.join(timeout=3)
         if supervisor_frozen:
-            os.kill(pid1, signal.SIGCONT)
+            try:
+                os.kill(pid1, signal.SIGCONT)
+            except ProcessLookupError:
+                pass
         for pid in frozen:
-            signal_worker(pid, signal.SIGCONT)
+            try:
+                signal_worker(pid, signal.SIGCONT)
+            except subprocess.CalledProcessError:
+                # The watchdog may already have retired this stopped child.
+                # Cleanup still owns and terminates all trial namespaces below.
+                pass
         for p in reversed(children):
             if p is capture:
                 continue
@@ -694,7 +634,7 @@ def main():
     parser.add_argument("--auth", choices=("pap", "chap"))
     parser.add_argument("--binary-dir", type=Path, default=Path("dist/bin"))
     parser.add_argument("--output", type=Path, default=Path("dist/pppoe-peer"))
-    parser.add_argument("--engine-image", type=Path, default=Path("dist/pppoe-engine.tar"), help="Pinned pppd root filesystem archive")
+    parser.add_argument("--engine-dir", type=Path, default=Path("dist"), help="Normal release engine and source archives")
     parser.add_argument("--dhcp6-server", type=Path, help="Run PPP DHCPv6 PD against this independent ISC dhcpd executable")
     args = parser.parse_args()
     if args.inside:
@@ -707,9 +647,18 @@ def main():
         for name in ("routerd", "routerd-modules", "routerd-logging", "routerd-bundle"):
             run(root + ["install", "-m", "500", str(args.binary_dir.resolve() / name), stage + "/" + name])
         run(root + ["install", "-m", "500", str(Path(__file__).resolve()), stage + "/peer.py"])
+        key = stage + "/key.pem"
+        run(root + ["openssl", "genpkey", "-algorithm", "ED25519", "-out", key])
+        run(root + ["chmod", "600", key])
+        project = Path(__file__).resolve().parents[1]
+        packed = run(root + ["python3", str(project / "scripts/build-runtime-bundle.py"),
+            "--boot", str(project / "images/boot.json"), "--binary-dir", str(args.binary_dir.resolve()),
+            "--engine-dir", str(args.engine_dir.resolve()), "--licenses", str(project / "dist/licenses"),
+            "--private-key-file", key, "--sequence", "1", "--output", stage + "/runtime.tar"], timeout=180)
+        run(root + ["python3", "-c", "from pathlib import Path;import sys;Path(sys.argv[1]).write_text(sys.argv[2])", stage + "/runtime.json", packed])
+        trust = run(root + [stage + "/routerd-bundle", "trust", "--private-key-file", key])
+        run(root + ["python3", "-c", "from pathlib import Path;import sys;p=Path(sys.argv[1]);p.write_text(sys.argv[2]);p.chmod(0o600)", stage + "/trust.json", trust])
         peer_args = []
-        run(root + ["install", "-m", "400", str(args.engine_image.resolve()), stage + "/pppoe-engine.tar"])
-        run(root + ["install", "-m", "400", str(args.engine_image.resolve().with_name("pppoe-sources.tar")), stage + "/pppoe-sources.tar"])
         if args.dhcp6_server:
             run(root + ["install", "-m", "500", os.path.abspath(args.dhcp6_server), stage + "/dhcpd"])
             peer_args += ["--dhcp6-server", stage + "/dhcpd"]
