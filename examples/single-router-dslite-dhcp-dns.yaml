@@ -131,10 +131,14 @@ resources:
         managed: false
         other_config: true
         router_lifetime_seconds: 1800
+        router_preference: high
+        mtu: 1500
         from:
           service: wan-pd
           delegation: lan
           rdnss_router: true
+          valid_lifetime_seconds: 7200
+          preferred_lifetime_seconds: 3600
         dnssl: [home.arpa]
   - id: service/lan-info
     depends_on: [service/wan-pd]
@@ -159,19 +163,26 @@ resources:
           lease_seconds: 43200
           router: 198.18.0.1
           dns_servers: [198.18.0.1]
+          ntp_servers: [198.18.0.1, 198.18.0.254]
           domain: home.arpa
+          options: [{name: domain-search, value: home.arpa}]
+        sticky_hold_days: 3
+        fingerprint_retention: {max_age_seconds: 604800, interval_seconds: 86400, vacuum: true}
+        log_dhcp: true
         authoritative: true
         max_leases: 200
         scopes:
           - name: special-devices
-            match: {ouiPrefixes: ["02:00:00"]}
+            # The saved three selectors share one profile; keep one pool owner.
+            match:
+              ouiPrefixes: ["02:77:00"]
+              macAddresses: ["02:77:01:00:00:05", "02:77:01:00:00:06", "02:77:01:00:00:07", "02:77:01:00:00:08", "02:77:01:00:00:09", "02:77:01:00:00:0a"]
             prefix: 198.18.0.0/24
             start: 198.18.0.32
             end: 198.18.0.63
             lease_seconds: 43200
-            router: 198.18.0.1
-            dns_servers: [198.18.0.1]
-            domain: home.arpa
+            router: 198.18.0.253
+            dns_servers: [198.18.0.253]
         reservations:
           - {mac_address: "02:00:00:00:00:01", hostname: printer, ip_address: 198.18.0.10}
           - {mac_address: "02:00:00:00:00:02", hostname: storage, ip_address: 198.18.0.11}

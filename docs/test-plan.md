@@ -1,27 +1,24 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 03:02 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 03:22 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
-## 判定と実行原則
+## 実行原則
 
-- 着手する機能の旧routerd実装・caller・運用修正とhomert02/03の実設定を読む。設定値・秘密は公開しない。
-- 毎回の実通信直前にこの計画全体を読み直し、対象・既知の問題・peer・実行版・観測点・隔離と復旧手順を確認する。現状とのずれを先に直す。
-- 実product processとkernel、独立したpeer/clientを使う。DHCP/PD/RA、DNS、NATを個別に動かしただけで受入にせず、設定から端末のInternetまで通す。
-- 動的address/prefix/DNS/identityは実応答から取得する。固定値と比較するのは明示した予約・管理addressなどに限る。同じIPv6はparseして比較する。
-- packet、端末結果、kernel FIB/firewall、worker状態を必要な範囲で照合する。異常時は原因を決める観測を行い、原因不明の同じ再試行や試験機構の増築を続けない。
-- 試験側の失敗と製品の失敗を区別する。未実行・未確認を合格にせず、短時間の通信を自然更新・既存TCP継続・実機資格へ読み替えない。
-- 自然更新待ちの間は独立する実装を進める。関連チェックが通った単位でcommit/pushし、CIの完了を待たない。
-- 試験後は再実行手順と簡潔な結果・限界だけを残し、不要なraw log/pcap/key/state/namespace/build outputを削除する。現在はPVE/QEMUと追加のPBR調査を実行しない。
+- 毎回の実通信直前にこの計画全体を読み、対象・peer・実行版・観測点・隔離・復旧を確認する。変更対象の旧routerd実装、caller、運用修正と保存中homert02/03の実設定を参照する。秘密は公開しない。
+- 実product processとkernel、独立したpeer/clientを使う。DHCP/PD/RA、DNS、NATを個別に動かしただけで受入にせず、設定から端末のInternetまで通す。補助テスト数やcoverageを完成の代わりにしない。
+- 動的address/prefix/DNS/identityは実応答から読み、IPv6はparseして比較する。固定値比較は明示した予約・管理addressなどに限る。packet、端末、kernel、workerを必要な範囲で照合し、製品・設定・peer・runnerの失敗を分けて原因を直す。
+- 一つの待機で独立作業を止めない。関連チェックが通った単位でcommit/pushし、CIの完了を待たない。現在はPVE/QEMUと追加PBR調査を行わない。
+- 残すのは再実行手順と簡潔な結果・限界。終了後にraw log/pcap/key/state/namespace/重複build outputを撤去する。長時間試験のlive ownerと最小の未解決資料は終了まで保護する。
 
-## 現在の実通信と限界
+## 現在の結果と限界
 
-38-resource native profile、基準main `b1a3e48` + 運用設定、build ID `b1a3e489ca77`で実HGW統合gateが終了0。独立LAN端末の公開HTTPS/DNSについて双方向計数・native nDPI由来・TLS SNIをtraffic-history API、管理WebへのLAN接続拒否をfirewall-history APIから確認した。独立syslog receiverと公式OTLP Collectorへ製品ログ/metrics/tracesが届き、全daemon restart後の新しいHealth syslog/log/metric/spanも実時刻で照合した。通常の上流選択120→80→60→120、4 DS-Lite、DNS/両DoH、管理、BGP 2 peersの各停止/再加入、NTP stratum3、Tailscale subnet/exitも通過。PD worker SIGKILL/通常再起動後のLAN復旧2.02/5.84秒、全daemon restartから全確認73.22秒、2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。7日保持は設定済みで期限削除の今回実証ではなく、自然T1・既存socket無損失継続・全homert/HA/実機資格も別に残る。
+38-resource native profile、基準main `b03debf` + LAN配布設定、build ID `b03debf15982`で実HGW統合gateが終了0。通常・予約・OUI・特定MACの独立端末5台で、通常gateway/DNS .1と特別gateway/DNS .253を実ACKから設定し、公開HTTPS/UDP DNSが往復した。通常/予約端末はNTP2アドレスとdomain-searchも取得。実Releaseで3日分の保持期限が保存され、端末IP撤去後も別MACの同アドレス要求には別leaseを配り、元MACには保持アドレスを再配布した。全daemon restart後も特別端末3台のRenew/ACK・通信とfingerprint APIが復旧した。LAN RAのhigh優先度/MTU1500/valid最大7200秒/preferred最大3600秒を実packetで確認。上流選択、4 DS-Lite、DNS/DoH、nDPI/計数/SNI、fresh syslog/OTLP、BGP/NTP/Tailscaleも通過。PD worker SIGKILL/通常再起動後の復旧2.96/5.85秒、全daemon restartから全確認102.76秒（60秒抑制と30秒sampling等を含む）。2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。自然T1・既存socket継続・3日/7日経過削除・全homert/HA/実機資格は今回の範囲外。
 
-製品Goは`b1a3e48`から不変。前checkpointの`make check`に加え、今回の`make race vet`、`make test-tools`（36件）、通常Makefile build、設定検証が終了0。3実行物は`readelf`でdynamic dependencyなし、nDPI source/license noticesを確認した。補助検査は実通信の代替ではない。
+製品Goは`b1a3e48`から不変。今回の`make race vet test-tools`（Python36件）、通常Makefile build、設定検証が終了0。3実行物は`readelf`でdynamic dependencyなし。nDPI source/license noticesも確認した。前checkpointの`make check`は補助根拠であり実通信の代替ではない。
 
-homert02/03の保存中の実設定は各110 resources。native単体例は38 resourcesであり、resource数の一致を移植目標にはしないが、全意図の受入は未完了。34 work packageもin_progress22/planned12のまま。ens18/ens20はvirtio NICで、NTT ONU直結、対象NIC/実機、arm64、HA、cloud/Kubernetes全体を資格済みとは扱わない。
+保存中homert02/03は各110 resources。native単体例は38 resourcesで、件数一致を目標にせず実際の意図を照合する。全意図の受入と34 work package（in_progress22/planned12）は未完了。ens18/ens20はvirtioであり、NTT ONU直結・対象NIC・実機性能・arm64・HA・cloud/Kubernetesの資格へ読み替えない。
 
-## 現行単体gateの再実行
+## 再実行と隔離
 
 ```sh
 make check-uplink DOCKER='sudo -n docker' \
@@ -30,81 +27,30 @@ make check-uplink DOCKER='sudo -n docker' \
   UPLINK_SECONDS=20 UPLINK_FULL_RESTART=1 UPLINK_TAILNET=1
 ```
 
-必要setup: 許可された実HGW uplink、sudo/root、iproute2、BusyBox、dhcpcd、dnsmasq、curl/dig/tcpdump、OpenSSL/SSH、FRR/Zebra/vtysh、公式otelcol-contrib。Makefileが製品とengineを通常buildし、checksum-pinnedのHeadscale/Tailscale peerを準備する。host管理address/route/clockを変更せず、専用macvlan MACとnamespaceを使う。LANはbenchmark prefix198.18.0.0/24、管理は198.19.0.0/24、BGP peerは192.0.2.0/24、tailnet control/peerは198.51.100.0/24へ隔離する。router側のlink/address/forward/NAT/serviceはnative profileが所有し、runnerで追加変換しない。
+必要setup: 許可済み実HGW uplink、sudo/root、iproute2、BusyBox、dhcpcd、dnsmasq、curl/dig/tcpdump、OpenSSL/SSH、FRR8.4.4/Zebra/vtysh、公式otelcol-contrib0.151.0（`/usr/local/bin/otelcol-contrib`）。Makefileが通常buildとchecksum-pinned Headscale/Tailscale1.104.2 peerを準備する。Makefile build済み実行物でrunnerだけを再実行する場合は同じ引数を`python3 scripts/uplink-smoke.py`へ渡し、実行build IDを記録する。
 
-独立peer setupは次のとおり。
+専用macvlan MACとnamespaceを使い、hostの管理address/default route/時計/trust storeを変更しない。LAN198.18.0.0/24、管理198.19.0.0/24、BGP192.0.2.0/24、tailnet underlay198.51.100.0/24へ隔離する。router側のlink/address/forward/NAT/serviceはnative設定が所有する。ens20や新規site IPは前提にしない。低優先候補は既存LAN上のgatewayであり、別WANのDHCPではない。
 
-- LAN: BusyBox予約clientとdhcpcdのOUI scope client。取得値をACK/実addressから読む。通常のDADを有効にし、DHCPv6 Information/SLAAC/RDNSS/DNSSLを確認する。
-- DNS: dnsmasqの独立上流を停止・復旧し、両IPのcacheと未取得名のSERVFAIL隔離を確認する。cache確認だけ`dig +nocookie`を使い、毎回異なるCookieを別cache keyにする試験側の不一致を避ける。通常DNSのUDP/TCP、local/reservation A/AAAA、DoH、loopback/管理DNSと履歴API/Webも確認する。
-- 管理: 一時鍵でSSH `show status`、Web履歴とLANからWebへの遮断。SSHは管理address設定前から指定addressで待受し、初回generation=1/restarts=0。再起動後もhost key・履歴を保持する。
-- BGP: 独立FRR8.4.4/ZebraとLAN198.18.0.0/24/peer203.0.113.0/24を相互広告し、両kernelのnext hop、独立FRR受信RIB、LAN 2端末のNATなしTCP/UDPを確認する。旧routerdのexport/connected allowlistをまとめる明示広告、import nextHopRewrite、GR intentを既存engineへ設定する。2 IPv4 peersの単体統合と各peerの停止/再加入を確認済み。長時間GR保持/期限・両peer同時断・既存TCP socketの無損失継続は未受入。
-- NTP: 実WAN学習源へのfreshな同期と独立chronyd2 clientへの応答。host modeのengine/peerは`-x`、clientは`-Q`で時計を変更しない。fallback選択とappliance時計補正は別確認。
-- Tailscale: 独立Headscale/Tailscale1.104.2。LAN IPv4 subnetとexitを広告し、acceptDNS/acceptRoutes=falseを保つ。OS標準CAの引継ぎを確認するため、ownerだけのmountへ元のCAと試験CAを合わせる。hostのtrust storeは変えず、auth key/control DBはprivate `/run`/stageへ置く。
-- Tailscaleのpeer→LANはupstream既定のsubnet SNATを使う。旧routerdも既定値を上書きしていない。LAN→peer IPv6は明示NATでproductのtailnet addressを使い、IPv6 LAN subnetの双方向広告とは区別する。両IP exit HTTPS/UDP DNS、node identityと再起動後の通信も確認する。public controlとcontrol hostname bootstrap DNSは未受入。
+WAN/tailnet captureは各最大8MB、PD captureはudp546と実行時間で限定する。ownerは全peer/process/namespaceを撤去する。長時間用syslog受信は直近8MB、公式Collector file exporterは8MB×現行/backup1へ制限する（公式`validate`通過）。受信資料はraw archiveとして残さない。
 
-WAN captureは最大8MB、tailnet captureも最大8MBへ制限する。PD captureは限定filterと実行時間で抑える。ownerのprivate mount/namespace/key/lease/state/captureは終了時に撤去する。`UPLINK_SECONDS=7800`など自然T1へ達する時間で実行すれば同じnative profileの更新も観測できるが、短時間gateの合格で代用しない。
+## 同一profileで確認する経路
 
-## DNSのsource構成と切替確認
+1. **WANと通常LAN。** 実HGWのDHCPv4、通常DADのRA/SLAAC、PD /60、DUID/IAID=1、委譲LANを確認する。LANの予約BusyBox端末と通常poolのdhcpcd端末がgateway/DNS、NTP2アドレス/domain-search、SLAAC/RDNSS/DNSSL/RA-triggered DHCPv6 Informationを取得し、両IPのInternetを使う。保存中homertのDHCPv6Serverはstatelessであり、不要なstateful poolを新設しない。
+2. **特別scopeと保持。** 実homertの3 selectorsは同じprofileを参照するため、一つのpool ownerへOUIと6 MACをまとめる。通常pool64..191/予約はgateway/DNS .1、特別pool32..63は .253。OUI端末1台と特定MAC端末2台を独立namespaceへ接続し、配布値の設定だけで特別gatewayの実DNS/HTTPSを使う。特別profileに通常poolのNTP/optionsを勝手に継承しない。3日sticky/7日daily fingerprint保持を設定し、実Releaseと端末IP撤去、保存期限、別MACの同IP要求、元MACの再取得を確認する。DBはread-onlyで観測し、stateを捏造しない。全daemon restart後にも特別端末のRenew/ACK・通信・fingerprint APIを確認する。3日/7日経過削除は別の受入。
+3. **LAN RA。** high preference、MTU1500、valid最大7200秒/preferred最大3600秒をPD所有期限で制約する。LAN送信元link-localの実packet、端末の通常DAD/SLAAC/DNS、正常停止時のzero-lifetime RAとkernel撤去を確認する。
+4. **DNS。** 宣言順のsource評価を旧routerdから維持し、子suffixを親より先に置く。独立dnsmasq5353/5354で異なるAを返し、通常回答、片側停止の切替、両側停止中のcacheと未取得名SERVFAIL、復旧を両IPで確認する。複数suffix/共有upstream、WAN PD学習DNS、Cloudflare/Google両DoHの実probe、local/lease A/AAAA、UDP/TCP、loopback/管理listener、履歴API/Webも確認する。cache比較だけ`+nocookie`でquery keyを揃える。peerの起動は実queryへの応答まで確認する。全private suffix実peerと個々のDoH停止切替は別の受入。
+5. **4 DS-Liteと上流選択。** 同じWANの別委譲/128（suffix ::21/::22/::13/::23）からAFTR ::100/::101/::102/::100へ接続し、各tunnelにbindした実TCP/HTTPS・UDP/DNSを確認する。内側192.0.0.2/32、MTU/MSS1454/DF処理、IPv6 host route table120とsource bypassを設定する。LAN新規通信は既存EgressPolicyのHealth/owner/markとweight120（3本）→80（4本目）→60（LAN static gateway）、60秒hysteresisで選ぶ。metric200..203はrouter起点の個別疎通用。試験専用nft tableで外側sourceを順に遮断し、Health・kernel規則・実conntrack mark/next hop・両通常端末の新規TCP/UDP、解除後の復帰を確認する。Linux static gatewayは同じHGWへ別MACでDHCPv4接続して転送/NAT/DNSを提供し、物理独立二回線の資格とは分ける。遮断tableはfinallyで撤去する。実設定にないPPPoE終端や別NICを新設しない。
+6. **BGP・NTP。** 独立FRR/Zebra2台でLAN198.18.0.0/24とpeer203.0.113.0/24を相互広告し、受信RIB・両kernel・product best pathでLAN2端末のNATなしTCP/UDPを確認する。各bgpdを一台ずつ停止/再加入し、残るpeerの通信と復旧を確認する。特定peerの初期選択や切戻しを要求しない。長時間GR期限・両peer同時断・既存socket無損失継続は別の受入。NTPは実WAN学習源と独立chronyd2 clientの応答を確認し、`-x`/`-Q`でhost時計を変更しない。fallbackとappliance時計補正は別の受入。
+7. **管理・Tailscale。** 一時鍵で管理SSH `show status`、Web履歴、LANからWebへの拒否、初回management generation1/restarts0、再起動後の鍵/履歴を確認する。独立Headscale/TailscaleへIPv4 LAN/exitを広告し、acceptDNS/acceptRoutes=falseとupstream既定のsubnet SNATを維持する。OS標準CAと試験CAはownerのprivate mount内で結合し、auth key/control DBをprivate stageへ置く。LAN→peer両IP、peer→LAN IPv4、両IP exit HTTPS/UDP DNSとnode identity保持を確認する。LAN→tailnet IPv6は明示NATであり、delegated IPv6 subnetの双方向広告ではない。public control/hostname bootstrapは別の受入。
+8. **運用と復旧。** INFO syslog/OTLP、logs/metrics/traces、group1 NFLOG、group2 native nDPI/flow history、7日/daily/vacuumを既存ownerへ接続する。独立BGP peer上にsyslog UDP5514と公式Collector gRPC4317をdaemonより先に待受させる。実公開通信の双方向計数・native由来・TLS SNI、実管理拒否のhistory、観測開始後の新しいHealth syslog/log/metric/spanを照合する。samplingは旧既定30秒で、短flow全件保存・lossless deliveryを主張しない。PD worker SIGKILL/通常再起動と全daemon再起動後に上記の通信・identity・履歴・更新を確認し、正常停止時には上流Releaseなしでprefixを撤去する。
 
-基準main `28cb655`の25-resource native profileへ、2 upstreamの条件付きsource、同じupstreamを使う複数suffix、WAN PDから学習するDNS source、2系統のDoHと明示bootstrapを接続する。旧routerdのresolver/receive callerはsourceを宣言順に評価するため、子suffixを親suffixより先に配置する。longest matchへの自動並替えとは扱わない。
+## 自然更新と残る全体受入
 
-独立dnsmasqを5353/5354へ別processで置き、それぞれ異なるAを返す。通常は選択された回答を記録し、primary停止時にはbackupの応答を確認、両方停止時にはcache済み回答の保持と未取得名のSERVFAILを確認して復旧する。`branch.split.test`と`corp.test`で子suffix/共有upstream、`www.example.net`でWAN学習DNSの応答とquery logのsourceを確認する。2系統のpublic DoHが実probeに成功することも確認する（初回と全daemon restart後に通過済み）。同じsource群をdaemon restart後にも照会し、通常のBGP/Tailscale/DHCP/PD/RA/管理/NTP/Internetを維持する。全private suffixの実peerや、個々のDoH停止切替は今回の範囲と分ける。実行コマンドと隔離/撤去手順は上記のとおり。
+自然PD T1は同じprofileで`UPLINK_SECONDS=7800`など実際の`renew_at`へ達する時間を選び、packetのRenew/Reply、DUID/IAID/prefixと更新期限、端末の通信・lease更新を確認する。短時間gateで代用しない。既存TCP socket/UDP mappingの継続は新規接続と別に観測する。自然更新待ちには独立する実装を進める。
 
-## 4 DS-Liteの構成と疎通確認
+別checkpointの限定根拠: 生成profile/build`7c1cb3619acb`はHGW source49153からの自然PD T1、同一DUID/IAID/prefix、期限更新、通常DAD、両端末の自然DHCPv4更新と676通信roundを確認済み。15-resource native/build`8ea44d776dc3`はWAN遮断解除後0.79秒の復旧を確認済み。実supervisor/control/network/Healthと独立二WANのTCP/UDP・packetによる障害復帰/worker再起動/古い通知/期限切れ/confirmed rollback、および限定Alpine/PID1 PVEの独立PPPoE/ISC DHCPv6/通信/署名更新rollbackも別gateで確認済み。現在の全profile・HA・実機資格には流用せず、今回は追加実行しない。raw stageは撤去済み。
 
-基準main `ce1589c`から28-resource単体profileへ拡張する。旧routerdの`DSLiteTunnelController`/`ensureDSLiteTunnel`とhost source bypass/route callerを読み、実homertの4 tunnelが同じWANに異なる委譲source（suffix ::21/::22/::13/::23）を使い、AFTR ::100/::101/::102/::100へ接続することを確認した。nativeのWAN /128 delegationと各DS-Lite serviceに明示し、各sourceの既存host-route bypassを設定する。
-
-router起点の個別疎通用にmetric200..203の4 DS-Lite既定経路を残す。LANの上流選択は後述のHealth/mark/weight policyを接続して受入済み。追加PBR調査は行わない。各tunnelの内側IPv4は192.0.0.2/32、直接deviceへのdefault routeを使い、不要なpoint-to-point gateway指定を外す。LANのNAT/MSS1454/DF処理も各tunnelへ設定する。
-
-4 tunnelへsocketをbindし、実公開peerへのTCP/HTTPSとUDP/DNSが返ることを確認する。4本のsource独立性、通常LAN Internet、DNS/BGP/Tailscale/管理/NTP、全daemon restart後の同じ経路の復旧も確認する。router起点の各経路疎通とLANの既定経路疎通を区別する。既存の最大8MB captureを共用し、終了時にnamespace/key/state/pcapを撤去する。
-
-最初の試行ではbackupをDHCPと誤って設定し、ens20からのDiscoverに応答がなく取得待ちで停止した。homertのDHCPv4Clientは0件でbackupは静的IPv4。既存計画にもens20のRA/DHCP無応答が記録されていた。誤ったDHCP設定・追加runner引数を削除し、4 DS-Liteの確認を独立して進める。その後の実設定再照合で、低優先の静的候補は既存LAN上のgatewayであり、別NICのWANではないと確認した。ens20の追加接続や試験host用の新規IPを要求する前提を撤回する。hostのens18/ens20 address/default routeが不変だったことは確認済み。
-
-2回目は既存のDNS復旧確認で、5354の独立dnsmasqを再起動した直後のqueryにconnection refusedが返り停止した。起動関数がprocess生成だけで返っていたため、同じ関数で独立peer自身への実query応答を確認してから返す。固定sleepや製品側retryは追加しない。各portのlogも分ける。DS-Liteの初回確認をDNS障害注入より前へ移し、無関係なfixture起動問題で経路観測が後回しにならないようにする。
-
-## BGP 2 peerの構成と停止・再加入確認
-
-基準main `6c16477`の28-resource native profileに2番目のpeerを設定する。旧routerdの`Controller.desiredPeers`とnativeの`selectedRoute`/kernel projectionを読み、同じBGPPeer配下の各peerへ共通のASN/import/export規則を適用し、実際のbest pathだけをkernelへ渡す動作を確認した。
-
-独立FRR/Zebraを2つのnamespaceへ置き、192.0.2.2/.3で同じ203.0.113.0/24を広告する。product側bgp0と192.0.2.1/24は既存native設定の所有物。2台目はpeer側veth上のmacvlanへ接続し、別process/別kernel FIBで動かす。両FRRがLAN198.18.0.0/24を受信してkernelへ入れたこと、productのbest path経由でLAN 2端末の新規TCP/UDPがNATなしで往復することを確認する。
-
-各peerのbgpdを1台ずつSIGTERM停止し、停止側のsession状態とkernel経路が残るpeerへ収束することを観測して両端末の通信を確認する。停止したbgpdを通常設定で再起動し、両session/RIB/FIB/通信の復旧を確認する。初回にこの停止・復帰を実施し、全daemon再起動後には両peerと通信の再収束を確認する。最初から特定のpeerが選ばれることや、再加入後に元peerへ戻ることは要求しない。GR保持期限・両peer同時断・既存TCP socketの無損失継続はこの試験から主張しない。4 DS-Lite、DNS、Tailscale、管理、NTP、通常Internetを同じnative profileで維持する。実行・capture上限・撤去は現行gate手順を使い、PVE/QEMUと追加PBR調査は行わない。
-
-## 別に確認済みの範囲
-
-- 生成profile、build`7c1cb3619acb`で自然PD T1 Renew/Replyをcaptureした。client546→server547、HGWのReplyは49153→546。DUID/IAID=1/prefixが同じで期限更新、通常DAD、両clientの自然DHCPv4更新と676通信roundを確認。native全体の自然T1には流用しない。raw stageは削除済み。
-- 15-resource native profile、build`8ea44d776dc3`でWAN blackhole時の両IP失敗と解除後0.79秒の復旧を確認。今回の追加機能で同じ遮断試験を繰り返す理由にはしない。
-- 実supervisor/control/network/Healthと独立二WAN/Linux peerのTCP/UDP・packetを使うHealth→PBR gateで、障害復帰、worker/supervisor restart、古い通知、期限切れ、confirmed rollbackを確認した。対象二回線/HAの資格ではない。
-- 既存の通常Alpine/PID1隔離PVE gateで、独立PPPoE/ISC DHCPv6/Linux clientのDHCP/PD/Renew/SLAAC・両IP通信、署名更新、明示/自動rollbackを確認済み。VMは撤去済み。今回は追加実行しない。
-
-## 上流選択の実装方針（ユーザー指摘による修正）
-
-homertと同等の上流選択を先に実装する。保存中のIPv4 priority policyは、委譲PD由来のDS-Lite 3 targetsのgroup（weight120）、別DS-Lite候補（weight80）、既存LAN上の静的gateway（weight60）の順。PPPoESessionの宣言はこの保存設定にはなく、PPPoEの終端を試験hostへ勝手に新設しない。PPPoEを含む構成は既存の終端・候補に沿って同じ優先順位の選択へ接続する。
-
-nativeの既存`EgressPolicy` group/weight/Health/owner契約を使い、既存の独立peer試験も参照する。4 tunnelへ直接bindした疎通やmetric200..203の仮配置は、この選択policyを実装したことにはしない（現在は後述の選択policyも受入済み）。別NIC/別回線/新規IPを必須の事前条件にせず、LAN上のgateway候補をそのまま表す。ens20で行った別WAN/DHCP試行と追加IP情報の依頼は誤った前提として撤回済み。新しいPBR機構の調査・全面試験やPVE/QEMUを追加せず、実設定の候補選択と必要な通信確認を進める。ログ/観測の追加より、この単体の主経路を先に閉じる。
-
-## 既存LAN gatewayを含む優先順位の実通信
-
-native profileにHealth 5本と既存EgressPolicyを接続し、通常Makefile build済み実行物による実通信が終了0。委譲sourceのDS-Lite 3本をweight120、4本目を80、LAN上のgatewayを60とする。既定のmetric経路はrouter起点の個別疎通用に残し、LANの新規通信はmark/tableで選ぶ。経路の所有とHealthの新規選択を分け、実設定の60秒hysteresisを保持する。Healthの観測だけで切替済みとせず、kernelの選択規則が更新されたことを待って通信する。
-
-独立Linux gatewayは専用namespace内の198.18.0.253で待受し、同じ許可済みens18/HGWへ別MACで接続してDHCPv4を取得、kernelで転送/NATする。追加NIC、site LANの新規address、hostのdefault route変更は不要。同じHGWの経路であり、物理的に独立した二回線の資格ではない。LAN内gatewayへ転送する同一interface間forward/NATも製品設定で所有する。
-
-初回に全Healthの実TCP到達を確認し、DS-Lite 3本の外側sourceを試験専用nft tableで遮断して4本目へ、続いて4本目も遮断してLAN gatewayへ切り替える。各段階でLAN 2端末の新規UDP/DNSとTCP/HTTPS、conntrack markと実kernel next hopを確認し、遮断解除後はweight120へ復帰する。既存socketの無損失継続とは区別する。全daemon restart後も通常優先順位と両端末の通信を確認する。試験専用tableはfinallyで撤去し、peer/process/namespaceは既存ownerが撤去する。
-
-最終確認は、同じMakefile build IDの実行物で`python3 scripts/uplink-smoke.py --uplink ens18 --config examples/single-router-dslite-dhcp-dns.yaml --seconds 20 --wan-mac 02:72:6f:75:74:03 --full-restart --tailnet`を実行した。試行中、試験用nftファイルの書式と、端末のDHCPアドレスを送信元と決めつけたconntrack照合を修正した。ソケットの実送信元を読んで照合し、製品側に迂回・retryは追加していない。終了後はstage/key/state/pcap/namespaceを撤去する。
-
-## 単体の運用ログ・通信履歴の接続
-
-単体profileは38 resourcesへ接続済みで、今回の実HGW gateが終了0。旧routerdのeventlog、TelemetryEnvironment、LogRetentionController、conntrackobserverと、実homertのINFO syslog/OTLP logs・metrics・traces、TLS SNI/application classification、group1 NFLOG、7日/daily/vacuumの意図を参照する。既存workerを使い、受信・分類・保存の所有者を増やさない。DNS・通信flow・firewallとoperational eventに7日/daily保持を設定するが、短時間試験で7日経過の削除を実証したとは扱わない。access/plugin/DHCP fingerprintなど全datasetの保持は別に照合する。
-
-独立BGP peer側namespaceの192.0.2.2に既存syslog receiver（UDP5514）と公式otelcol-contrib 0.151.0（OTLP/gRPC4317、file exporter）を置く。試験hostに`/usr/local/bin/otelcol-contrib`が必要。製品の外部依存ではなく独立受信peer。両receiverはdaemon起動前に待受を確認し、受信内容はprivate stageに置いて終了時に撤去する。
-
-既存firewallにflow observation group2と管理拒否ruleのgroup1ログを明示する。独立LAN端末→public peerの実HTTPS/UDP DNSで、kernel conntrackの双方向計数、native nDPI由来、TLS SNIを製品のtraffic-history APIで読む。管理WebへLAN経由の接続は従来どおり拒否し、その実パケットをfirewall-history APIへ記録する。syslogの製品ログ、公式Collectorのlogs/metrics/tracesとHealth probe spanを確認する。受入時の追加観測で、全daemon再起動後の新しいHealth記録4種を時刻で照合して通過した。この新規記録の照合もrunnerへ含める。全daemon restart後も同じ通信・管理拒否・履歴・送信を確認する。samplingは旧既定30秒のままとし、短いflowの全件記録やlossless deliveryを主張しない。通常WAN/LAN/上流選択/PD/DNS/BGP/NTP/Tailscaleも同じgateで維持する。
-
-## 残作業の実行順と合格条件
-
-1. **homert単体の全経路を接続する。** 両node設定の110 resourcesを機能/caller/kernel effectへ対応させ、複数DNS suffix/upstream/learnedDNS、4 DS-Lite経路とbackup WAN、BGP2 peers、残るLAN scope/identity/telemetry・運用機能を埋める。converterや旧routerd2 API維持を目的にしない。
-2. **同一単体profileでcold startから通常利用・復旧まで受け入れる。** WAN DHCPv4/RA/PD/Informationと自然更新、DUID/IAID、LAN DHCPv4のdynamic/OUI/MAC/予約、stateful DHCPv6が必要な範囲、RA/SLAAC/RDNSS/DNSSL、DNS各経路と両IPInternet、NAT/DS-Lite、MTU/MSS/DF/PTB、PD変更/期限・worker/control/daemon restart・通常停止後の収束を確認する。新規flowと継続TCP/UDPを区別する。
-3. **二台HAを通す。** VRRP readiness/VIP、GARP/NA、DHCP/PD/DUID/IAID・lease同期、conntrack/NAT、既存TCP socket/UDP mapping、新規端末、DNS/BGP/NTP/Tailscaleを両方向停止・復帰で確認する。単体や短いnamespace合格を実homert二台へ読み替えない。
-4. **残るwork packageを閉じる。** SYS（OS/capability/time/privilege/watchdog）、NET（PPPoE/link/VRF/VXLAN/DHCPv6 stateful/relay/DNS/BGP/BFD/WireGuard）、CORE/OPS（transaction/lifecycle/event/dynamic config/plugin/API/CLI/Web/logging/retention/DPI）、HA/EXT（同期/IPsec/Tailscale）、CLOUD（provider/federation/SAM）、DIST（signed runtime/boot/更新/A-B/実機/arm64/cloud image/Kubernetes）を[各packageの受入条件](implementation-plan.json)で実peerへ接続する。一つの待機・不具合で独立作業を止めない。
-5. **QUALを確定する。** 全field/default/lifecycle/status/eventと明示的置換、各配布先の通信・障害復旧・性能・更新rollbackを照合する。対象ONU/NICやproviderを使えない場合は最小の不足setupと未受入範囲を残し、全体完成は宣言しない。本番変更・課金は実際のauthorization内で行う。
+1. **homert単体の全意図を閉じる。** 保存中の両110-resource設定を機能/caller/kernel effectへ照合する。残るprivate DNS peer、BGP契約、LAN/運用/保持dataset、全設定のcold start・自然更新・MTU/MSS/DF/PTB・PD変更/期限・通信継続・worker/control/daemon復旧を受け入れる。converterや旧prototype API維持を目的にしない。
+2. **二台HA。** VRRP readiness/VIP/GARP/NA、DHCP/PD/DUID/IAID・lease同期、conntrack/NAT、既存TCP/UDP mapping、新規端末、DNS/BGP/NTP/Tailscaleを両方向停止/復帰で確認する。単体namespaceの成功を実homert二台へ読み替えない。
+3. **全34 work package。** SYS（OS/capability/time/privilege/watchdog）、NET（PPPoE/link/VRF/VXLAN/DHCPv6 stateful/relay/DNS/BGP/BFD/WireGuard）、CORE/OPS（transaction/lifecycle/event/dynamic config/plugin/API/CLI/Web/logging/retention/DPI）、HA/EXT（同期/IPsec/Tailscale）、CLOUD（provider/federation/SAM）、DIST（signed runtime/boot/更新/A-B/実機/arm64/cloud image/Kubernetes）を各packageの受入条件で実peerへ接続する。一つの不具合で独立作業を止めない。
+4. **QUAL。** 全field/default/lifecycle/status/eventと明示的置換、各配布先の通信・障害復旧・性能・更新rollbackを照合する。対象ONU/NIC/providerが使えなければ最小の不足setupと未受入範囲を残す。本番変更/課金は実際のauthorization内で行い、全条件が実証されるまで全体完成を宣言しない。

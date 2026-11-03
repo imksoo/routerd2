@@ -349,6 +349,9 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             gateway_nat = stage / "gateway-nat.nft"
             gateway_nat.write_text('table ip independent_gateway {\n chain nat {\n type nat hook postrouting priority srcnat;\n ip saddr 198.18.0.0/24 oifname "gateway-wan" masquerade\n }\n}\n')
             run(inside(gateway, ["nft", "-f", str(gateway_nat)]))
+            start(gateway, ["dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null", "--no-hosts", "--no-resolv",
+                "--bind-interfaces", "--listen-address=198.18.0.253", "--server=1.1.1.1", "--pid-file=" + str(stage / "gateway-dns.pid")], "gateway-dns")
+            wait(lambda: bool(run(inside(gateway, ["ss", "-H", "-lun", "sport = :53"]))))
 
         def start_private_dns(port, answer):
             process = start(
@@ -429,7 +432,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             telemetry_rows = stage / "received-telemetry.jsonl"
             collector_config.write_text(json.dumps({
                 "receivers": {"otlp": {"protocols": {"grpc": {"endpoint": "192.0.2.2:4317"}}}},
-                "exporters": {"file": {"path": str(telemetry_rows), "append": True, "flush_interval": "100ms"}},
+                "exporters": {"file": {"path": str(telemetry_rows), "flush_interval": "100ms", "rotation": {"max_megabytes": 8, "max_backups": 1}}},
                 "service": {"telemetry": {"logs": {"level": "error"}, "metrics": {"level": "none"}},
                     "pipelines": {signal: {"receivers": ["otlp"], "exporters": ["file"]} for signal in ("logs", "metrics", "traces")}}
             }))
@@ -605,17 +608,19 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             assert ipaddress.ip_address(wan4["currentAddress"]).version == 4, "WAN DHCPv4 did not publish an IPv4 lease"
             print("PASS actual HGW DHCPv4 client received and applied its observed WAN lease", flush=True)
         lease_events = stage / "client-lease-events"
+        client_options = stage / "client-dhcp-options"
         hook = stage / "client-dhcp-hook.sh"
         hook.write_text(
             '#!/bin/sh\ncase "$1" in\n'
             'bound|renew)\n'
             '  ip address replace "$ip/24" dev "$interface" || exit 1\n'
             '  ip route replace default via "$router" dev "$interface" || exit 1\n'
+            '  printf "%s|%s\\n" "$ntpsrv" "$search" > "' + str(client_options) + '"\n'
             '  printf "%s %s %s %s\\n" "$1" "$ip" "$router" "$dns" >> "' + str(lease_events) + '";;\n'
             'esac\n'
         )
         hook.chmod(0o500)
-        dhcp_client = start(client, ["busybox", "udhcpc", "-f", "-i", "client0", "-s", str(hook), "-p", str(stage / "client-dhcp.pid"), "-t", "3", "-T", "1", "-A", "1", "-x", "hostname:uplink-client"], "client-dhcp")
+        dhcp_client = start(client, ["busybox", "udhcpc", "-f", "-i", "client0", "-s", str(hook), "-p", str(stage / "client-dhcp.pid"), "-t", "3", "-T", "1", "-A", "1", "-x", "hostname:uplink-client", "-O", "42", "-O", "119"], "client-dhcp")
         wait(lambda: lease_events.exists() and bool(lease_events.read_text().splitlines()))
         lease = lease_events.read_text().splitlines()[-1].split()
         ipaddress.IPv4Address(lease[1])
@@ -662,10 +667,12 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         print("PASS independent LAN client received router DNS and search domain via DHCPv6", flush=True)
 
         auto_events = stage / "automatic-client-events"
+        auto_dhcp_options = stage / "automatic-dhcp-options"
         auto_hook = stage / "automatic-client-hook.sh"
         auto_hook.write_text(
             '#!/bin/sh\ncase "$reason" in\n'
-            'BOUND|RENEW) printf "v4|%s|%s|%s|%s\\n" "$reason" "$new_ip_address" "$new_routers" "$new_domain_name_servers" >> "' + str(auto_events) + '";;\n'
+            'BOUND|RENEW) printf "%s|%s\\n" "$new_ntp_servers" "$new_domain_search" > "' + str(auto_dhcp_options) + '"\n'
+            'printf "v4|%s|%s|%s|%s\\n" "$reason" "$new_ip_address" "$new_routers" "$new_domain_name_servers" >> "' + str(auto_events) + '";;\n'
             'ROUTERADVERT) printf "ra|%s\\n" "$nd1_rdnss1_servers" >> "' + str(auto_events) + '";;\n'
             'INFORM6) printf "v6|%s|%s\\n" "$new_dhcp6_name_servers" "$new_dhcp6_domain_search" >> "' + str(auto_events) + '";;\n'
             'esac\n'
@@ -675,7 +682,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         )
         auto_hook.chmod(0o500)
         auto_config = stage / "automatic-client.conf"
-        auto_config.write_text("ipv6rs\nslaac hwaddr\nnoipv4ll\noption domain_name_servers, domain_name, domain_search\n")
+        auto_config.write_text("ipv6rs\nslaac hwaddr\nnoipv4ll\noption domain_name_servers, domain_name, domain_search, ntp_servers\n")
         automatic_client = start(automatic, ["dhcpcd", "-B", "-d", "-f", str(auto_config), "-c", str(auto_hook), "client1"], "automatic-client")
 
         def automatic_ready():
@@ -691,9 +698,9 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         if config_path is not None:
             auto_v4 = next(event for event in reversed(auto_options) if event[0] == "v4")
             auto_address = ipaddress.IPv4Address(auto_v4[2])
-            assert ipaddress.IPv4Address("198.18.0.32") <= auto_address <= ipaddress.IPv4Address("198.18.0.63"), "OUI client was outside its configured scope: " + str(auto_v4)
-            assert auto_v4[3:] == ["198.18.0.1", "198.18.0.1"], "OUI scope did not supply its configured gateway and DNS: " + str(auto_v4)
-            print("PASS independent OUI-matched client received a dynamic lease from its configured scope", auto_v4[2], flush=True)
+            assert ipaddress.IPv4Address("198.18.0.64") <= auto_address <= ipaddress.IPv4Address("198.18.0.191"), "unmatched client was outside the primary scope: " + str(auto_v4)
+            assert auto_v4[3:] == ["198.18.0.1", "198.18.0.1"], "primary scope did not supply its configured gateway and DNS: " + str(auto_v4)
+            print("PASS independent unmatched client received a dynamic lease from the primary scope", auto_v4[2], flush=True)
         auto_dns6 = [ipaddress.IPv6Address(address) for address in next(event[1] for event in reversed(auto_options) if event[0] == "v6").split()]
         auto_addresses = json.loads(run(["ip", "-n", automatic, "-j", "address", "show", "dev", "client1"]))
         delegated = [ipaddress.IPv6Network(p["prefix"]) for p in query("control.sock", "/v1/services/service.wan-pd")["snapshot"]["prefixes"]]
@@ -705,6 +712,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         assert router_dns in servers and router_dns in auto_dns6, "DHCPv6 information and RA did not both supply the router DNS listener"
         assert any(a["family"] == "inet6" and not a.get("tentative") and any(ipaddress.IPv6Address(a["local"]) in prefix for prefix in delegated) for link in auto_addresses for a in link["addr_info"]), "automatic LAN client has no usable delegated SLAAC address"
         print("PASS independent dhcpcd automatically acquired DHCPv4 and RA-triggered DHCPv6 with delegated SLAAC", flush=True)
+
+        router_lan_ll = next(a["local"] for link in router_addresses for a in link["addr_info"] if a.get("scope") == "link")
 
         def forwarding_state():
             clients_ready = True
@@ -1022,6 +1031,77 @@ print(*s.getsockname())
             assert denied.returncode != 0, "management console was reachable through the LAN interface"
             print("PASS loopback/management DNS, cache during upstream outage, persistent query history, SSH host identity and Web access restricted to management interface", flush=True)
 
+        special_clients = []
+        def start_special_client(index, mac, requested=""):
+            namespace = "r2special" + str(index) + "-" + str(os.getpid())
+            run(["ip", "netns", "add", namespace])
+            namespaces.append(namespace)
+            run(["ip", "-n", namespace, "link", "set", "lo", "up"])
+            run(inside(client, ["ip", "link", "add", "link", "client0", "name", "special0", "netns", namespace, "type", "macvlan", "mode", "bridge"]))
+            run(["ip", "-n", namespace, "link", "set", "special0", "address", mac, "up"])
+            events = stage / ("special" + str(index) + "-leases")
+            hook = stage / ("special" + str(index) + "-hook.sh")
+            hook.write_text('#!/bin/sh\ncase "$1" in bound|renew)\n'
+                'ip address replace "$ip/$subnet" dev "$interface" || exit 1\n'
+                'ip route replace default via "$router" dev "$interface" || exit 1\n'
+                'printf "%s|%s|%s|%s\\n" "$1" "$ip" "$router" "$dns" >> "' + str(events) + '";;\n'
+                'deconfig) ip -4 address flush dev "$interface" scope global; ip -4 route flush dev "$interface";;\nesac\n')
+            hook.chmod(0o500)
+            command = ["busybox", "udhcpc", "-f", "-i", "special0", "-s", str(hook), "-p", str(stage / ("special" + str(index) + ".pid")),
+                "-t", "3", "-T", "1", "-A", "1", "-x", "hostname:special-" + str(index)]
+            if requested:
+                command += ["-r", requested]
+            process = start(namespace, command, "special" + str(index) + "-dhcp")
+            wait(lambda: events.exists() and bool(events.read_text().strip()))
+            result = (namespace, process, events, mac)
+            special_clients.append(result)
+            return result
+
+        def check_special_clients():
+            for namespace, process, events, mac in special_clients:
+                lease = events.read_text().splitlines()[-1].split("|")
+                address = ipaddress.IPv4Address(lease[1])
+                assert ipaddress.IPv4Address("198.18.0.32") <= address <= ipaddress.IPv4Address("198.18.0.63"), lease
+                assert lease[2:] == ["198.18.0.253", "198.18.0.253"], lease
+                default = json.loads(run(["ip", "-n", namespace, "-j", "route", "show", "default"]))
+                assert default[0]["gateway"] == lease[2], default
+                answer = run(inside(namespace, ["dig", "@" + lease[3], "example.net", "A", "+short", "+time=3", "+tries=1"]))
+                assert answer.strip(), "special scope DNS did not resolve through its own gateway"
+                run(inside(namespace, ["curl", "-4", "--noproxy", "*", "--fail", "--max-time", "8", "--resolve",
+                    "one.one.one.one:443:1.1.1.1", "-sS", "-I", "https://one.one.one.one/"]))
+                wait(lambda: bool(query("control.sock", "/v1/services/service.lan-leases/dhcp-fingerprints?mac=" + mac + "&limit=10").get("entries")))
+            for options in (client_options, auto_dhcp_options):
+                ntp, search = options.read_text().strip().split("|")
+                assert set(ntp.split()) == {"198.18.0.1", "198.18.0.254"}, (options.name, ntp)
+                assert "home.arpa" in search.split(), (options.name, search)
+            print("PASS primary/reserved and OUI/exact-MAC scopes supplied their configured pool, gateway, DNS, NTP/search; special clients reached public DNS/HTTPS via the independent LAN gateway; DHCP fingerprints persisted", flush=True)
+
+        def check_lan_distribution():
+            first = start_special_client(0, "02:77:00:00:00:04")
+            start_special_client(1, "02:77:01:00:00:05")
+            original = first[2].read_text().splitlines()[-1].split("|")[1]
+            first[1].send_signal(signal.SIGUSR2)
+            def held():
+                path = stage / "state/services/lan-leases/dhcp-sticky.db"
+                if not path.exists():
+                    return False
+                with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as database:
+                    row = database.execute("SELECT released_at, sticky_until FROM dhcp_sticky_leases WHERE mac=? AND ip=?", (first[3], original)).fetchone()
+                if not row or not row[0]:
+                    return False
+                assert row[1] - row[0] == 3 * 86400 * 1_000_000_000, row
+                return True
+            wait(held)
+            wait(lambda: not any(a.get("scope") == "global" for link in json.loads(run(["ip", "-n", first[0], "-j", "-4", "address", "show", "dev", "special0"])) for a in link["addr_info"]))
+            third = start_special_client(2, "02:77:01:00:00:06", original)
+            assert third[2].read_text().splitlines()[-1].split("|")[1] != original, "a different MAC acquired the released address during its configured sticky hold"
+            previous = len(first[2].read_text().splitlines())
+            first[1].send_signal(signal.SIGUSR1)
+            wait(lambda: len(first[2].read_text().splitlines()) > previous)
+            assert first[2].read_text().splitlines()[-1].split("|")[1] == original, "returning MAC did not recover its held address"
+            check_special_clients()
+            print("PASS actual DHCP release created a 3-day hold; another MAC requesting that address received a different lease, and the original MAC recovered its held address", flush=True)
+
         def check_operations():
             since = time.time_ns()
             run(inside(automatic, ["curl", "-4", "--noproxy", "*", "--fail", "--max-time", "8", "--resolve",
@@ -1065,6 +1145,7 @@ print(*s.getsockname())
 
         if config_path is not None:
             check_dns_sources()
+            check_lan_distribution()
             check_management()
             check_bgp()
             check_bgp_peer_recovery()
@@ -1295,6 +1376,11 @@ print(*s.getsockname())
                 wait(lambda: all(query("control.sock", "/v1/services/service.health-dslite" + str(i)).get("snapshot", {}).get("active", False) for i in range(3)))
                 check_selected_upstream({272, 273, 274})
                 check_operations()
+                for namespace, process, events, mac in special_clients:
+                    count = len(events.read_text().splitlines())
+                    process.send_signal(signal.SIGUSR1)
+                    wait(lambda: len(events.read_text().splitlines()) > count)
+                check_special_clients()
                 check_time()
             print("PASS actual HGW full daemon restart retained identity and restored both clients; seconds", round(time.monotonic() - restart_at, 2), flush=True)
             if tailnet:
@@ -1334,6 +1420,12 @@ print(*s.getsockname())
                 elif records:
                     records[-1] += " " + line.strip()
         records.sort(key=lambda line: float(line.split()[0]))
+        if config_path is not None:
+            normal_ra = [line for line in records if "router advertisement" in line and router_lan_ll + " >" in line and "router lifetime 0s" not in line]
+            assert normal_ra and any("pref high" in line and re.search(r"mtu option [^:]+:\s*1500", line) for line in normal_ra), "configured RA preference/MTU not observed: " + str(normal_ra[-2:])
+            lifetimes = [tuple(map(int, match)) for line in normal_ra for match in re.findall(r"valid time (\d+)s, pref\. time (\d+)s", line)]
+            assert lifetimes and all(0 <= preferred <= 3600 and preferred <= valid <= 7200 for valid, preferred in lifetimes), lifetimes
+            print("PASS actual LAN RA high preference, MTU1500 and configured prefix lifetime bounds", flush=True)
         assert not any(float(line.split()[0]) >= graceful_at and "dhcp6 release (xid=" in line for line in records), "graceful stop released the upstream grant"
         renews, rebinds, replies = set(), set(), set()
         for line in records:

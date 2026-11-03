@@ -11185,8 +11185,8 @@
     "physical_target_profile": "homert02/03 are identified PVE guests with4vCPU/4GiB, three VirtIO NICs and VirtIO/SCSI disks. Matching isolated PVE product boot/recovery was exercised; actual WAN/LAN attachment, clean installation from a preconverted native configuration, measured load and any additional hardware/architecture qualification remain open.",
     "validation_reporting": "Use docs/test-plan.md for the concise current gate state. Detailed historical checkpoint ledgers are not acceptance authority; keep only current result, limits and repeatable procedure. Never claim unrun gates or partial homert profiles complete.",
     "current_acceptance": {
-      "as_of_utc": "2026-11-03T03:02:08Z",
-      "product_code_checkpoint": "b1a3e48",
+      "as_of_utc": "2026-11-03T03:22:39Z",
+      "product_code_checkpoint": "b03debf1598204125f2f00363fd7ca036e3ad26e",
       "homert_source": "User-provided read-only working copies at chatty.lain.local:~/homert02; the current homert02 and homert03 files each contain 110 resources with matching kind counts. Do not publish configuration values or secrets.",
       "completed_gates": [
         "The product code checkpoint passed make check including Go/Python checks, race detector and vet.",
@@ -11200,7 +11200,7 @@
         "observed_so_far": "On main-derived build 7c1cb3619acb with the generated test profile, the real HGW returned PD Advertise/Reply from UDP source port 49153 to client port 546. One natural T1 Renew/Reply was captured; initial Solicit and Renew had the same DUID, configured IAID 1 and delegated prefix, and the lease deadline advanced. DAD was enabled on WAN/LAN; all observed global addresses were non-tentative with no DAD failures. PD worker SIGKILL, graceful worker restart and full daemon restart restored both clients in 1.32s, 3.61s and 3.99s. Zero-lifetime RA withdrew the kernel prefix without releasing the upstream grant; both independent clients naturally renewed DHCPv4 and completed 676 rounds of IPv4/IPv6 HTTPS and learned-DNS UDP/TCP.",
         "limit": "not direct ONU, target physical NIC, full homert profile or two-node HA qualification"
       },
-      "current_changes": "38-resource native profile、基準main b1a3e48 + 運用設定、build ID b1a3e489ca77で実HGW統合gateが終了0。独立LAN端末の公開HTTPS/DNSについて双方向計数・native nDPI由来・TLS SNIをtraffic-history API、管理WebへのLAN接続拒否をfirewall-history APIから確認した。独立syslog receiverと公式OTLP Collectorへ製品ログ/metrics/tracesが届き、全daemon restart後の新しいHealth syslog/log/metric/spanも実時刻で照合した。通常の上流選択120→80→60→120、4 DS-Lite、DNS/両DoH、管理、BGP 2 peersの各停止/再加入、NTP stratum3、Tailscale subnet/exitも通過。PD worker SIGKILL/通常再起動後のLAN復旧2.02/5.84秒、全daemon restartから全確認73.22秒、2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。7日保持は設定済みで期限削除の今回実証ではなく、自然T1・既存socket無損失継続・全homert/HA/実機資格も別に残る。",
+      "current_changes": "38-resource native profile、基準main b03debf + LAN配布設定、build ID b03debf15982で実HGW統合gateが終了0。通常・予約・OUI・特定MACの独立端末5台で、通常gateway/DNS .1と特別gateway/DNS .253を実ACKから設定し、公開HTTPS/UDP DNSが往復した。通常/予約端末はNTP2アドレスとdomain-searchも取得。実Releaseで3日分の保持期限が保存され、端末IP撤去後も別MACの同アドレス要求には別leaseを配り、元MACには保持アドレスを再配布した。全daemon restart後も特別端末3台のRenew/ACK・通信とfingerprint APIが復旧した。LAN RAのhigh優先度/MTU1500/valid最大7200秒/preferred最大3600秒を実packetで確認。上流選択、4 DS-Lite、DNS/DoH、nDPI/計数/SNI、fresh syslog/OTLP、BGP/NTP/Tailscaleも通過。PD worker SIGKILL/通常再起動後の復旧2.96/5.85秒、全daemon restartから全確認102.76秒（60秒抑制と30秒sampling等を含む）。2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。自然T1・既存socket継続・3日/7日経過削除・全homert/HA/実機資格は今回の範囲外。",
       "open_work_packages": 34,
       "unqualified_profiles": [
         "homert-single full input",
@@ -11210,7 +11210,7 @@
         "Kubernetes",
         "SAM/federation full path"
       ],
-      "tested_source_head": "b1a3e489ca77 plus operational native profile and independent syslog/OTLP receiver integration; product Go unchanged",
+      "tested_source_head": "b03debf15982 plus LAN distribution, sticky/fingerprint and bounded RA profile; product Go unchanged",
       "native_examples": {
         "examples/single-router-dslite-dhcp-dns.yaml": 38,
         "examples/homert02-native.yaml": 14,
@@ -11218,9 +11218,9 @@
         "full_homert_profile": "not present; the examples do not represent the complete current 110-resource intent"
       },
       "latest_native_profile_gate": {
-        "status": "38-resource real-HGW operational-services integrated gate passed (exit 0)",
-        "observed": "38-resource native profile、基準main b1a3e48 + 運用設定、build ID b1a3e489ca77で実HGW統合gateが終了0。独立LAN端末の公開HTTPS/DNSについて双方向計数・native nDPI由来・TLS SNIをtraffic-history API、管理WebへのLAN接続拒否をfirewall-history APIから確認した。独立syslog receiverと公式OTLP Collectorへ製品ログ/metrics/tracesが届き、全daemon restart後の新しいHealth syslog/log/metric/spanも実時刻で照合した。通常の上流選択120→80→60→120、4 DS-Lite、DNS/両DoH、管理、BGP 2 peersの各停止/再加入、NTP stratum3、Tailscale subnet/exitも通過。PD worker SIGKILL/通常再起動後のLAN復旧2.02/5.84秒、全daemon restartから全確認73.22秒、2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。7日保持は設定済みで期限削除の今回実証ではなく、自然T1・既存socket無損失継続・全homert/HA/実機資格も別に残る。",
-        "limit": "7-day/daily retention is configured, not elapsed-age acceptance in this short run. Full dataset retention, natural full-profile T1, continuous existing sockets, full homert/HA/ONU/target NIC qualification remain open."
+        "status": "38-resource real-HGW LAN-distribution integrated gate passed (exit 0)",
+        "observed": "38-resource native profile、基準main b03debf + LAN配布設定、build ID b03debf15982で実HGW統合gateが終了0。通常・予約・OUI・特定MACの独立端末5台で、通常gateway/DNS .1と特別gateway/DNS .253を実ACKから設定し、公開HTTPS/UDP DNSが往復した。通常/予約端末はNTP2アドレスとdomain-searchも取得。実Releaseで3日分の保持期限が保存され、端末IP撤去後も別MACの同アドレス要求には別leaseを配り、元MACには保持アドレスを再配布した。全daemon restart後も特別端末3台のRenew/ACK・通信とfingerprint APIが復旧した。LAN RAのhigh優先度/MTU1500/valid最大7200秒/preferred最大3600秒を実packetで確認。上流選択、4 DS-Lite、DNS/DoH、nDPI/計数/SNI、fresh syslog/OTLP、BGP/NTP/Tailscaleも通過。PD worker SIGKILL/通常再起動後の復旧2.96/5.85秒、全daemon restartから全確認102.76秒（60秒抑制と30秒sampling等を含む）。2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。自然T1・既存socket継続・3日/7日経過削除・全homert/HA/実機資格は今回の範囲外。",
+        "limit": "Actual 3-day hold creation/reacquisition, not elapsed 3/7-day expiry. Full-profile natural T1, continuous sockets, full homert/HA/ONU/target NIC remain open."
       },
       "upstream_selection_correction": "Existing LAN static gateway, not ens20. Implemented and verified group weights 120 -> 80 -> 60 -> 120 with 60s hysteresis, actual Health workers, both LAN clients TCP/UDP, conntrack marks and kernel next hops. No new WAN NIC or site IP allocation prerequisite."
     }
@@ -11229,7 +11229,7 @@
     {
       "stage": 1,
       "profile": "homert-single-implementation",
-      "next": "Operational services passed: syslog, fresh Health OTLP logs/metrics/traces, native nDPI/counters/TLS SNI, firewall history, whole-daemon restart with the real HGW profile. Next close actual LAN intent: exact-MAC scopes, DHCP NTP/domain-search, 3-day sticky hold/fingerprint retention, RA high preference/MTU/lifetime bounds. The saved DHCPv6Server is stateless; do not invent stateful pools. Continue full-profile natural renew and continuity before HA; no PVE/QEMU or extra PBR investigation.",
+      "next": "LAN intent passed with five clients, including special OUI/exact-MAC gateway/DNS, primary/reservation NTP/domain-search, real sticky release/hold/reacquisition, fingerprints, and RA high/MTU/lifetime bounds. Next observe natural PD T1 and continuity on this complete current profile while advancing remaining single-router intent and HA independently. Keep full homert/HA/remaining work packages open; no PVE/QEMU or extra PBR investigation.",
       "acceptance": "Cold-start the complete single-router profile with an independent WAN peer and Linux client. Verify WAN/LAN DHCPv4 scopes and reservations, DHCPv6-PD/Information identity and natural renew, RA/DAD/SLAAC, local/conditional/DoH DNS, all DS-Lite paths and IPv6, Health/PBR, NAT/MTU/MSS, BGP/NTP/Tailscale/management where configured, and worker/daemon restart and recovery from actual packets, client results, kernel routes and firewall state. Keep ONU/physical-NIC qualification separate."
     },
     {

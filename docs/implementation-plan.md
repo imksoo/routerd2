@@ -1,8 +1,8 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
-更新: 2026-11-03 03:02 UTC。syslog/OTLP、native nDPIの通信分類・計数・TLS SNIとfirewall履歴を同一単体profileへ接続し、実HGW/独立端末・受信peer、全daemon restart後の新規Health記録まで受入済み。次はLAN配布設定の残差を閉じる。全homert/HAの受入は継続中。
+更新: 2026-11-03 03:22 UTC。syslog/OTLP、native nDPIの通信分類・計数・TLS SNIとfirewall履歴を同一単体profileへ接続し、実HGW/独立端末・受信peer、全daemon restart後の新規Health記録まで受入済み。通常/予約/特別scope・保持・RA配布も受入済み。次は全profileの自然更新・通信継続を進める。全homert/HAの受入は継続中。
 
-全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で9日15時間33分、記録済み期限から4日10時間5分経過した。34 work packageはin_progress22件/planned12件。部分受入を全体の完成に数えない。
+全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で9日15時間54分、記録済み期限から4日10時間26分経過した。34 work packageはin_progress22件/planned12件。部分受入を全体の完成に数えない。
 
 ## 現在の棚卸し
 
@@ -27,11 +27,11 @@ mainを取得し、直近の変更を統合した。34 work packageの状態は�
 
 一回の変更単位は「設定から利用者の結果まで」とする。失敗時はpacket・socket・経路・workerのうち原因を決める観測だけを追加し、原因が分からないまま同じ試験を繰り返さない。自然T1の待ち時間には独立する実装を進める。試験を増やすことや報告書を作ることを進捗の代用にしない。合格した単位をcommit/pushしてから次へ移る。全体完成の見積りは、単体の全通信経路とHAの未解決原因が把握できた時点で更新する。
 
-38-resource native profile、基準main `b1a3e48` + 運用設定、build ID `b1a3e489ca77`で実HGW統合gateが終了0。独立LAN端末の公開HTTPS/DNSについて双方向計数・native nDPI由来・TLS SNIをtraffic-history API、管理WebへのLAN接続拒否をfirewall-history APIから確認した。独立syslog receiverと公式OTLP Collectorへ製品ログ/metrics/tracesが届き、全daemon restart後の新しいHealth syslog/log/metric/spanも実時刻で照合した。通常の上流選択120→80→60→120、4 DS-Lite、DNS/両DoH、管理、BGP 2 peersの各停止/再加入、NTP stratum3、Tailscale subnet/exitも通過。PD worker SIGKILL/通常再起動後のLAN復旧2.02/5.84秒、全daemon restartから全確認73.22秒、2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。7日保持は設定済みで期限削除の今回実証ではなく、自然T1・既存socket無損失継続・全homert/HA/実機資格も別に残る。
+38-resource native profile、基準main `b03debf` + LAN配布設定、build ID `b03debf15982`で実HGW統合gateが終了0。通常・予約・OUI・特定MACの独立端末5台で、通常gateway/DNS .1と特別gateway/DNS .253を実ACKから設定し、公開HTTPS/UDP DNSが往復した。通常/予約端末はNTP2アドレスとdomain-searchも取得。実Releaseで3日分の保持期限が保存され、端末IP撤去後も別MACの同アドレス要求には別leaseを配り、元MACには保持アドレスを再配布した。全daemon restart後も特別端末3台のRenew/ACK・通信とfingerprint APIが復旧した。LAN RAのhigh優先度/MTU1500/valid最大7200秒/preferred最大3600秒を実packetで確認。上流選択、4 DS-Lite、DNS/DoH、nDPI/計数/SNI、fresh syslog/OTLP、BGP/NTP/Tailscaleも通過。PD worker SIGKILL/通常再起動後の復旧2.96/5.85秒、全daemon restartから全確認102.76秒（60秒抑制と30秒sampling等を含む）。2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。自然T1・既存socket継続・3日/7日経過削除・全homert/HA/実機資格は今回の範囲外。
 
 DNSの複数上流/suffix/learnedDNS/両DoHを単体gateで接続した。次は実設定のprivate peer全体の確認、受入済みの4 DS-Lite選択policy/LAN静的gatewayに続いて、残るLAN/運用機能の単体経路を埋め、同じprofileで自然更新と継続通信を確認する。追加のPBR調査・PVE/QEMUは行わない。
 
-上流選択の優先作業を修正する。実homertはPD由来DS-Lite群（weight120）→別DS-Lite候補（80）→既存LAN上の静的gateway（60）。ユーザーが示すDS-Lite/PPPoE/静的経路などの順序に、既存の候補と終端を沿わせる。別のens20 WANと試験host用IPを必要とした前提・依頼は撤回する。既存`EgressPolicy`のgroup/weight/Health/ownerをnative設定へ接続し、優先順位と両端末の通信を受入済み。運用ログ・通信履歴も今回接続済み。次は残るLAN配布設定を接続する。直接bindによる4 tunnel疎通は上流選択の完成ではない。
+上流選択の優先作業を修正する。実homertはPD由来DS-Lite群（weight120）→別DS-Lite候補（80）→既存LAN上の静的gateway（60）。ユーザーが示すDS-Lite/PPPoE/静的経路などの順序に、既存の候補と終端を沿わせる。別のens20 WANと試験host用IPを必要とした前提・依頼は撤回する。既存`EgressPolicy`のgroup/weight/Health/ownerをnative設定へ接続し、優先順位と両端末の通信を受入済み。運用ログ・通信履歴も今回接続済み。LAN配布設定も受入済み。次は同一profileの自然更新と通信継続を確認する。直接bindによる4 tunnel疎通は上流選択の完成ではない。
 
 ## 仕切り直した実行順
 

@@ -52,6 +52,10 @@ def endpoint(mode, output, port):
                     if mode == 'echo':
                         sock.sendto(message, peer)
                     else:
+                        # Acceptance needs recent receipts, not an unbounded archive.
+                        if log.tell() >= 8 * 1024 * 1024:
+                            log.seek(0)
+                            log.truncate()
                         log.write(json.dumps({'time': time.time(), 'peer': peer, 'message': message.decode('utf-8')})+'\n')
 
 
