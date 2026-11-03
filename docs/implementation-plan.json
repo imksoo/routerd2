@@ -11414,6 +11414,14 @@
         "distribution": "前のe58d695ベースのアドレス配布変更で通常署名bundleを実publisherで生成し、receiverのstage/verifyが終了0。今回のDNS変更後のbundle試験ではない。25 worker roles、6 engine bindings、15 artifactsで、DHCPv4/v6は同一dnsmasq engine/sourceを参照し二重収録しない。初回のbundle実行はローカルのPPPoE source archive不足で未生成となり、既存Makefileのengine準備後に最終確認を通した。",
         "remaining": "隔離Linuxの実product process/kernelと独立端末での受入。保存homertのstateless構成にはpoolを追加していない。stateful lease同期、prefix変更/自然失効、HA、全構成Internet/署名起動・更新、ONU/NIC/性能と全34 packageは継続中。",
         "dns_implementation": "One typed DHCPv4/v6 receive view, actual dnsmasq lease input, original per-address lease/source lifetimes; same-name A/AAAA merge without another lease database."
+      },
+      "latest_stateful_dhcp6_renumber_gate": {
+        "status": "passed; NET-06 remains in progress",
+        "source": "aabd595 plus current-prefix lease publication fix",
+        "build_identity": "aabd5951463d",
+        "observed": "基準main `aabd595` + 本修正、通常Makefile build `aabd5951463d`、独立dhcpcd・実supervisor/control/network/worker・bundled dnsmasqで`dhcp6-server`が終了0。設定APIでLAN /64・RA・配布DNS/listenerを変更し、端末の自然更新から新prefix取得、旧AAAA撤去、新割当の両DNS/UDP/TCP A・AAAA・PTRとTCP/UDP、同じDUIDを確認した。端末をReleaseなしで停止し、実leaseの保存期限（120秒）後にAAAAが消え、600秒leaseのIPv4 Aは残った。再開後は端末の実割当とDAD完了を読み直し、DNSとTCP/UDPが復旧した。",
+        "remaining": "これは隔離Linuxでの設定によるLAN再番号付けとlease自然失効の受入。上流PDの変更/失効から同じstateful LANへ連鎖する全経路、stateful lease同期/HA、全構成Internet・実機/ONU/NIC/性能と全34 packageは継続中。",
+        "procedure": "make check-dhcp6-server DOCKER='sudo -n docker'"
       }
     }
   },

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/netip"
 	"os"
 	"strconv"
@@ -22,8 +23,34 @@ import (
 
 // The engine owns allocations and the file. As in routerd's zone reader,
 // independently usable rows survive unrelated lines and optional information.
-func readLeases(path string, now time.Time) ([]dhcp6serverconfig.Lease, error) {
-	data, err := os.ReadFile(path)
+func readLeases(c dhcp6serverconfig.Config, now time.Time) ([]dhcp6serverconfig.Lease, error) {
+	bits := int(c.Pool.PrefixLength)
+	if bits == 0 {
+		bits = 64
+	}
+	prefix := netip.PrefixFrom(c.Pool.Start, bits).Masked()
+	prefixes := []netip.Prefix{prefix}
+	if prefix.Addr().IsUnspecified() {
+		// Constructor ranges follow current interface prefixes. dnsmasq can
+		// retain an old binding in its lease file after returning VL=0 for it;
+		// that durable history is no longer a usable DNS address on this LAN.
+		iface, err := net.InterfaceByName(c.Interface)
+		if err != nil {
+			return nil, err
+		}
+		addresses, err := iface.Addrs()
+		if err != nil {
+			return nil, err
+		}
+		prefixes = nil
+		for _, address := range addresses {
+			p, err := netip.ParsePrefix(address.String())
+			if err == nil && p.Addr().Is6() && p.Addr().IsGlobalUnicast() {
+				prefixes = append(prefixes, netip.PrefixFrom(p.Addr(), bits).Masked())
+			}
+		}
+	}
+	data, err := os.ReadFile(c.StatePath + ".leases")
 	if err != nil {
 		return nil, err
 	}
@@ -43,6 +70,16 @@ func readLeases(path string, now time.Time) ([]dhcp6serverconfig.Lease, error) {
 		}
 		address, err := netip.ParseAddr(fields[2])
 		if err != nil || !address.Is6() || address.Is4In6() || address.Zone() != "" || !address.IsGlobalUnicast() {
+			continue
+		}
+		current := false
+		for _, prefix := range prefixes {
+			if prefix.Contains(address) {
+				current = true
+				break
+			}
+		}
+		if !current {
 			continue
 		}
 		hostname := fields[3]
@@ -79,7 +116,7 @@ func observeLeases(ctx context.Context, c dhcp6serverconfig.Config, server []byt
 				if source.until.Nanos != 0 {
 					s.ExpiresNanos = min(s.ExpiresNanos, source.until.Nanos)
 				}
-				s.Leases, err = readLeases(c.StatePath+".leases", clock.WallTime)
+				s.Leases, err = readLeases(c, clock.WallTime)
 				if err != nil {
 					return fmt.Errorf("observe DHCPv6 leases: %w", err)
 				}

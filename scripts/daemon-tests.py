@@ -57,7 +57,7 @@ SUITES = {
         ("TestDaemonDHCP6RAIndependentPeers", ("wan0",), 300),
         ("TestDaemonDHCP6DuplicateAddressDecline", ("wire0",), 90),
     ),
-    "dhcp6-server": (("TestDaemonDHCP6InformationIndependentClient", ("lan0",), 100), ("TestDaemonDHCP6StatefulIndependentClient", ("lan0",), 110)),
+    "dhcp6-server": (("TestDaemonDHCP6InformationIndependentClient", ("lan0",), 100), ("TestDaemonDHCP6StatefulIndependentClient", ("lan0",), 300)),
     "dhcp6-ra-pd": (
         ("TestDaemonDHCP6RAAddsAddressToPD", ("wire0", "lan0"), 160),
         ("TestDaemonConditionalLAN", ("wan0", "lan0"), 145),

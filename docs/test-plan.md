@@ -225,4 +225,9 @@ archive試験は既存の単体手順を共有し、各引継ぎ後に新しい�
 
 ## DHCPv4/v6の同名DNS登録
 
-同じ`check-dhcp6-server`のアドレス配布試験で、独立dhcpcdから実FQDNを送信する。DNS sourceには実DHCPv4/v6 serverを両方設定し、実配布されたIPv4/IPv6 DNSへ、同名のA/AAAAと両familyの実割当のPTRをUDP/TCPで照合する。クライアントのhostname変更・実更新と、worker/daemon再起動後も確認する。元のlease UTC期限と各producerの元BOOTTIME期限をアドレスごとに保持し、一方のfamilyの登録で他方を消さない。lease読取や通知の失敗でworking DHCP engineを止めず、再観測できない情報は元期限で失効させる。prefix変更/自然失効・同期と全構成Internetの残作業は別に閉じる。
+同じ`check-dhcp6-server`のアドレス配布試験で、独立dhcpcdから実FQDNを送信する。DNS sourceには実DHCPv4/v6 serverを両方設定し、実配布されたIPv4/IPv6 DNSへ、同名のA/AAAAと両familyの実割当のPTRをUDP/TCPで照合する。クライアントのhostname変更・実更新と、worker/daemon再起動後も確認する。元のlease UTC期限と各producerの元BOOTTIME期限をアドレスごとに保持し、一方のfamilyの登録で他方を消さない。lease読取や通知の失敗でworking DHCP engineを止めず、再観測できない情報は元期限で失効させる。上流PDからのprefix変更/失効の連鎖・同期と全構成Internetの残作業は別に閉じる。
+
+
+同じDHCPv6手順の後半では、設定APIからLAN /64・RA・配布DNS/listenerをまとめて変更する。端末の自然Renewから旧addressのVL=0と新prefix取得を確認し、新addressのTCP/UDP・A/AAAA/PTRとDUID保持を照合する。旧prefixのlease履歴がengine fileへ残っても、現在の配布prefixに属さないaddressをDNSへ再掲載しない。次に独立dhcpcdだけをSIGSTOPし（Releaseなし）、実120秒leaseの自然失効でAAAAが撤去され、実600秒leaseのAが残ることを両DNSのUDP/TCPで確認する。SIGCONT後の通常更新でDNSとTCP/UDPを再確認する。時計・DB・lease fileの手修復は使わない。自然待機を含めるため、この既存手順のowner上限は280秒、外側runnerは300秒とする。
+
+最新結果: 基準main `aabd595` + 本修正、通常Makefile build `aabd5951463d`、独立dhcpcd・実supervisor/control/network/worker・bundled dnsmasqで`dhcp6-server`が終了0。設定APIでLAN /64・RA・配布DNS/listenerを変更し、端末の自然更新から新prefix取得、旧AAAA撤去、新割当の両DNS/UDP/TCP A・AAAA・PTRとTCP/UDP、同じDUIDを確認した。端末をReleaseなしで停止し、実leaseの保存期限（120秒）後にAAAAが消え、600秒leaseのIPv4 Aは残った。再開後は端末の実割当とDAD完了を読み直し、DNSとTCP/UDPが復旧した。 これは隔離Linuxでの設定によるLAN再番号付けとlease自然失効の受入。上流PDの変更/失効から同じstateful LANへ連鎖する全経路、stateful lease同期/HA、全構成Internet・実機/ONU/NIC/性能と全34 packageは継続中。

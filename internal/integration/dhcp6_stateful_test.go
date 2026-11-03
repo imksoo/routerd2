@@ -19,6 +19,7 @@ import (
 
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6serverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
@@ -34,7 +35,7 @@ import (
 )
 
 func TestDaemonDHCP6StatefulIndependentClient(t *testing.T) {
-	if !isolateFixtureTimeout(t, "TestDaemonDHCP6StatefulIndependentClient", 95*time.Second) {
+	if !isolateFixtureTimeout(t, "TestDaemonDHCP6StatefulIndependentClient", 280*time.Second) {
 		return
 	}
 	client := fixturePeerNamespace(t, "lan0", "client0")
@@ -46,16 +47,16 @@ func TestDaemonDHCP6StatefulIndependentClient(t *testing.T) {
 		},
 		Zones: []dnsconfig.RuntimeZone{{Name: "lan", Spec: api.DNSZoneSpec{Zone: "lan.test", DHCPDerived: api.DNSZoneDHCPDerivedSpec{Sources: []string{"DHCPv4Server/addresses4", "DHCPv6Server/addresses"}}}}},
 	}
-	document := config.FromNative(config.Native{
+	native := config.Native{
 		Network: network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"2001:db8:80::1/64", "198.18.0.1/24"}}, {Name: "lo", Addresses: []string{"2001:db8:ffff::9/128"}}}},
 		Services: []serviceconfig.Service{
-			{Name: "addresses4", DHCPServer: &serviceconfig.DHCPServer{Interface: "lan0", ServerAddress: "198.18.0.1", Authoritative: true, Primary: dhcpserverconfig.Scope{Prefix: "198.18.0.0/24", Start: "198.18.0.100", End: "198.18.0.199", LeaseSeconds: 120, Router: "198.18.0.1", DNSServers: []string{"198.18.0.1"}, Domain: "lan.test"}}},
+			{Name: "addresses4", DHCPServer: &serviceconfig.DHCPServer{Interface: "lan0", ServerAddress: "198.18.0.1", Authoritative: true, Primary: dhcpserverconfig.Scope{Prefix: "198.18.0.0/24", Start: "198.18.0.100", End: "198.18.0.199", LeaseSeconds: 600, Router: "198.18.0.1", DNSServers: []string{"198.18.0.1"}, Domain: "lan.test"}}},
 			{Name: "addresses", DHCP6Server: &serviceconfig.DHCP6Server{Interface: "lan0", LogDHCP: true, Pool: &dhcp6serverconfig.Pool{Start: netip.MustParseAddr("::100"), End: netip.MustParseAddr("::1ff"), LeaseSeconds: 120}, DNSServers: []netip.Addr{netip.MustParseAddr("2001:db8:80::1")}, DomainSearch: []string{"lan.test"}}},
 			{Name: "lan-ra", RA: &serviceconfig.RouterAdvertisement{Config: ra.Config{Interface: "lan0", Managed: true, OtherConfig: true, RouterLifetimeSeconds: 1800, DNSSLifetimeSeconds: 1800, Prefixes: []ra.Prefix{{Prefix: "2001:db8:80::/64", OnLink: true, Autonomous: false, ValidLifetimeSeconds: 7200, PreferredLifetimeSeconds: 3600}}}}},
 			{Name: "dns", DNS: &serviceconfig.DNS{RuntimeConfig: resolver}},
 		},
-	})
-	f := startFixtureDaemon(t, document)
+	}
+	f := startFixtureDaemon(t, config.FromNative(native))
 	self, err := netns.Get()
 	if err != nil {
 		t.Fatal(err)
@@ -175,6 +176,12 @@ os.execvp('dhcpcd',sys.argv[1:])`, "dhcpcd", "-B", "-d", "-f", clientConfig, "-c
 	dnsName := "v6client"
 	checkDNS := func() {
 		t.Helper()
+		var observed string
+		defer func() {
+			if t.Failed() {
+				t.Log(observed)
+			}
+		}()
 		until(t, 8*time.Second, func() bool {
 			for _, server := range servers {
 				for _, transport := range []string{"+notcp", "+tcp"} {
@@ -184,10 +191,12 @@ os.execvp('dhcpcd',sys.argv[1:])`, "dhcpcd", "-B", "-d", "-f", clientConfig, "-c
 					}{{"A", address4}, {"AAAA", address}} {
 						answer, err := query(server, dnsName+".lan.test", record.kind, transport)
 						if err != nil {
+							observed = fmt.Sprintf("DNS %s %s %s: %q %v", server, transport, record.kind, answer, err)
 							return false
 						}
 						got, err := netip.ParseAddr(answer)
 						if err != nil || got != record.address {
+							observed = fmt.Sprintf("DNS %s %s %s: got %q, want %s", server, transport, record.kind, answer, record.address)
 							return false
 						}
 						cmd := exec.Command("dig", "@"+server, "-x", record.address.String(), "+short", "+time=2", "+tries=1", transport)
@@ -196,6 +205,7 @@ os.execvp('dhcpcd',sys.argv[1:])`, "dhcpcd", "-B", "-d", "-f", clientConfig, "-c
 							return false
 						}
 						if strings.TrimSpace(string(result)) != dnsName+".lan.test." {
+							observed = fmt.Sprintf("PTR %s %s %s: %q", server, transport, record.address, result)
 							return false
 						}
 					}
@@ -306,6 +316,110 @@ os.execvp('dhcpcd',sys.argv[1:])`, "dhcpcd", "-B", "-d", "-f", clientConfig, "-c
 		t.Fatal("daemon restart changed server DUID")
 	}
 	renew()
+
+	// Change the configured LAN prefix through the real control path. Keep
+	// DHCPv4 working while the constructor range follows the new IPv6 prefix.
+	oldAddress := address
+	native.Network.Interfaces[0].Addresses[0] = "2001:db8:81::1/64"
+	native.Services[1].DHCP6Server.DNSServers = []netip.Addr{netip.MustParseAddr("2001:db8:81::1")}
+	native.Services[2].RA.Prefixes[0].Prefix = "2001:db8:81::/64"
+	native.Services[3].DNS.Spec.Listen[0].Addresses[1] = "2001:db8:81::1"
+	var state control.State
+	if err := f.control.Do(ctx, "GET", "/v1/config", nil, &state); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.control.Do(ctx, "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: state.Revision, RequestID: "renumber-lan", Config: config.FromNative(native)}, nil); err != nil {
+		t.Fatal(err)
+	}
+	readRenumbered := func() bool {
+		found := false
+		err := fixtureInsideNamespace(client, func() error {
+			link, err := netlink.LinkByName("client0")
+			if err != nil {
+				return err
+			}
+			all, err := netlink.AddrList(link, netlink.FAMILY_V6)
+			for _, value := range all {
+				ip, parseErr := netip.ParseAddr(value.IP.String())
+				if parseErr == nil && netip.MustParsePrefix("2001:db8:81::/64").Contains(ip) && value.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) == 0 {
+					address = ip
+					found = true
+				}
+			}
+			return err
+		})
+		return err == nil && found && address != oldAddress
+	}
+	until(t, 135*time.Second, readRenumbered)
+	servers[1] = "2001:db8:81::1"
+	checkDNS()
+	traffic()
+	if identity() != original {
+		t.Fatal("prefix change changed server DUID")
+	}
+
+	// Suspend the independent client without Release. The real lease expires
+	// on the server's ordinary clock; IPv4 has its own longer lease.
+	if err := unix.Kill(-child.Process.Pid, unix.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = unix.Kill(-child.Process.Pid, unix.SIGCONT) })
+	var observed runtimeplan.InstanceStatus
+	if err := f.control.Do(ctx, "GET", "/v1/services/service.addresses", nil, &observed); err != nil {
+		t.Fatal(err)
+	}
+	var allocated dhcp6serverconfig.Snapshot
+	if err := json.Unmarshal(observed.Snapshot, &allocated); err != nil {
+		t.Fatal(err)
+	}
+	var expires time.Time
+	for _, lease := range allocated.Leases {
+		if lease.Address == address {
+			expires = lease.ExpiresAt
+			break
+		}
+	}
+	if expires.IsZero() {
+		t.Fatal("no actual lease expiry for", address)
+	}
+	// Wait for the recorded expiry rather than flooding the LAN with DNS
+	// queries throughout the client's lease lifetime.
+	if remaining := time.Until(expires); remaining > 0 {
+		time.Sleep(remaining)
+	}
+	until(t, 8*time.Second, func() bool {
+		answer, err := query(servers[0], dnsName+".lan.test", "AAAA", "+notcp")
+		return err == nil && answer == ""
+	})
+	for _, server := range servers {
+		for _, transport := range []string{"+notcp", "+tcp"} {
+			answer, err := query(server, dnsName+".lan.test", "A", transport)
+			got, parseErr := netip.ParseAddr(answer)
+			if err != nil || parseErr != nil || got != address4 {
+				t.Fatal("IPv6 expiry removed the live IPv4 record", answer, err)
+			}
+			answer, err = query(server, dnsName+".lan.test", "AAAA", transport)
+			if err != nil || answer != "" {
+				t.Fatal("expired DHCPv6 lease remains in DNS", answer, err)
+			}
+		}
+	}
+	beforeResume, err := os.Stat(lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Kill(-child.Process.Pid, unix.SIGCONT); err != nil {
+		t.Fatal(err)
+	}
+	clientAction("-N")
+	until(t, 15*time.Second, func() bool {
+		current, err := os.Stat(lease)
+		return err == nil && current.ModTime().After(beforeResume.ModTime()) && readRenumbered()
+	})
+	// The expired address was free to be reassigned; read the client's current
+	// allocation instead of requiring the old one to survive expiry.
+	checkDNS()
+	traffic()
 	capture.mu.Lock()
 	defer capture.mu.Unlock()
 	wanted, err := hex.DecodeString(original)

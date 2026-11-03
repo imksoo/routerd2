@@ -2,6 +2,14 @@
 
 更新: 2026-11-03。全体ゴールは継続中。
 
+## DHCPv6再番号付け時の古いDNS登録を修正
+
+実端末試験で、dnsmasqが旧addressにVL=0を返した後も元期限付きのlease履歴を保存し、DNSが旧・新AAAAを両方返す問題を再現した。engine lease fileは変更せず、観測時に固定poolのprefix、またはconstructorの現在のinterface prefixに属する割当だけを公開する。旧routerdのlease readerとdnsmasqのconstructor/lease実装を比較した。新しいallocator、lease DB、再試行層は追加していない。
+
+基準main `aabd595` + 本修正、通常Makefile build `aabd5951463d`、独立dhcpcd・実supervisor/control/network/worker・bundled dnsmasqで`dhcp6-server`が終了0。設定APIでLAN /64・RA・配布DNS/listenerを変更し、端末の自然更新から新prefix取得、旧AAAA撤去、新割当の両DNS/UDP/TCP A・AAAA・PTRとTCP/UDP、同じDUIDを確認した。端末をReleaseなしで停止し、実leaseの保存期限（120秒）後にAAAAが消え、600秒leaseのIPv4 Aは残った。再開後は端末の実割当とDAD完了を読み直し、DNSとTCP/UDPが復旧した。
+
+これは隔離Linuxでの設定によるLAN再番号付けとlease自然失効の受入。上流PDの変更/失効から同じstateful LANへ連鎖する全経路、stateful lease同期/HA、全構成Internet・実機/ONU/NIC/性能と全34 packageは継続中。 関連Race/vet、make fmt-check/test-tools、通常3実行物のstatic linkも通過。再実行は`make check-dhcp6-server DOCKER='sudo -n docker'`。先行runnerでは期限待ちのDNS連続照会がcapture上限を超え、再開直後の旧address前提も失敗した。実保存期限を待ち、再取得後の実kernel address/DADを観測する形へ直し、capture上限と意図した通信確認を維持した最終手順が合格した。
+
 ## DHCPv6 leaseのDNS登録と両familyの自動設定
 
 旧routerdのdnsmasq lease読取とzone回答を基に、engineが所有する実IPv6 leaseを有限の観測としてDNSへ接続した。DHCPv4/v6は同じtyped receive viewを使い、別のlease DBは作らない。同名レコードを丸ごと置き換える処理を修正し、A/AAAAを集約して各addressの元lease期限/producer期限を保持する。lease読取・通知はengine停止を妨げない所有goroutineで行い、報告失敗で配布自体を止めない。

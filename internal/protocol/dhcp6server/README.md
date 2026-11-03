@@ -127,8 +127,12 @@ A DNS zone can consume `DHCPv6Server/<service-name>` alongside DHCPv4 sources.
 The worker observes the actual engine lease file; the engine remains the sole
 allocation owner. Each address retains its original lease expiry and finite
 source observation deadline. Adding AAAA preserves A for the same name, and
-expired addresses disappear independently. Ancillary publication failure does
+expired addresses disappear independently. Constructor pools publish bindings
+only under current interface prefixes; a retained old-prefix lease row is
+allocation history, not a usable DNS address. Ancillary publication failure does
 not stop allocation; an unrefreshed DNS observation expires.
 
-Stateful lease synchronization, prefix change, natural lease expiry,
-Reconfigure and complete deployment qualification remain open.
+The same check exercises a configured LAN prefix change through natural
+client renewal, original lease expiry without Release, independent IPv4 DNS
+retention and reacquisition. Stateful lease synchronization, upstream-PD-driven
+renumbering/expiry, Reconfigure and complete deployment qualification remain open.
