@@ -128,14 +128,14 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         boot["engines"]["ntp"] = str(stage / "chrony-engine.tar")
         management_key = stage / "management-key"
         run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(management_key)])
-        boot["ssh"] = {"listen": "198.19.0.1:2222", "user": "admin", "authorized_keys": [management_key.with_suffix(".pub").read_text().strip()]}
+        boot["ssh"] = {"listen": "10.255.255.1:2222", "user": "admin", "authorized_keys": [management_key.with_suffix(".pub").read_text().strip()]}
     (stage / "boot.json").write_text(json.dumps(boot))
     if config_path is None:
-        nat_rules = [{"type": "masquerade", "match": {"family": 4, "source": "198.18.0.0/24", "out_interface": "dslite0"}}]
+        nat_rules = [{"type": "masquerade", "match": {"family": 4, "source": "198.18.0.0/16", "out_interface": "dslite0"}}]
         resources = [
             {"id": "wan", "interface": {"name": "wan0", "ipv4_rp_filter": 0}},
             {"id": "lan", "interface": {"name": "lan0"}},
-            {"id": "lan-ip", "address": {"interface": "lan0", "cidr": "198.18.0.1/24"}},
+            {"id": "lan-ip", "address": {"interface": "lan0", "cidr": "198.18.0.1/16"}},
             {
                 "id": "forwarding",
                 "forwarding": {"ipv4": True, "ipv6": True, "ipv4_rp_filter": 0},
@@ -219,7 +219,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                 "id": "leases",
                 "service": {"name": "leases", "dhcp_server": {
                     "interface": "lan0", "server_address": "198.18.0.1", "sticky_hold_days": 3, "authoritative": True,
-                    "primary": {"prefix": "198.18.0.0/24", "start": "198.18.0.2", "end": "198.18.0.20",
+                    "primary": {"prefix": "198.18.0.0/16", "start": "198.18.0.2", "end": "198.18.0.20",
                                 "lease_seconds": 60, "router": "198.18.0.1", "dns_servers": ["198.18.0.1"]},
                 }},
             },
@@ -318,11 +318,11 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         )
         run(["ip", "-n", client, "link", "set", "client0", "address", "02:00:00:00:00:02"])
         run(["ip", "-n", client, "link", "set", "client0", "up"])
-        run(["ip", "-n", client, "address", "add", dns_peer_address + "/24", "dev", "client0"])
+        run(["ip", "-n", client, "address", "add", dns_peer_address + "/16", "dev", "client0"])
 
         if config_path is not None:
             run(["ip", "link", "add", "mgmt0", "netns", router, "type", "veth", "peer", "name", "mgmt-peer", "netns", client])
-            run(["ip", "-n", client, "address", "add", "198.19.0.2/24", "dev", "mgmt-peer"])
+            run(["ip", "-n", client, "address", "add", "10.255.255.2/24", "dev", "mgmt-peer"])
             run(["ip", "-n", client, "link", "set", "mgmt-peer", "up"])
 
         if config_path is not None:
@@ -333,8 +333,9 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             namespaces.append(gateway)
             run(["ip", "-n", gateway, "link", "set", "lo", "up"])
             run(inside(client, ["ip", "link", "add", "link", "client0", "name", "gateway-lan", "netns", gateway, "type", "macvlan", "mode", "bridge"]))
-            run(["ip", "-n", gateway, "address", "add", "198.18.0.253/24", "dev", "gateway-lan"])
+            run(["ip", "-n", gateway, "address", "add", "198.19.0.253/16", "dev", "gateway-lan"])
             run(["ip", "-n", gateway, "link", "set", "gateway-lan", "up"])
+            run(["ip", "-n", gateway, "route", "add", "198.18.0.0/16", "via", "198.19.0.1", "dev", "gateway-lan"])
             run(["ip", "link", "add", "link", uplink, "name", "gateway-wan", "netns", gateway, "type", "macvlan", "mode", "bridge"])
             gateway_mac = (int(wan_mac.replace(":", ""), 16) + 1).to_bytes(6, "big")
             run(["ip", "-n", gateway, "link", "set", "gateway-wan", "address", ":".join(f"{b:02x}" for b in gateway_mac), "up"])
@@ -349,10 +350,10 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             wait(lambda: bool(json.loads(run(["ip", "-n", gateway, "-j", "route", "show", "default"]))))
             run(inside(gateway, ["sysctl", "-qw", "net.ipv4.ip_forward=1"]))
             gateway_nat = stage / "gateway-nat.nft"
-            gateway_nat.write_text('table ip independent_gateway {\n chain nat {\n type nat hook postrouting priority srcnat;\n ip saddr 198.18.0.0/24 oifname "gateway-wan" masquerade\n }\n}\n')
+            gateway_nat.write_text('table ip independent_gateway {\n chain nat {\n type nat hook postrouting priority srcnat;\n ip saddr { 198.18.0.0/16, 198.19.0.0/16 } oifname "gateway-wan" masquerade\n }\n}\n')
             run(inside(gateway, ["nft", "-f", str(gateway_nat)]))
             start(gateway, ["dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null", "--no-hosts", "--no-resolv",
-                "--bind-interfaces", "--listen-address=198.18.0.253", "--server=1.1.1.1", "--pid-file=" + str(stage / "gateway-dns.pid")], "gateway-dns")
+                "--bind-interfaces", "--listen-address=198.19.0.253", "--server=1.1.1.1", "--pid-file=" + str(stage / "gateway-dns.pid")], "gateway-dns")
             wait(lambda: bool(run(inside(gateway, ["ss", "-H", "-lun", "sport = :53"]))))
 
         def start_private_dns(port, answer):
@@ -390,7 +391,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                 name = "static-device-" + address
                 start(gateway, ["python3", "-u", "-c", echo["ECHO_SERVER"], address], name)
                 wait(lambda name=name: "READY" in (stage / (name + ".log")).read_text())
-            for namespace, address, name in ((client, "198.19.0.2", "management-device"), (gateway, wan_local_peer, "wan-local-device")):
+            for namespace, address, name in ((client, "10.255.255.2", "management-device"), (gateway, wan_local_peer, "wan-local-device"), (gateway, "198.19.0.253", "legacy-device")):
                 start(namespace, ["python3", "-u", "-c", echo["ECHO_SERVER"], address], name)
                 wait(lambda name=name: "READY" in (stage / (name + ".log")).read_text())
 
@@ -468,7 +469,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             ntp_source = stage / "ntp-source.conf"
             ntp_source.write_text(
                 "local stratum 8\n"
-                f"bindaddress {dns_peer_address}\nallow 198.18.0.0/24\ncmdport 0\n"
+                f"bindaddress {dns_peer_address}\nallow 198.18.0.0/16\ncmdport 0\n"
                 f"bindcmdaddress {stage}/ntp-source.sock\npidfile {stage}/ntp-source.pid\n"
                 f"driftfile {stage}/ntp-source.drift\n"
             )
@@ -530,7 +531,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                     {"id": "tailnet", "service": {"name": "tailnet", "tailscale": {
                         "interface": "tailscale0", "server_url": "https://192.0.2.1:8443", "hostname": "hgw-router",
                         "auth_key_file": str(authfile), "control_ca_file": str(cert),
-                        "advertise_routes": ["198.18.0.0/24"], "advertise_exit_node": True,
+                        "advertise_routes": ["198.18.0.0/16"], "advertise_exit_node": True,
                     }}},
                 ]
                 firewall = next(r["firewall"] for r in resources if "firewall" in r)
@@ -624,13 +625,14 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             configured = query("control.sock", "/v1/config")["config"]
             core = next(r["service"]["dns"] for r in configured["resources"] if r["id"] == "service/dns-core")
             lan_domain = core["zones"][0]["spec"]["zone"].rstrip(".")
+            lan_dhcp = next(r["service"]["dhcp_server"] for r in configured["resources"] if r["id"] == "service/lan-leases")
         lease_events = stage / "client-lease-events"
         client_options = stage / "client-dhcp-options"
         hook = stage / "client-dhcp-hook.sh"
         hook.write_text(
             '#!/bin/sh\ncase "$1" in\n'
             'bound|renew)\n'
-            '  ip address replace "$ip/24" dev "$interface" || exit 1\n'
+            '  ip address replace "$ip/$subnet" dev "$interface" || exit 1\n'
             '  ip route replace default via "$router" dev "$interface" || exit 1\n'
             '  printf "%s|%s\\n" "$ntpsrv" "$search" > "' + str(client_options) + '"\n'
             '  printf "%s %s %s %s\\n" "$1" "$ip" "$router" "$dns" >> "' + str(lease_events) + '";;\n'
@@ -715,11 +717,17 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         if config_path is not None:
             auto_v4 = next(event for event in reversed(auto_options) if event[0] == "v4")
             auto_address = ipaddress.IPv4Address(auto_v4[2])
-            assert ipaddress.IPv4Address("198.18.0.64") <= auto_address <= ipaddress.IPv4Address("198.18.0.191"), "unmatched client was outside the primary scope: " + str(auto_v4)
+            assert ipaddress.IPv4Address(lan_dhcp["primary"]["start"]) <= auto_address <= ipaddress.IPv4Address(lan_dhcp["primary"]["end"]), "unmatched client was outside the primary scope: " + str(auto_v4)
             assert auto_v4[3:] == ["198.18.0.1", "198.18.0.1"], "primary scope did not supply its configured gateway and DNS: " + str(auto_v4)
             print("PASS independent unmatched client received a dynamic lease from the primary scope", auto_v4[2], flush=True)
         auto_dns6 = [ipaddress.IPv6Address(address) for address in next(event[1] for event in reversed(auto_options) if event[0] == "v6").split()]
         auto_addresses = json.loads(run(["ip", "-n", automatic, "-j", "address", "show", "dev", "client1"]))
+        if config_path is not None:
+            primary = ipaddress.ip_network(lan_dhcp["primary"]["prefix"])
+            for namespace, interface, address in ((client, "client0", lease[1]), (automatic, "client1", str(auto_address))):
+                assigned = json.loads(run(["ip", "-n", namespace, "-j", "-4", "address", "show", "dev", interface]))
+                assert any(a["local"] == address and a["prefixlen"] == primary.prefixlen
+                    for link in assigned for a in link["addr_info"]), assigned
         delegated = [ipaddress.IPv6Network(p["prefix"]) for p in query("control.sock", "/v1/services/service.wan-pd")["snapshot"]["prefixes"]]
         ra_dns = [ipaddress.IPv6Address(address) for address in next(event[1] for event in reversed(auto_options) if event[0] == "ra" and len(event) == 2 and event[1]).split()]
         router_addresses = json.loads(run(["ip", "-n", router, "-j", "-6", "address", "show", "dev", "lan0"]))
@@ -796,25 +804,105 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             wait(listening)
             print("Observed fresh IPv4/IPv6 DNS listener readiness; seconds", round((time.clock_gettime_ns(time.CLOCK_BOOTTIME) - started) / 1e9, 2), flush=True)
 
+        special_clients = []
+        def start_special_client(index, mac, requested=""):
+            namespace = "r2special" + str(index) + "-" + str(os.getpid())
+            run(["ip", "netns", "add", namespace])
+            namespaces.append(namespace)
+            run(["ip", "-n", namespace, "link", "set", "lo", "up"])
+            run(inside(client, ["ip", "link", "add", "link", "client0", "name", "special0", "netns", namespace, "type", "macvlan", "mode", "bridge"]))
+            run(["ip", "-n", namespace, "link", "set", "special0", "address", mac, "up"])
+            events = stage / ("special" + str(index) + "-leases")
+            hook = stage / ("special" + str(index) + "-hook.sh")
+            hook.write_text('#!/bin/sh\ncase "$1" in bound|renew)\n'
+                'ip address replace "$ip/$subnet" dev "$interface" || exit 1\n'
+                'ip route replace default via "$router" dev "$interface" || exit 1\n'
+                'printf "%s|%s|%s|%s\\n" "$1" "$ip" "$router" "$dns" >> "' + str(events) + '";;\n'
+                'deconfig) ip -4 address flush dev "$interface" scope global; ip -4 route flush dev "$interface";;\nesac\n')
+            hook.chmod(0o500)
+            command = ["busybox", "udhcpc", "-f", "-i", "special0", "-s", str(hook), "-p", str(stage / ("special" + str(index) + ".pid")),
+                "-t", "3", "-T", "1", "-A", "1", "-x", "hostname:special-" + str(index)]
+            if requested:
+                command += ["-r", requested]
+            process = start(namespace, command, "special" + str(index) + "-dhcp")
+            wait(lambda: events.exists() and bool(events.read_text().strip()))
+            result = (namespace, process, events, mac)
+            special_clients.append(result)
+            return result
+
+        def check_special_clients():
+            for namespace, process, events, mac in special_clients:
+                lease = events.read_text().splitlines()[-1].split("|")
+                address = ipaddress.IPv4Address(lease[1])
+                scope = next(row for row in lan_dhcp["scopes"] if row["name"] == "special-devices")
+                assert ipaddress.IPv4Address(scope["start"]) <= address <= ipaddress.IPv4Address(scope["end"]), lease
+                assert lease[2:] == [scope["router"], " ".join(scope["dns_servers"])], lease
+                assigned = json.loads(run(["ip", "-n", namespace, "-j", "-4", "address", "show", "dev", "special0"]))
+                assert any(a["local"] == str(address) and ipaddress.ip_interface(a["local"] + "/" + str(a["prefixlen"])).network == ipaddress.ip_network(scope["prefix"])
+                    for link in assigned for a in link["addr_info"]), assigned
+                default = json.loads(run(["ip", "-n", namespace, "-j", "route", "show", "default"]))
+                assert default[0]["gateway"] == lease[2], default
+                answer = run(inside(namespace, ["dig", "@" + lease[3], "example.net", "A", "+short", "+time=3", "+tries=1"]))
+                assert answer.strip(), "special scope DNS did not resolve through its own gateway"
+                run(inside(namespace, ["curl", "-4", "--noproxy", "*", "--fail", "--max-time", "8", "--resolve",
+                    "one.one.one.one:443:1.1.1.1", "-sS", "-I", "https://one.one.one.one/"]))
+                wait(lambda: bool(query("control.sock", "/v1/services/service.lan-leases/dhcp-fingerprints?mac=" + mac + "&limit=10").get("entries")))
+            for options in (client_options, auto_dhcp_options):
+                ntp, search = options.read_text().strip().split("|")
+                assert set(ntp.split()) == {"198.18.0.1", "198.18.0.254"}, (options.name, ntp)
+                assert lan_domain in search.split(), (options.name, search)
+            print("PASS primary/reserved and OUI/exact-MAC scopes supplied their configured pool, gateway, DNS, NTP/search; special clients reached public DNS/HTTPS via the independent LAN gateway; DHCP fingerprints persisted", flush=True)
+
+        def check_lan_distribution():
+            first = start_special_client(0, "02:77:00:00:00:04")
+            start_special_client(1, "02:77:01:00:00:05")
+            original = first[2].read_text().splitlines()[-1].split("|")[1]
+            first[1].send_signal(signal.SIGUSR2)
+            def held():
+                path = stage / "state/services/lan-leases/dhcp-sticky.db"
+                if not path.exists():
+                    return False
+                with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as database:
+                    row = database.execute("SELECT released_at, sticky_until FROM dhcp_sticky_leases WHERE mac=? AND ip=?", (first[3], original)).fetchone()
+                if not row or not row[0]:
+                    return False
+                assert row[1] - row[0] == 3 * 86400 * 1_000_000_000, row
+                return True
+            wait(held)
+            wait(lambda: not any(a.get("scope") == "global" for link in json.loads(run(["ip", "-n", first[0], "-j", "-4", "address", "show", "dev", "special0"])) for a in link["addr_info"]))
+            third = start_special_client(2, "02:77:01:00:00:06", original)
+            assert third[2].read_text().splitlines()[-1].split("|")[1] != original, "a different MAC acquired the released address during its configured sticky hold"
+            previous = len(first[2].read_text().splitlines())
+            first[1].send_signal(signal.SIGUSR1)
+            wait(lambda: len(first[2].read_text().splitlines()) > previous)
+            assert first[2].read_text().splitlines()[-1].split("|")[1] == original, "returning MAC did not recover its held address"
+            check_special_clients()
+            print("PASS actual DHCP release created a 3-day hold; another MAC requesting that address received a different lease, and the original MAC recovered its held address", flush=True)
+
         def check_local_devices():
             wan = query("control.sock", "/v1/services/service.wan4")["snapshot"]
-            for destination, translated in (("198.19.0.2", "198.19.0.1"), (wan_local_peer, wan["currentAddress"])):
+            source = json.loads(run(["ip", "-n", automatic, "-j", "route", "get", "198.19.0.253"]))[0]["prefsrc"]
+            for destination, translated in (("10.255.255.2", "10.255.255.1"), (wan_local_peer, wan["currentAddress"]), ("198.19.0.253", source)):
                 # The other LAN namespace owns the management peer. Use the
                 # automatic client so packets actually traverse the router.
                 run(inside(automatic, ["python3", "-c", echo["ECHO_CLIENT"], destination, translated]))
-            print("PASS independent LAN client reached management and WAN-local devices over TCP/UDP; peers observed the configured management and current WAN source addresses", flush=True)
+            print("PASS independent LAN client reached management/WAN-local devices with source NAT and the legacy LAN device with its original source over TCP/UDP", flush=True)
 
         def check_static_routes():
             wan = query("control.sock", "/v1/services/service.wan4")["snapshot"]["currentAddress"]
             source = json.loads(run(["ip", "-n", automatic, "-j", "route", "get", "192.168.50.1"]))[0]["prefsrc"]
-            # The WAN peer also serves the existing LAN gateway fixture. This
-            # host route gives its WAN device a symmetric return path.
-            run(["ip", "-n", gateway, "route", "replace", source + "/32", "via", wan, "dev", "gateway-wan"])
-            for destination, expected, interface in (("192.168.100.1", "198.18.0.1", "lan0"),
-                    ("172.20.1.1", "198.18.0.1", "lan0"), ("192.168.50.1", source, "wan0")):
+            for destination, interface in (("192.168.100.1", "lan0"), ("172.20.1.1", "lan0"), ("192.168.50.1", "wan0")):
                 route = json.loads(run(["ip", "-n", router, "-j", "route", "get", destination, "from", source, "iif", "lan0"]))[0]
                 assert route["dev"] == interface, route
-                run(inside(automatic, ["python3", "-c", echo["ECHO_CLIENT"], destination, expected]))
+            for destination in ("192.168.100.1", "172.20.1.1"):
+                run(inside(automatic, ["python3", "-c", echo["ECHO_CLIENT"], destination, source]))
+            # This peer also serves the LAN gateway. Give its WAN device a
+            # symmetric return path for this exchange, then restore the LAN path.
+            run(["ip", "-n", gateway, "route", "replace", source + "/32", "via", wan, "dev", "gateway-wan"])
+            try:
+                run(inside(automatic, ["python3", "-c", echo["ECHO_CLIENT"], "192.168.50.1", source]))
+            finally:
+                run(["ip", "-n", gateway, "route", "del", source + "/32"])
             blackholes = json.loads(run(["ip", "-n", router, "-j", "route", "show", "type", "blackhole", "10.0.0.0/8"]))
             assert any(row.get("dst") == "10.0.0.0/8" for row in blackholes), blackholes
             packet_file = stage / "blackhole.pcap"
@@ -851,6 +939,7 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
             print("PASS independent LAN client resolved router IPv4/IPv6 and its DHCP reservation through routerd2 DNS", flush=True)
             check_local_devices()
             check_static_routes()
+            check_lan_distribution()
         if tailnet:
             def tailnet_observation():
                 return query("control.sock", "/v1/services/service.tailnet").get("snapshot", {})
@@ -862,7 +951,7 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
             peer_ips = {ipaddress.ip_address(a).version: a for a in peer_status["TailscaleIPs"]}
             nodes = json.loads(run(inside(remote, head + ["nodes", "list", "-o", "json"])))
             node = next(n for n in nodes if n["name"] == "hgw-router")
-            run(inside(remote, head + ["nodes", "approve-routes", "-i", str(node["id"]), "-r", "198.18.0.0/24,0.0.0.0/0,::/0"]))
+            run(inside(remote, head + ["nodes", "approve-routes", "-i", str(node["id"]), "-r", "198.18.0.0/16,0.0.0.0/0,::/0"]))
             wait(lambda: any(product_ips[0] in p.get("TailscaleIPs", []) and p.get("ExitNodeOption")
                              for p in json.loads(run(inside(remote, peer_cli + ["status", "--json"]))).get("Peer", {}).values()))
             run(inside(remote, peer_cli + ["set", "--exit-node=" + product_ips[0], "--exit-node-allow-lan-access=true"]))
@@ -969,7 +1058,7 @@ print(*s.getsockname())
                 expected = "lan0" if mark == 276 else "dslite" + str(mark - 272)
                 assert route["dev"] == expected, route
                 if mark == 276:
-                    assert route["gateway"] == "198.18.0.253", route
+                    assert route["gateway"] == "198.19.0.253", route
                 status = run(inside(namespace, ["curl", "-4", "--noproxy", "*", "--max-time", "8", "--resolve",
                     "one.one.one.one:443:1.1.1.1", "-sS", "-I", "-o", "/dev/null", "-w", "%{http_code}", "https://one.one.one.one/"]))
                 assert status in ("200", "301", "302", "308"), status
@@ -999,7 +1088,11 @@ print(*s.getsockname())
 
         if config_path is not None:
             check_dslite_paths()
-            check_upstream_recovery()
+            if wan_outage:
+                check_upstream_recovery()
+            else:
+                wait(lambda: all(query("control.sock", "/v1/services/service.health-dslite" + str(i)).get("snapshot", {}).get("active", False) for i in range(3)))
+                check_selected_upstream({272, 273, 274})
 
         cached_answers = {}
         for server, family in ((lease[3], "-4"), (str(router_dns), "-6")):
@@ -1061,8 +1154,8 @@ print(*s.getsockname())
             wait(lambda: bgp_peer_states() == {p[1]: "SESSION_STATE_ESTABLISHED" for p in bgp_peers})
             wait(lambda: selected_bgp_peer() in bgp_processes)
             for namespace, address, root in bgp_peers:
-                wait(lambda: any(r.get("gateway") == "192.0.2.1" for r in json.loads(run(["ip", "-n", namespace, "-j", "route", "show", "198.18.0.0/24"]))))
-                peer_view = json.loads(run(inside(namespace, ["vtysh", "--vty_socket", str(root), "-d", "bgpd", "-c", "show bgp ipv4 unicast 198.18.0.0/24 json"])))
+                wait(lambda: any(r.get("gateway") == "192.0.2.1" for r in json.loads(run(["ip", "-n", namespace, "-j", "route", "show", "198.18.0.0/16"]))))
+                peer_view = json.loads(run(inside(namespace, ["vtysh", "--vty_socket", str(root), "-d", "bgpd", "-c", "show bgp ipv4 unicast 198.18.0.0/16 json"])))
                 assert peer_view.get("paths"), "independent FRR did not receive the LAN advertisement: " + address
             bgp_traffic()
             print("PASS two independent FRR peers received LAN routes; BGP selected a learned kernel path and both LAN clients completed TCP/UDP without NAT", flush=True)
@@ -1084,14 +1177,14 @@ print(*s.getsockname())
             print("PASS each independent BGP peer stopped and rejoined with routes and client traffic restored", flush=True)
 
         def check_management():
-            for namespace, server in ((router, "127.0.0.1"), (client, "198.19.0.1")):
+            for namespace, server in ((router, "127.0.0.1"), (client, "10.255.255.1")):
                 answer = run(inside(namespace, ["dig", "@" + server, "router." + lan_domain, "A", "+short", "+time=3", "+tries=1"]))
                 assert answer.strip() == "198.18.0.1", "loopback/management DNS did not resolve the configured LAN name: " + answer
             status = json.loads(run(inside(client, [
                 "ssh", "-F", "/dev/null", "-i", str(management_key), "-o", "BatchMode=yes",
                 "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=accept-new",
                 "-o", "UserKnownHostsFile=" + str(stage / "known-hosts"), "-o", "ConnectTimeout=3",
-                "-p", "2222", "admin@198.19.0.1", "show status",
+                "-p", "2222", "admin@10.255.255.1", "show status",
             ])))
             assert status["ready"], "SSH reported the router unavailable"
             # LAN and core caches have separate owners. Exercise the core's own
@@ -1102,82 +1195,11 @@ print(*s.getsockname())
             history_path = "/v1/services/service.dns-core/dns-history?name=available.split.test.&limit=20"
             wait(lambda: any(q["cacheHit"] for q in query("control.sock", history_path)["queries"]))
             page = run(inside(client, ["curl", "--noproxy", "*", "--fail", "--max-time", "4", "-sS",
-                "http://198.19.0.1:8080/dns-queries?service=service.dns-core&name=available.split.test.&limit=20"]))
+                "http://10.255.255.1:8080/dns-queries?service=service.dns-core&name=available.split.test.&limit=20"]))
             assert 'data-query="' in page and any(address in page for address in ("192.0.2.77", "192.0.2.78")), "Web console omitted the recorded DNS answer"
-            denied = subprocess.run(inside(client, ["curl", "--interface", "client0", "--noproxy", "*", "--max-time", "2", "-sS", "http://198.19.0.1:8080/"]), capture_output=True)
+            denied = subprocess.run(inside(client, ["curl", "--interface", "client0", "--noproxy", "*", "--max-time", "2", "-sS", "http://10.255.255.1:8080/"]), capture_output=True)
             assert denied.returncode != 0, "management console was reachable through the LAN interface"
             print("PASS loopback/management DNS, cache during upstream outage, persistent query history, SSH host identity and Web access restricted to management interface", flush=True)
-
-        special_clients = []
-        def start_special_client(index, mac, requested=""):
-            namespace = "r2special" + str(index) + "-" + str(os.getpid())
-            run(["ip", "netns", "add", namespace])
-            namespaces.append(namespace)
-            run(["ip", "-n", namespace, "link", "set", "lo", "up"])
-            run(inside(client, ["ip", "link", "add", "link", "client0", "name", "special0", "netns", namespace, "type", "macvlan", "mode", "bridge"]))
-            run(["ip", "-n", namespace, "link", "set", "special0", "address", mac, "up"])
-            events = stage / ("special" + str(index) + "-leases")
-            hook = stage / ("special" + str(index) + "-hook.sh")
-            hook.write_text('#!/bin/sh\ncase "$1" in bound|renew)\n'
-                'ip address replace "$ip/$subnet" dev "$interface" || exit 1\n'
-                'ip route replace default via "$router" dev "$interface" || exit 1\n'
-                'printf "%s|%s|%s|%s\\n" "$1" "$ip" "$router" "$dns" >> "' + str(events) + '";;\n'
-                'deconfig) ip -4 address flush dev "$interface" scope global; ip -4 route flush dev "$interface";;\nesac\n')
-            hook.chmod(0o500)
-            command = ["busybox", "udhcpc", "-f", "-i", "special0", "-s", str(hook), "-p", str(stage / ("special" + str(index) + ".pid")),
-                "-t", "3", "-T", "1", "-A", "1", "-x", "hostname:special-" + str(index)]
-            if requested:
-                command += ["-r", requested]
-            process = start(namespace, command, "special" + str(index) + "-dhcp")
-            wait(lambda: events.exists() and bool(events.read_text().strip()))
-            result = (namespace, process, events, mac)
-            special_clients.append(result)
-            return result
-
-        def check_special_clients():
-            for namespace, process, events, mac in special_clients:
-                lease = events.read_text().splitlines()[-1].split("|")
-                address = ipaddress.IPv4Address(lease[1])
-                assert ipaddress.IPv4Address("198.18.0.32") <= address <= ipaddress.IPv4Address("198.18.0.63"), lease
-                assert lease[2:] == ["198.18.0.253", "198.18.0.253"], lease
-                default = json.loads(run(["ip", "-n", namespace, "-j", "route", "show", "default"]))
-                assert default[0]["gateway"] == lease[2], default
-                answer = run(inside(namespace, ["dig", "@" + lease[3], "example.net", "A", "+short", "+time=3", "+tries=1"]))
-                assert answer.strip(), "special scope DNS did not resolve through its own gateway"
-                run(inside(namespace, ["curl", "-4", "--noproxy", "*", "--fail", "--max-time", "8", "--resolve",
-                    "one.one.one.one:443:1.1.1.1", "-sS", "-I", "https://one.one.one.one/"]))
-                wait(lambda: bool(query("control.sock", "/v1/services/service.lan-leases/dhcp-fingerprints?mac=" + mac + "&limit=10").get("entries")))
-            for options in (client_options, auto_dhcp_options):
-                ntp, search = options.read_text().strip().split("|")
-                assert set(ntp.split()) == {"198.18.0.1", "198.18.0.254"}, (options.name, ntp)
-                assert lan_domain in search.split(), (options.name, search)
-            print("PASS primary/reserved and OUI/exact-MAC scopes supplied their configured pool, gateway, DNS, NTP/search; special clients reached public DNS/HTTPS via the independent LAN gateway; DHCP fingerprints persisted", flush=True)
-
-        def check_lan_distribution():
-            first = start_special_client(0, "02:77:00:00:00:04")
-            start_special_client(1, "02:77:01:00:00:05")
-            original = first[2].read_text().splitlines()[-1].split("|")[1]
-            first[1].send_signal(signal.SIGUSR2)
-            def held():
-                path = stage / "state/services/lan-leases/dhcp-sticky.db"
-                if not path.exists():
-                    return False
-                with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as database:
-                    row = database.execute("SELECT released_at, sticky_until FROM dhcp_sticky_leases WHERE mac=? AND ip=?", (first[3], original)).fetchone()
-                if not row or not row[0]:
-                    return False
-                assert row[1] - row[0] == 3 * 86400 * 1_000_000_000, row
-                return True
-            wait(held)
-            wait(lambda: not any(a.get("scope") == "global" for link in json.loads(run(["ip", "-n", first[0], "-j", "-4", "address", "show", "dev", "special0"])) for a in link["addr_info"]))
-            third = start_special_client(2, "02:77:01:00:00:06", original)
-            assert third[2].read_text().splitlines()[-1].split("|")[1] != original, "a different MAC acquired the released address during its configured sticky hold"
-            previous = len(first[2].read_text().splitlines())
-            first[1].send_signal(signal.SIGUSR1)
-            wait(lambda: len(first[2].read_text().splitlines()) > previous)
-            assert first[2].read_text().splitlines()[-1].split("|")[1] == original, "returning MAC did not recover its held address"
-            check_special_clients()
-            print("PASS actual DHCP release created a 3-day hold; another MAC requesting that address received a different lease, and the original MAC recovered its held address", flush=True)
 
         def check_operations():
             since = time.time_ns()
@@ -1247,7 +1269,6 @@ print(*s.getsockname())
 
         if config_path is not None:
             check_dns_sources()
-            check_lan_distribution()
             check_management()
             check_bgp()
             check_bgp_peer_recovery()

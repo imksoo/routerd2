@@ -984,7 +984,13 @@
           "result": "Restores old routerd supplementary Information-request after PD Reply even when DNS is already present. Partial PD updates retain omitted live information only through its original deadline. Parent normal dhcp6-information-original-expiry-native92 passed independent ISC split response, LAN DNS/dual-IP TCPUDP, renewal/restart/original expiry67.22s; related Race/vet passed. Root combined build/acceptance in progress.",
           "limit": "This particular split is an independent ISC condition, not reproduced on physical HGW."
         },
-        "identity_selection": "DHCPv6 client DUID/IAID are persistent client identity. Keep them stable across worker restart and ordinary recovery; configure explicit client/server DUIDs in native service intent when required."
+        "identity_selection": "DHCPv6 client DUID/IAID are persistent client identity. Keep them stable across worker restart and ordinary recovery; configure explicit client/server DUIDs in native service intent when required.",
+        "dual_lan_native_profile": {
+          "source": "69ecf22; normal build69ecf22aa39d; Go unchanged",
+          "result": "2026-11-03、基準main `69ecf22` + native設定/fixture変更、通常build `69ecf22aa39d`（製品Go不変）で、通常/機器用LANを別の/16にした単体44-resource実HGW手順が終了0。通常LANは198.18.0.0/16、機器用は198.19.0.0/16、管理は重複しない10.255.255.0/24。DHCP/BusyBox hookは実応答のnetmaskを使い、予約/通常/OUI/個別MACの割当・実prefix・gateway/DNS・Internet・Release/sticky再取得を確認した。通常LANから実機器用DHCP client2台の名前解決も確認。保存設定にあったRFC1918宛先のSNAT除外を反映し、benchmarkの両LANも内部宛先として除外。私設/機器用宛てには元のLAN sourceが届き、管理/WAN内宛ての明示SNATとInternet向けSNATは維持した。",
+          "recovery": "全daemon再起動後にも両subnetのDHCP/prefix/通信、NAT/非NAT、経路/blackhole、DNS/NTP/管理/BGP/Tailscaleが通過。confirmed rollback期限切れ30.72秒/control再起動6.41秒、PD SIGKILL2.60秒/通常再起動5.33秒、全daemon後の全項目再確認111.50秒。これは転送断時間ではない。20秒の2巡回・自然PD更新0回。通常build・3実行物static link、make test-tools race vet・py_compileが通過。NTPの提供許可は保存設定どおり通常LANのみで、機器用LANへのNTP提供とは数えない。",
+          "limit": "通常機能確認から毎回の上流障害注入を外し、既存の明示的なUPLINK_WAN_OUTAGE=1へまとめた。今回の最終版は健全な現用上流での実UDP/TCPを確認し、全段切替の再受入には数えない。追加の先行確認で0秒を指定し自然更新待ちに入った実行は明示終了し、合格に流用していない。最終版は20秒・全daemon再起動ありで終了0。二台設定への同構成の接続、全保存intent/実機資格と全34 packageは継続中。"
+        }
       }
     },
     {
@@ -11231,7 +11237,7 @@
     "physical_target_profile": "homert02/03 are identified PVE guests with4vCPU/4GiB, three VirtIO NICs and VirtIO/SCSI disks. Matching isolated PVE product boot/recovery was exercised; actual WAN/LAN attachment, clean installation from a preconverted native configuration, measured load and any additional hardware/architecture qualification remain open.",
     "validation_reporting": "Use docs/test-plan.md for the concise current gate state. Detailed historical checkpoint ledgers are not acceptance authority; keep only current result, limits and repeatable procedure. Never claim unrun gates or partial homert profiles complete.",
     "current_acceptance": {
-      "as_of_utc": "2026-11-03T13:00:24Z",
+      "as_of_utc": "2026-11-03T13:43:44Z",
       "homert_source": "User-provided read-only working copies at chatty.lain.local:~/homert02; the current homert02 and homert03 files each contain 110 resources with matching kind counts. Do not publish configuration values or secrets.",
       "completed_gates": [
         "Go runtime checkpoint842c47e passed make check and final runtimeplan Race. This unchanged Go code plus the bundle producer passed normal build, test-tools/race/vet and actual publisher/receiver operations.",
@@ -11248,18 +11254,18 @@
         "Kubernetes",
         "SAM/federation full path"
       ],
-      "tested_source_head": "0fbb5c3 plus four static-route declarations and actual-client/capture checks; runtime Go unchanged",
+      "tested_source_head": "69ecf22 plus dual /16 LAN configuration, saved NAT exemptions and actual-client checks; runtime Go unchanged",
       "native_examples": {
-        "examples/single-router-dslite-dhcp-dns.yaml": 43,
+        "examples/single-router-dslite-dhcp-dns.yaml": 44,
         "examples/homert02-native.yaml": 48,
         "examples/homert03-native.yaml": 48,
         "full_homert_profile": "not present; the examples do not represent the complete current 110-resource intent"
       },
       "latest_native_profile_gate": {
-        "status": "43-resource actual-HGW static/blackhole route integration and whole-daemon restart passed (exit0)",
-        "source": "0fbb5c3; normal build0fbb5c31fd34; Go unchanged",
-        "observed": "2026-11-03、基準main `0fbb5c3` + native設定/fixture変更、通常build `0fbb5c31fd34`（製品Go不変）で、4つの保存IPv4経路を接続した単体43-resource実HGW手順が終了0。LAN gateway経由の個別host/私設網、WAN on-linkで独立clientのTCP/UDPが届き、選択interfaceとpeerの実観測sourceを照合した。10/8 blackholeはTCP/UDP timeout、実kernel routeと短時間captureのLAN ingressあり/egressなしで確認。追加経路と管理側通信は基本DHCP/DNSの直後に先行確認し、全daemon再起動後にも再確認した。",
-        "limit": "20-second observation/2 rounds/0 natural PD renewals. Full checks111.44s is not forwarding outage. Distinct primary/legacy LAN subnets are not yet represented by the single profile."
+        "status": "44-resource dual IPv4 LAN /16, DHCP profile, private non-NAT and whole-daemon restart passed (exit0)",
+        "source": "69ecf22; normal build69ecf22aa39d; Go unchanged",
+        "observed": "2026-11-03、基準main `69ecf22` + native設定/fixture変更、通常build `69ecf22aa39d`（製品Go不変）で、通常/機器用LANを別の/16にした単体44-resource実HGW手順が終了0。通常LANは198.18.0.0/16、機器用は198.19.0.0/16、管理は重複しない10.255.255.0/24。DHCP/BusyBox hookは実応答のnetmaskを使い、予約/通常/OUI/個別MACの割当・実prefix・gateway/DNS・Internet・Release/sticky再取得を確認した。通常LANから実機器用DHCP client2台の名前解決も確認。保存設定にあったRFC1918宛先のSNAT除外を反映し、benchmarkの両LANも内部宛先として除外。私設/機器用宛てには元のLAN sourceが届き、管理/WAN内宛ての明示SNATとInternet向けSNATは維持した。",
+        "limit": "20-second observation/2 rounds/0 natural PD renewals. Full checks111.50s is not forwarding outage. NTP allow remains primary LAN only. Paired integration and full saved intent remain open."
       },
       "upstream_selection_correction": "Existing LAN static gateway, not ens20. Implemented and verified group weights 120 -> 80 -> 60 -> 120 with 60s hysteresis, actual Health workers, both LAN clients TCP/UDP, conntrack marks and kernel next hops. No new WAN NIC or site IP allocation prerequisite.",
       "latest_ha_foundation_gate": {
@@ -11382,7 +11388,7 @@
     {
       "stage": 1,
       "profile": "homert-single-implementation",
-      "next": "Match saved homert dual IPv4 LAN subnets and DHCP profiles. Current native example still puts primary and special pools in one subnet, unlike the saved primary/legacy /16 networks. Add the second address on the existing LAN interface, match gateway/source-NAT intent, then verify independently selected clients, masks/options, DNS/Internet and routing early. Keep no new WAN NIC, PVE/QEMU or additional PBR investigation; all34 packages and paired/physical acceptance remain in scope.",
+      "next": "Compare remaining saved single-router interface, static WAN and BGP peer placement/intent with the actual production path; remove fixture-only topology differences where they conceal interoperability. Dual /16 LAN/DHCP and saved private-destination NAT exemptions now passed. Then carry the accepted complete single-router intent into paired profiles and real HA acceptance. Do not add WAN NICs, PVE/QEMU or PBR investigations; do not repeat natural-renewal or unrelated suites without a changed premise. All34 packages and physical/deployment gates remain in scope.",
       "acceptance": "Cold-start the complete single-router profile with an independent WAN peer and Linux client. Verify WAN/LAN DHCPv4 scopes and reservations, DHCPv6-PD/Information identity and natural renew, RA/DAD/SLAAC, local/conditional/DoH DNS, all DS-Lite paths and IPv6, Health/PBR, NAT/MTU/MSS, BGP/NTP/Tailscale/management where configured, and worker/daemon restart and recovery from actual packets, client results, kernel routes and firewall state. Keep ONU/physical-NIC qualification separate."
     },
     {

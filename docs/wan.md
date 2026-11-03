@@ -20,9 +20,13 @@ The combined [single-router profile](../examples/single-router-dslite-dhcp-dns.y
 puts the common client-facing path in one native program: DHCPv4, stateless
 DHCPv6 information, SLAAC/RA from PD, conditional DNS and a default DoH upstream,
 DS-Lite/NAT for IPv4 and native IPv6 forwarding. Its example values are generic;
-it is not a conversion of either 110-resource homert file. The 16-resource
-profile, including NTP client/server service, passed the real-HGW and independent Linux-client check described in
-[the acceptance plan](test-plan.md), including WAN outage and process restarts.
+it is not a conversion of either 110-resource homert file. The isolated profile
+uses primary `198.18.0.0/16` and legacy-device `198.19.0.0/16` networks on the
+same LAN interface, plus management `10.255.255.0/24`. DHCP profiles select their
+own subnet, gateway and DNS; private and internal destinations retain client
+addresses while Internet paths use their declared source NAT. Current actual-HGW,
+independent-client results and qualification limits are in
+[the acceptance plan](test-plan.md).
 
 | homert intent | routerd2 native declaration | Example |
 | --- | --- | --- |

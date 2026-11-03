@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 13:00 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 13:44 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 実行原則
 
@@ -207,9 +207,18 @@ DoH確認は固定provider名ではなく、実configに設定されたHTTPS上�
 
 ## 保存homertの個別IPv4経路とblackhole
 
-単体例には、LAN側gateway経由の`192.168.100.1/32`（metric10）、WANへのon-link `192.168.0.0/16`（metric20）、LAN側gateway経由の`172.16.0.0/12`（metric20）、`10.0.0.0/8` blackhole（metric20）を宣言する。LAN gatewayのbenchmarkアドレスは`198.18.0.253`で、実サイト値を公開しない。
+単体例には、LAN側gateway経由の`192.168.100.1/32`（metric10）、WANへのon-link `192.168.0.0/16`（metric20）、LAN側gateway経由の`172.16.0.0/12`（metric20）、`10.0.0.0/8` blackhole（metric20）を宣言する。LAN gatewayのbenchmarkアドレスは`198.19.0.253`で、実サイト値を公開しない。
 前項と同じ`make check-uplink`で、独立gateway namespaceに対象の受信アドレスとsocket peerを設定する。WAN側peerには実WAN lease経由で試験clientへの戻りhost routeを明示する。個別経路/私設網/WAN on-linkのTCP/UDP、kernelが選んだinterfaceとpeerの観測sourceを照合する。
 blackholeは実clientからTCP/UDPを送り、timeout、kernel blackhole route、短時間・最大20 packetのcaptureでLAN ingressあり/egressなしを確認する。管理側・追加経路の確認は基本DHCP/DNSが使えた直後に行い、他の既存項目の待機を先行させない。全daemon再起動後にも同じ確認を行う。
 このscopeは単体Linuxの経路適用と転送であり、実Starlink/IX2215の資格ではない。保存設定にある二つのLAN IPv4サブネットと異なるDHCP profileの構成差は別途解消し、同一サブネットのpool確認で代用しない。
 
 2026-11-03: 通常build `0fbb5c31fd34`、単体43-resourceの上記手順は終了0。起動時・全daemon再起動後の実TCP/UDPとblackhole ingress/egressを確認。全項目再確認111.44秒は転送断時間ではない。残る二つのLAN subnet/DHCP profileの構成差は未受入。詳細は[引き継ぎ](pve-codex-handoff.md)へ記録した。
+
+## 二つのLAN subnetとDHCP profile
+
+単体例は通常LAN `198.18.0.0/16`、機器用LAN `198.19.0.0/16`を同じ`lan0`へ設定し、管理は`10.255.255.0/24`へ分離する。機器用gateway/DNSは独立peer `198.19.0.253`。peerには通常LANへの戻り経路を明示し、WAN側照会中のhost routeだけを使い終わったら撤去する。
+前項と同じ`make check-uplink ... UPLINK_SECONDS=20 UPLINK_FULL_RESTART=1 UPLINK_TAILNET=1`で、通常/予約/機器用割当、実netmask、MAC/OUI、gateway/DNS、公開DNS/HTTPS、Release/3日sticky、DHCP名のDNS回答を実peerと照合する。fixtureはDHCP ACKのmaskをそのまま設定し、固定/24で補わない。割当範囲も実configから読む。
+保存RFC1918とbenchmark内部宛先にはSNATしない。私設/機器用peerが元の通常LAN sourceを見ることと、管理/WAN内peerが明示した変換後sourceを見ることを、実TCP/UDPで確認する。両LANに広げたBGP/Tailscaleのprefixと管理SSH/Web、通常LANのIPv6/DNS/NTPも再確認する。
+通常機能の実行は健全な現用上流を使い、上流の全段障害注入は明示した`UPLINK_WAN_OUTAGE=1`だけで行う。自然更新を再測定しない短時間確認には正の秒数を指定する。`--seconds 0`は自然PD更新まで待つ指定である。
+
+2026-11-03: 通常build `69ecf22aa39d`、44-resourceの最終20秒/全daemon再起動手順は終了0。両/16の実DHCPと通信、NAT除外、再起動後を確認。全項目再確認111.50秒は転送断時間ではない。自然PD更新0回。詳細と未受入範囲は[引き継ぎ](pve-codex-handoff.md)へ記録した。

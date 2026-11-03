@@ -1,5 +1,7 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
+保存設定の二つのLAN /16とDHCP profileを単体44-resourceへ接続し、実netmask/割当/通信と全daemon再起動後が通過した。保存NAT除外も反映し、私設/機器用宛ての元sourceとInternet/管理/WAN内のSNATを実peerで確認。次は残る保存intentと実接続topologyを照合し、単体で受け入れた構成を二台profileへ接続する。詳細は[引き継ぎ](pve-codex-handoff.md)を参照する。
+
 保存IPv4経路4件を単体native例へ接続した43-resource実HGW手順が終了0。実TCP/UDPとblackholeのLAN ingress/egressを起動時・全daemon再起動後に確認した。次は、保存設定の二つのLAN subnet/DHCP profileと、単体例の同一subnet・別poolの構成差を解消する。詳細は[引き継ぎ](pve-codex-handoff.md)を参照する。
 
 保存homertのLAN→管理側/WAN内機器の転送・送信元NATを単体設定へ接続し、独立peerのTCP/UDPと観測sourceが起動時・全daemon再起動後に通過した。基準main `96d0112`、通常build `96d01127742c`。保存中の個別静的経路とblackholeの統合は次に進める。詳細は[引き継ぎ](pve-codex-handoff.md)を参照する。

@@ -1,6 +1,14 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03 13:00 UTC。全体ゴールは継続中。
+更新: 2026-11-03 13:44 UTC。全体ゴールは継続中。
+
+## 二つのLAN subnetと保存NAT除外の接続
+
+2026-11-03、基準main `69ecf22` + native設定/fixture変更、通常build `69ecf22aa39d`（製品Go不変）で、通常/機器用LANを別の/16にした単体44-resource実HGW手順が終了0。通常LANは198.18.0.0/16、機器用は198.19.0.0/16、管理は重複しない10.255.255.0/24。DHCP/BusyBox hookは実応答のnetmaskを使い、予約/通常/OUI/個別MACの割当・実prefix・gateway/DNS・Internet・Release/sticky再取得を確認した。通常LANから実機器用DHCP client2台の名前解決も確認。保存設定にあったRFC1918宛先のSNAT除外を反映し、benchmarkの両LANも内部宛先として除外。私設/機器用宛てには元のLAN sourceが届き、管理/WAN内宛ての明示SNATとInternet向けSNATは維持した。
+
+全daemon再起動後にも両subnetのDHCP/prefix/通信、NAT/非NAT、経路/blackhole、DNS/NTP/管理/BGP/Tailscaleが通過。confirmed rollback期限切れ30.72秒/control再起動6.41秒、PD SIGKILL2.60秒/通常再起動5.33秒、全daemon後の全項目再確認111.50秒。これは転送断時間ではない。20秒の2巡回・自然PD更新0回。通常build・3実行物static link、make test-tools race vet・py_compileが通過。NTPの提供許可は保存設定どおり通常LANのみで、機器用LANへのNTP提供とは数えない。
+
+通常機能確認から毎回の上流障害注入を外し、既存の明示的なUPLINK_WAN_OUTAGE=1へまとめた。今回の最終版は健全な現用上流での実UDP/TCPを確認し、全段切替の再受入には数えない。追加の先行確認で0秒を指定し自然更新待ちに入った実行は明示終了し、合格に流用していない。最終版は20秒・全daemon再起動ありで終了0。二台設定への同構成の接続、全保存intent/実機資格と全34 packageは継続中。 再実行は[試験計画](test-plan.md)の「二つのLAN subnetとDHCP profile」。
 
 ## 保存IPv4経路とblackholeの単体通信
 
