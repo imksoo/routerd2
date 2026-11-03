@@ -325,7 +325,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             run(["ip", "-n", client, "link", "set", "mgmt-peer", "up"])
 
         def start_private_dns(port, answer):
-            return start(
+            process = start(
                 client,
                 [
                     "dnsmasq",
@@ -339,8 +339,15 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                     "--local-ttl=1",
                     "--address=/#/" + answer,
                 ],
-                "private-dns",
+                "private-dns-" + str(port),
             )
+            def responding():
+                if process.poll() is not None:
+                    raise RuntimeError((stage / ("private-dns-" + str(port) + ".log")).read_text())
+                response = subprocess.run(inside(client, ["dig", "@" + dns_peer_address, "-p", str(port), "ready.split.test", "A", "+short", "+time=1", "+tries=1"]), capture_output=True, text=True)
+                return response.stdout.strip() == answer
+            wait(responding, 10)
+            return process
 
         if config_path is not None:
             bgp_peer = "r2bgp-" + str(os.getpid())
@@ -777,6 +784,29 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                         raise
             check_tailnet()
             print("PASS actual HGW automatic LAN -> Tailscale peer IPv4/IPv6 (explicit IPv6 NAT), advertised IPv4 LAN <- peer TCP/UDP; IPv4/IPv6 exit HTTPS/UDP DNS", flush=True)
+        def check_dslite_paths():
+            endpoints = []
+            for index in range(4):
+                service = "service.internet" + (str(index) if index else "")
+                wait(lambda: query("control.sock", "/v1/services/" + service).get("snapshot", {}).get("available", False))
+                endpoints.append(query("control.sock", "/v1/services/" + service)["snapshot"])
+            assert len({e["local"] for e in endpoints}) == 4, "DS-Lite sources were not independent delegated addresses"
+            for interface in ("dslite0", "dslite1", "dslite2", "dslite3"):
+                response = run(inside(router, ["curl", "-4", "--interface", interface, "--noproxy", "*", "--max-time", "8", "--resolve", "one.one.one.one:443:1.1.1.1", "-sS", "-I", "-o", "/dev/null", "-w", "%{http_code}", "https://one.one.one.one/"]))
+                assert response in ("200", "301", "302", "308"), (interface, response)
+                run(inside(router, ["python3", "-c", """import socket,struct,sys
+s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(3)
+s.setsockopt(socket.SOL_SOCKET,socket.SO_BINDTODEVICE,sys.argv[1].encode()+bytes([0]))
+s.connect(('1.1.1.1',53));s.send(bytes.fromhex('4d2101000001000000000000076578616d706c65036e65740000010001'))
+r=s.recv(4096);ident,flags,questions,answers,_,_=struct.unpack('!6H',r[:12])
+assert ident==0x4d21 and flags&0x800f==0x8000 and answers>0,(sys.argv[1],r.hex())
+s.close()
+""", interface]))
+                print("PASS actual TCP/HTTPS and UDP/DNS on", interface, flush=True)
+
+        if config_path is not None:
+            check_dslite_paths()
+
         cached_answers = {}
         for server, family in ((lease[3], "-4"), (str(router_dns), "-6")):
             answer = run(inside(client, ["dig", family, "@" + server, "available.split.test", "A", "+nocookie", "+short", "+time=3", "+tries=1"])).strip()
@@ -1091,6 +1121,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                 check_dns_sources()
                 check_management()
                 check_bgp()
+                check_dslite_paths()
                 check_time()
             print("PASS actual HGW full daemon restart retained identity and restored both clients; seconds", round(time.monotonic() - restart_at, 2), flush=True)
             if tailnet:

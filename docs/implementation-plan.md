@@ -1,16 +1,16 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
-更新: 2026-11-03 01:47 UTC。main `28cb655`由来buildで25-resource native単体profileのDNS複数上流・suffix/学習DNS・両DoHを実HGW/独立peer/client gateへ統合し、restartまで終了0。製品Goコードは不変。全homertとHA/対象環境は継続中。
+更新: 2026-11-03 02:04 UTC。main `ce1589c`由来buildで28-resource native単体profileの4 DS-Liteを実HGWへ接続し、初回/全daemon restart後のTCP・UDPが全経路で往復した。製品Goコードは不変。backup静的接続と全homert/HA受入は継続中。
 
-全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で9日14時間10分、記録済み期限から4日8時間42分経過した。34 work packageはin_progress22件/planned12件。部分受入を全体の完成に数えない。
+全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で9日14時間35分、記録済み期限から4日9時間07分経過した。34 work packageはin_progress22件/planned12件。部分受入を全体の完成に数えない。
 
 ## 現在の棚卸し
 
-- 現行の単体例は25 resources。DHCP/PD/RA、DNS/cache/history/DoH、DS-Lite/IPv6 Internet、管理、NTP、BGP 1 peer、Tailscale subnet/exitを同じ実daemonで接続し、独立peer/clientとの通信と全daemon restartを通過した。最新条件・結果・再実行手順は[試験計画](test-plan.md)に集約する。
+- 現行の単体例は28 resources。DHCP/PD/RA、DNS/cache/history/DoH、DS-Lite/IPv6 Internet、管理、NTP、BGP 1 peer、Tailscale subnet/exitを同じ実daemonで接続し、独立peer/clientとの通信と全daemon restartを通過した。最新条件・結果・再実行手順は[試験計画](test-plan.md)に集約する。
 - `make check`（Race Detector・vet）、通常static build、設定検証を通過。補助検査の成功を製品全体の完成とは扱わない。
 - 別checkpointで生成profileの自然PD T1、nativeのWAN遮断復旧、二WAN Health→PBR、Alpine/PID1の通信/署名更新/rollbackを確認済み。現在の全profileや実機資格への流用はせず、追加PVE/QEMU・PBR調査は行わない。
 - 保存中のhomert02/03設定は各110 resources、kind件数一致、DNSForwarder11件。両方のIPv6 host route table120、WAN /128 DS-Lite source、BGP広告、Tailscaleの運用を参照済み。実設定値・秘密は公開しない。
-- 全homertの複数DNS/learnedDNS、4 DS-Lite/backup、二BGP peers、残るLAN/運用機能と全体の自然更新・継続通信、二台HAが残る。各homert例14 resourcesは全設定の代わりにならない。
+- 全homertの複数DNS/learnedDNS、4 DS-Liteの選択policy/backup、二BGP peers、残るLAN/運用機能と全体の自然更新・継続通信、二台HAが残る。各homert例14 resourcesは全設定の代わりにならない。
 - ens18/ens20はvirtio。NTT ONU直結、対象NIC/実機、arm64、cloud/Kubernetes全体は未受入。利用できる独立環境で実装を続け、必要な最小setupを範囲ごとに明記する。
 
 ## 今回の棚卸しと実行単位（2026-11-03）
@@ -20,16 +20,16 @@ mainを取得し、直近の変更を統合した。34 work packageの状態は�
 | 順序 | 実装・接続するもの | 実通信で閉じる条件 | 現在 |
 | --- | --- | --- | --- |
 | 1 | 単体DNSのcache・query log、loopback/管理listener、SSH/Web管理 | 独立端末から解決・履歴閲覧・鍵認証、上流停止中のcache、管理interface制限、daemon再起動後の復旧 | 実HGWで合格、main反映済み |
-| 2 | 複数DNS suffix/upstream、4本のDS-Liteとbackup回線、BGP、Tailscaleの単体設定 | 現行homertの各通信経路を独立peer/端末から通す。既存engineへ接続し、不足箇所だけ実装 | BGP 1 peerとTailscaleの単体経路は合格。他は未接続部分あり |
+| 2 | 複数DNS suffix/upstream、4本のDS-Liteとbackup回線、BGP、Tailscaleの単体設定 | 現行homertの各通信経路を独立peer/端末から通す。既存engineへ接続し、不足箇所だけ実装 | DNS/4 DS-Lite/BGP 1 peer/Tailscaleの単体経路は合格。他は未接続部分あり |
 | 3 | 単体全体のcold start、自然更新、MTU/通信継続、更新・復旧 | 同一profileで端末の通常利用を維持し、変更後に戻る | 部分試験のみ |
 | 4 | 二台HAのVIP/lease/PD/conntrackと既存TCP/UDP | 両方向の停止・復帰、新規端末と既存通信を同時に確認 | 未受入 |
 | 5 | 残る34 work packageの機能・配布先ごとの残差 | 対応peer/配布先で受入。利用できない対象と最小追加setupを明記 | 未完了 |
 
 一回の変更単位は「設定から利用者の結果まで」とする。失敗時はpacket・socket・経路・workerのうち原因を決める観測だけを追加し、原因が分からないまま同じ試験を繰り返さない。自然T1の待ち時間には独立する実装を進める。試験を増やすことや報告書を作ることを進捗の代用にしない。合格した単位をcommit/pushしてから次へ移る。全体完成の見積りは、単体の全通信経路とHAの未解決原因が把握できた時点で更新する。
 
-25-resource native profile、基準main `5b46865` + OS trust-store修正、build ID `5b4686577c4a`で実HGW/独立FRR・Headscale・Tailscale・Linux clientの統合gateが終了0。CA指定を省略してHTTPS登録でき、LAN→tailnet peerのIPv4/IPv6 TCP/UDP、peer→広告LANのIPv4 TCP/UDP、product exit node経由のIPv4/IPv6 HTTPS・UDP DNSが通った。全daemon再起動後もnode identityを保持して同じ通信が復旧した。BGPの相互広告・両kernelの経路・LAN 2端末のNATなしTCP/UDP、DNS/cache/history・SSH/Web・WAN学習NTP源stratum 3と両IP Internetも同時に通過。PD worker SIGKILL/通常再起動後1.89/5.09秒で端末通信が戻り、full restartから全確認完了17.80秒（NTP測定を含む）。2通信round、zero-lifetime RA/kernel withdrawal、upstream Releaseなしを確認。host CA bundleのSHA-256は試験前後で一致。stage/key/CA mount/control DB/capture/namespaceは撤去済み。
+28-resource native profile、main由来build `ce1589c1bcab`で4 DS-Liteの実HGW統合gateが終了0。独立した4つのWAN /128 sourceと3 AFTRへの4 tunnelを設定し、各deviceへsocketをbindしたTCP/HTTPS・UDP/DNSが初回と全daemon restart後にすべて往復した。各委譲source宛てのIPv4-in-IPv6 returnを既存captureで確認。LANの既定経路通信、DNS複数上流/learnedDNS/両DoH、BGP、Tailscale subnet/exit、管理・履歴、WAN学習NTP stratum 3も通過した。PD worker SIGKILL/通常再起動後のLAN復旧2.92/4.88秒、full restartから全確認完了44.21秒（DoH probe待ち・NTP測定込み）。2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。hostのens18/ens20 addressとdefault routeの一致を確認し、stage/key/CA mount/peer DB/capture/namespaceを撤去した。
 
-DNSの複数上流/suffix/learnedDNS/両DoHを単体gateで接続した。次は実設定のprivate peer全体の確認、DS-Lite/backup WANのnative設定、二BGP peers等の単体経路を埋め、同じprofileで自然更新と継続通信を確認する。追加のPBR調査・PVE/QEMUは行わない。
+DNSの複数上流/suffix/learnedDNS/両DoHを単体gateで接続した。次は実設定のprivate peer全体の確認、4 DS-Liteの選択policy/backup WANの静的native設定、二BGP peers等の単体経路を埋め、同じprofileで自然更新と継続通信を確認する。追加のPBR調査・PVE/QEMUは行わない。
 
 ## 仕切り直した実行順
 

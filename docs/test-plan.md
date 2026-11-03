@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 01:47 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 02:04 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 判定と実行原則
 
@@ -15,11 +15,11 @@
 
 ## 現在の実通信と限界
 
-25-resource native profile、main由来build `28cb655c1ced`でDNS拡張を含む実HGW統合gateが終了0。独立dnsmasq 2 processの片系停止で残るupstreamへ切替、両系停止時の両IP cache保持・未取得名のSERVFAIL隔離、復旧を確認。子suffixと複数suffixのsource選択、WAN PD学習DNSによるpublic名のA応答とquery historyのsource、Cloudflare/Google両DoHの実probe成功も確認した。全daemon再起動後も同じDNS source群、BGP両kernel経路とTCP/UDP、Tailscale subnet/exitとidentity、管理・履歴・WAN学習NTP stratum 3、両IP Internetが復旧した。PD worker SIGKILL/通常再起動後2.94/5.18秒で端末通信が復旧。full restartから全確認完了43.90秒はDoH probeの成功待ちとNTP測定を含み、純粋な転送復旧時間ではない。2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。stage/key/CA mount/peer DB/capture/namespaceは撤去済み。
+28-resource native profile、main由来build `ce1589c1bcab`で4 DS-Liteの実HGW統合gateが終了0。独立した4つのWAN /128 sourceと3 AFTRへの4 tunnelを設定し、各deviceへsocketをbindしたTCP/HTTPS・UDP/DNSが初回と全daemon restart後にすべて往復した。各委譲source宛てのIPv4-in-IPv6 returnを既存captureで確認。LANの既定経路通信、DNS複数上流/learnedDNS/両DoH、BGP、Tailscale subnet/exit、管理・履歴、WAN学習NTP stratum 3も通過した。PD worker SIGKILL/通常再起動後のLAN復旧2.92/4.88秒、full restartから全確認完了44.21秒（DoH probe待ち・NTP測定込み）。2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。hostのens18/ens20 addressとdefault routeの一致を確認し、stage/key/CA mount/peer DB/capture/namespaceを撤去した。
 
 製品Goコードは`28cb655`から不変。同checkpointの`make check`（Go/Python、Race Detector、vet）を引き継ぎ、今回の`make test-tools`（36件）・通常Makefile build・設定検証が終了0。3実行物は`readelf`でdynamic dependencyなし、nDPI source/license noticesを確認した。補助検査は実通信の代替ではない。
 
-homert02/03の保存中の実設定は各110 resources。native単体例は25 resourcesであり、resource数の一致を移植目標にはしないが、全意図の受入は未完了。34 work packageもin_progress22/planned12のまま。ens18/ens20はvirtio NICで、NTT ONU直結、対象NIC/実機、arm64、HA、cloud/Kubernetes全体を資格済みとは扱わない。
+homert02/03の保存中の実設定は各110 resources。native単体例は28 resourcesであり、resource数の一致を移植目標にはしないが、全意図の受入は未完了。34 work packageもin_progress22/planned12のまま。ens18/ens20はvirtio NICで、NTT ONU直結、対象NIC/実機、arm64、HA、cloud/Kubernetes全体を資格済みとは扱わない。
 
 ## 現行単体gateの再実行
 
@@ -49,6 +49,18 @@ WAN captureは最大8MB、tailnet captureも最大8MBへ制限する。PD captur
 基準main `28cb655`の25-resource native profileへ、2 upstreamの条件付きsource、同じupstreamを使う複数suffix、WAN PDから学習するDNS source、2系統のDoHと明示bootstrapを接続する。旧routerdのresolver/receive callerはsourceを宣言順に評価するため、子suffixを親suffixより先に配置する。longest matchへの自動並替えとは扱わない。
 
 独立dnsmasqを5353/5354へ別processで置き、それぞれ異なるAを返す。通常は選択された回答を記録し、primary停止時にはbackupの応答を確認、両方停止時にはcache済み回答の保持と未取得名のSERVFAILを確認して復旧する。`branch.split.test`と`corp.test`で子suffix/共有upstream、`www.example.net`でWAN学習DNSの応答とquery logのsourceを確認する。2系統のpublic DoHが実probeに成功することも確認する（初回と全daemon restart後に通過済み）。同じsource群をdaemon restart後にも照会し、通常のBGP/Tailscale/DHCP/PD/RA/管理/NTP/Internetを維持する。全private suffixの実peerや、個々のDoH停止切替は今回の範囲と分ける。実行コマンドと隔離/撤去手順は上記のとおり。
+
+## 4 DS-Liteの構成と疎通確認
+
+基準main `ce1589c`から28-resource単体profileへ拡張する。旧routerdの`DSLiteTunnelController`/`ensureDSLiteTunnel`とhost source bypass/route callerを読み、実homertの4 tunnelが同じWANに異なる委譲source（suffix ::21/::22/::13/::23）を使い、AFTR ::100/::101/::102/::100へ接続することを確認した。nativeのWAN /128 delegationと各DS-Lite serviceに明示し、各sourceの既存host-route bypassを設定する。
+
+既定経路はmetric200..203の4 DS-Liteとする。各経路の単体疎通用構成で、実homertのHealth/mark/weight選択policy全体の移植や切替合格ではない。追加PBR調査は行わない。各tunnelの内側IPv4は192.0.0.2/32、直接deviceへのdefault routeを使い、不要なpoint-to-point gateway指定を外す。LANのNAT/MSS1454/DF処理も各tunnelへ設定する。
+
+4 tunnelへsocketをbindし、実公開peerへのTCP/HTTPSとUDP/DNSが返ることを確認する。4本のsource独立性、通常LAN Internet、DNS/BGP/Tailscale/管理/NTP、全daemon restart後の同じ経路の復旧も確認する。router起点の各経路疎通とLANの既定経路疎通を区別する。既存の最大8MB captureを共用し、終了時にnamespace/key/state/pcapを撤去する。
+
+最初の試行ではbackupをDHCPと誤って設定し、ens20からのDiscoverに応答がなく取得待ちで停止した。homertのDHCPv4Clientは0件でbackupは静的IPv4。既存計画にもens20のRA/DHCP無応答が記録されていた。誤ったDHCP設定・追加runner引数を削除し、4 DS-Liteの確認を独立して進める。backupの最小不足setupは、この試験hostで利用できる静的address/gatewayとその上流。未使用addressを推測して割り当てない。hostのens18/ens20 address/default routeは試験前後で照合する。
+
+2回目は既存のDNS復旧確認で、5354の独立dnsmasqを再起動した直後のqueryにconnection refusedが返り停止した。起動関数がprocess生成だけで返っていたため、同じ関数で独立peer自身への実query応答を確認してから返す。固定sleepや製品側retryは追加しない。各portのlogも分ける。DS-Liteの初回確認をDNS障害注入より前へ移し、無関係なfixture起動問題で経路観測が後回しにならないようにする。
 
 ## 別に確認済みの範囲
 
