@@ -1630,7 +1630,11 @@
         "internal/network",
         "internal/runtimeplan",
         "packaging/alpine"
-      ]
+      ],
+      "priority": "after_homert_acceptance",
+      "implementation_notes": {
+        "user_priority_20261103": "User explicitly deferred IPsec. Read-only inspection of both saved110-resource homert profiles found zero IPsecConnection resources. Complete the functions used by homert02/03 before starting this engine."
+      }
     },
     {
       "id": "EXT-02",

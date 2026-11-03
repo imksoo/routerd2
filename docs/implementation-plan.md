@@ -1,5 +1,7 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
+2026-11-03のユーザー指示により、IPsec（EXT-01）はhomert02/03の機能実装・受入後へ回す。両方の保存110-resource設定にIPsecConnectionは0件。初回homert受入では、保存設定にある機能と配布・復旧の実装を優先する。
+
 保存homertのprivate DNS/NextDNSを現行の単体45-resource・二台各54-resourceへ接続し、通常build `092ba33db448`で全daemon再起動と両方向HAを受け入れた。8質問を両IP UDP/TCPで、単体の再起動前後は各32照会、HAの初期/各切替後は計96照会。HA runnerの設定・domain・DoH上流の固定と試験peerの共通PID競合を修正した。private 1先の応答変動は残る。条件・限界・再実行は[引き継ぎ](pve-codex-handoff.md)へ集約する。
 
 main `f60b3d2`・通常build `f60b3d2789cb`の45-resource単体構成で、実HGWとの自然PD Renew/Reply 1組・期限更新と652巡回の両IP Internet/DNS・Tailscale通信が終了0。109回の周期観測で29 workerの世代は同一、全てReady=trueを維持した。PD SIGKILL3.25秒・通常再起動5.20秒、全daemon後の全項目再確認111.86秒も通過した。 111.86秒は全項目の確認時間。既存TCP socket継続、全private DNS、全110-resource意図、対象ONU/NIC・配布先と全34 packageの残作業を継続する。詳細と手順は[引き継ぎ](pve-codex-handoff.md)・[試験計画](test-plan.md)へ集約する。
@@ -51,7 +53,7 @@ DNSの複数上流/suffix/learnedDNS/両DoHを単体gateで接続した。次は
 2. **full single profileを同じ実HGW/独立clientでcold startから通す。** DNS/DHCP/RA/DS-Lite/Health/PBR、自然更新、worker/daemon restart、実通信とkernel/captureを確認し、完了済み25-resource native gateの合格範囲を広げる。target ONU/NIC qualificationは分離して記録する。
 3. **実行環境は現在の実HGWと隔離Linuxに固定する。** 今回はPVE/QEMUの追加実行と追加のPBR調査を行わず、単体profileの未対応機能と実通信を進める。既存のPVE/Health→PBR試験結果を追加試験の理由にしない。ある一つの未解決gateが他の独立work packageの進行を止めない。
 4. **単体が通った後、二台HAを実環境で受け入れる。** VRRP/VIP readiness、DHCP/PD identity・lease同期、conntrack、既存TCP/UDPと新規通信、両方向切替・復帰を確認する。
-5. **34 work packageをJSONの依存関係に従い閉じる。** homertに必須のCORE/SYS/NET/HA/OPS/EXTを先行し、SAM/cloud/provider、image・hardware、Kubernetesを実peer・対象環境へ広げる。provider課金と本番変更は既存authorization内で行う。
+5. **34 work packageをJSONの依存関係に従い閉じる。** 保存homertで使うCORE/SYS/NET/HA/OPSとTailscaleを先行し、SAM/cloud/provider、image・hardware、Kubernetesを実peer・対象環境へ広げる。provider課金と本番変更は既存authorization内で行う。
 
 各実通信試験の直前に `docs/test-plan.md` 全体を読み直す。動的に割り当たる値は実応答から取得し、固定値を期待するのは設定で明示した予約などに限る。先行する長時間観測と無関係な実装・レビューは並行する。失敗は製品・設定・peer・環境へ切り分け、原因を修正して影響した実通信を再確認する。終了した試験は簡潔な条件/結果/限界/再実行手順のみを残し、raw data・orphan process・不要なbuild outputを削除する。
 
@@ -1600,6 +1602,8 @@ HA-02/EXT-02も未完了であり、今回の接続継続だけでhomert置換�
 実装先の案: `internal/logging`, `internal/observability (新設予定)`, `internal/control`, `packaging/alpine`。
 
 #### EXT-01 — IPsec/IKE の owned engine 統合
+
+優先順位: ユーザー指示によりhomert02/03の受入後。
 
 範囲: 旧 routerd 互換 / track: engines / risk: high。
 前提: CORE-03, CORE-06, SYS-02, NET-03, NET-05。 設計判断: D-02, D-03, D-07。
