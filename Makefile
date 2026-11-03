@@ -271,6 +271,11 @@ check-uplink: build dnsmasq-engine $(if $(UPLINK_CONFIG),chrony-engine) $(if $(f
 	@if test -n '$(UPLINK_CONFIG)'; then test -z '$(UPLINK_AFTR)' -a -z '$(UPLINK_DNS_UPSTREAM)' || { printf '%s\n' 'UPLINK_CONFIG supplies its own AFTR, DNS and features'; exit 1; }; $(RELEASE_BUILT_DIR)/routerd config validate '$(UPLINK_CONFIG)'; fi
 	$(PYTHON) scripts/uplink-smoke.py --uplink '$(UPLINK_INTERFACE)' $(if $(UPLINK_CONFIG),--config '$(UPLINK_CONFIG)',--aftr '$(UPLINK_AFTR)') --seconds '$(UPLINK_SECONDS)' $(if $(UPLINK_CONFIG),,--dns-upstream '$(UPLINK_DNS_UPSTREAM)') --wan-mac '$(UPLINK_WAN_MAC)' $(if $(UPLINK_STATE_DIR),--state-dir '$(UPLINK_STATE_DIR)') $(if $(filter 1,$(UPLINK_WAN_OUTAGE)),--wan-outage) $(if $(filter 1,$(UPLINK_FULL_RESTART)),--full-restart) $(if $(filter 1,$(UPLINK_TAILNET)),--tailnet) $(if $(filter 1,$(UPLINK_RETENTION)),--retention-check)
 
+.PHONY: check-site-dns
+check-site-dns:
+	@test -n '$(SITE_DNS_OWNER)' -a -n '$(SITE_DNS_STAGE)' -a -n '$(SITE_DNS_CLIENT)' -a -n '$(SITE_DNS_CASES)' || { printf '%s\n' 'Select the live owner, stage, client namespace and private peer-result cases'; exit 1; }
+	sudo -n nsenter --mount=/proc/$(SITE_DNS_OWNER)/ns/mnt -- $(PYTHON) -I '$(CURDIR)/scripts/dns-peer-queries.py' --stage '$(SITE_DNS_STAGE)' --client '$(SITE_DNS_CLIENT)' --cases '$(SITE_DNS_CASES)'
+
 .PHONY: check-doh-outage
 check-doh-outage:
 	@test -n '$(DOH_OWNER_PID)' -a -n '$(DOH_PARENT_NAMESPACE)' || { printf '%s\n' 'Select the live uplink fixture owner PID and client namespace'; exit 1; }

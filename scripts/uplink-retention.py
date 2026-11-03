@@ -52,12 +52,14 @@ def main():
 
     def communication():
         for transport in ([], ["+tcp"]):
-            answer = run(["ip", "netns", "exec", client, "dig", "@198.18.0.1", "router.home.arpa", "A", "+short", "+time=3", "+tries=1", *transport])
+            answer = run(["ip", "netns", "exec", client, "dig", "@198.18.0.1", "router." + lan_domain, "A", "+short", "+time=3", "+tries=1", *transport])
             assert answer.strip(), "LAN DNS returned no A answer"
         for family, address in (("-4", "1.1.1.1"), ("-6", "[2606:4700:4700::1111]")):
             run(["ip", "netns", "exec", client, "curl", family, "--noproxy", "*", "--fail", "--max-time", "8", "--resolve", "one.one.one.one:443:" + address, "-sS", "-I", "https://one.one.one.one/"])
 
     original = api("/v1/config")["config"]
+    core = next(r["service"]["dns"] for r in original["resources"] if r["id"] == "service/dns-core")
+    lan_domain = core["zones"][0]["spec"]["zone"].rstrip(".")
     protected = {d[0]: set(sorted(records(d), key=lambda pair: pair[1])[:10]) for d in datasets}
     assert all(protected.values()), {name: len(rows) for name, rows in protected.items()}
 

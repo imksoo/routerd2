@@ -1,5 +1,7 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
+2026-11-03、基準main `c371753`、通常build `6e0f020bf76c`（製品Go不変）で、保存homertの実private DNS/NextDNS設定を接続した単体39-resource実HGW手順が終了0。実NextDNS/Cloudflareの設定済みDoH上流すべてのHealthyを確認。安定した5転送先について独立LAN端末から両IP・UDP/TCPの20照会を行い、3先のSOA、2先のNXDOMAINとcore履歴の選択sourceを照合した。残る1先は事前UDP/TCP無応答から、試験中UDPのSERVFAILと後続NOERRORへ変化し、WAN captureで指定peer自身のNOERROR/NODATA応答を確認した。この先の固定SERVFAIL期待は試験側の誤りで、安定した4方式の受入には数えない。試験用local zoneは実suffixを隠さない名前へ変更し、DHCP/search/照会側も合わせた。新規WAN・host経路は追加していない。 同じ実行で通常の両IP Internet/DNS、DHCP scopes/sticky、BGP、NTP（host時計変更なし）、Tailscale/管理/運用記録、confirmed rollbackが通過。11巡回/自然PD更新0回、PD SIGKILL2.01秒・通常再起動4.87秒、停止時RA撤去/上流Releaseなし。全daemon再起動、HAでの実private DNS、全110-resource intent・実機資格は未受入。NextDNSは実endpointのprobe疎通で、全LAN照会がNextDNSを選んだという主張ではない。
+
 保存homertにあった期限削除前のsyslog archive先のnative例への接続漏れを修正した。単体39-resource実HGWの同じ実行で、DNS/終了flow/NFLOG/DHCP識別の4 datasetに対する送信障害中の保持・通信と、復旧後の27件の受信/期限削除を確認した。7日経過・二台archive・全signal資格は残る。詳細は[引き継ぎ](pve-codex-handoff.md)と[試験計画](test-plan.md)を参照する。
 
 署名候補の実DNS待受競合から、既定120秒での失敗・reboot要求・以前のruntime/paired設定への復旧と端末通信まで終了0。保存設定の手修復なしで、新しいDNS設定とDUIDを保持した。実行条件と限界は[引き継ぎ](pve-codex-handoff.md)を参照する。

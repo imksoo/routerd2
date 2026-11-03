@@ -202,13 +202,14 @@ with `vacuum: false`; requesting vacuum reports an explicit error. Recreate such
 disposable state to use incremental vacuum. No in-service full database rewrite
 or migration layer is added.
 
-The legacy importer accepts events-only LogRetention with daily scheduling and
-UDP LogSink references. It rejects the deployed multi-dataset request atomically
-with `unsupported_semantics` until accessLogs, pluginRuns, dnsQueries,
-trafficFlows, firewallEvents and dhcpFingerprints have native history owners.
-Those datasets are not silently dropped. Diagnostic NDJSON logs remain under
-their existing finite rotation; this policy does not pretend they are those
-operational datasets.
+Native configuration supplies the event policy directly. DNS query, traffic
+flow, firewall and DHCP fingerprint histories have their own policy and writer
+owners; the single-router profile exercises their expiry/archive paths with
+actual producers. No legacy multi-dataset importer is an execution path.
+The old `access_logs` tables had no production writer in the examined routerd
+baseline; an empty table is not a native feature requirement. Plugin execution
+and its run history remain part of the unfinished CORE-05 contract. Diagnostic
+NDJSON rotation is distinct from these operational histories.
 
 Run `make check-retention` for an isolated product acceptance. Actual
 configuration commits and an EventRule exercise original records and consumers;
@@ -217,4 +218,4 @@ covers count/bytes/age, archive errors with concurrent records/rule consumption
 and routed UDP, recovery, persisted configuration after control restart and
 severity filtering. Its log-only unreachable route makes UDP submission fail;
 merely stopping a UDP receiver cannot establish reliable delivery or failure.
-It does not qualify physical appliances or the unimplemented datasets.
+It does not qualify physical appliances or all operational datasets.

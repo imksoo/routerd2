@@ -11340,6 +11340,11 @@
         "license_files": 303,
         "observed": "通常build `842c47e32300`で新しい`make runtime-bundle`が終了0。25役割・5 engine・15 artifacts、527,315,456 byteの署名配布物へsourceと303 license資料を同梱した。実receiverでstage/verify/initialize/statusと後続候補のprepare/cancelが通過し、元のactiveと増加済みwatermarkを維持。独立OpenSSLも署名を検証した。入力はprivate snapshotへ固定し、nDPIのsourceコピーをproduction/build入力へ限定してroot private probeとsite boot treeの非収録を確認した。再実行は[配布手順](runtime-bundle.md)。これは配布物と保存選択の受入であり、このbundleの実機起動・全profile更新は残る。",
         "scope": "Offline build/sign/stage/verify/selection operations; full-profile signed boot/update/recovery remains open. Shared-host clock must not be modified by appliance chronyd; full-profile appliance execution needs its own kernel/clock domain."
+      },
+      "private_dns_gate": {
+        "source": "c371753; executed normal build6e0f020bf76c; Go unchanged",
+        "result": "2026-11-03、基準main `c371753`、通常build `6e0f020bf76c`（製品Go不変）で、保存homertの実private DNS/NextDNS設定を接続した単体39-resource実HGW手順が終了0。実NextDNS/Cloudflareの設定済みDoH上流すべてのHealthyを確認。安定した5転送先について独立LAN端末から両IP・UDP/TCPの20照会を行い、3先のSOA、2先のNXDOMAINとcore履歴の選択sourceを照合した。残る1先は事前UDP/TCP無応答から、試験中UDPのSERVFAILと後続NOERRORへ変化し、WAN captureで指定peer自身のNOERROR/NODATA応答を確認した。この先の固定SERVFAIL期待は試験側の誤りで、安定した4方式の受入には数えない。試験用local zoneは実suffixを隠さない名前へ変更し、DHCP/search/照会側も合わせた。新規WAN・host経路は追加していない。",
+        "limit": "同じ実行で通常の両IP Internet/DNS、DHCP scopes/sticky、BGP、NTP（host時計変更なし）、Tailscale/管理/運用記録、confirmed rollbackが通過。11巡回/自然PD更新0回、PD SIGKILL2.01秒・通常再起動4.87秒、停止時RA撤去/上流Releaseなし。全daemon再起動、HAでの実private DNS、全110-resource intent・実機資格は未受入。NextDNSは実endpointのprobe疎通で、全LAN照会がNextDNSを選んだという主張ではない。"
       }
     }
   },
@@ -11347,7 +11352,7 @@
     {
       "stage": 1,
       "profile": "homert-single-implementation",
-      "next": "Protect the live natural PD T1 owner. Paired 47-resource profiles now passed actual HGW/client IPv4/IPv6 HTTPS, UDP/TCP DNS and VIP NTP, then a-to-b graceful-stop recovery in 17.01 seconds with 3 failed probe rounds. Continue reverse recovery, established TCP/UDP and all services; inspect observed effect ACK timeout. Keep existing upstream priority, with no new ens20/PPPoE fixture or extra PBR campaign.",
+      "next": "Complete missing single-router production functions against saved homert intent. Natural PD T1 owner finished and was removed; private DNS/NextDNS gate now covers five stable sources. Keep one intermittent peer unqualified. No new WAN NIC, PVE/QEMU or additional PBR campaign. Continue independent CORE/SYS/NET implementation and compare actual routerd paths.",
       "acceptance": "Cold-start the complete single-router profile with an independent WAN peer and Linux client. Verify WAN/LAN DHCPv4 scopes and reservations, DHCPv6-PD/Information identity and natural renew, RA/DAD/SLAAC, local/conditional/DoH DNS, all DS-Lite paths and IPv6, Health/PBR, NAT/MTU/MSS, BGP/NTP/Tailscale/management where configured, and worker/daemon restart and recovery from actual packets, client results, kernel routes and firewall state. Keep ONU/physical-NIC qualification separate."
     },
     {

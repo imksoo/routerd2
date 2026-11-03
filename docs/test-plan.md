@@ -166,3 +166,18 @@ live DBや時計へ時刻/行を注入しない。専用到達不能routeはfina
 fixtureの終了後にDB/log/captureを撤去する。
 
 実行結果: 2026-11-03、基準main `6e0f020` + native設定/fixture変更、実行build `799377d12628`（製品Go不変）で、archiveを接続した単体39-resource実HGW/Tailscale手順が終了0。保存homertのLogRetention sinksを再確認し、event/DNS/flow/firewall/DHCP fingerprintの保持へ既存syslog peerを接続した。通常通信・confirmed rollback・PD復旧の後、同じowner内で一時intentの期限2秒/間隔1秒を直列実行。archive専用の到達不能先で4 datasetの元記録を保持したまま、独立端末のDNS UDP/TCPとIPv4/IPv6 HTTPSが成功した。正常な受信先へ戻し、DNS query10件、終了済みflow10件、NFLOG拒否2件、DHCP fingerprint5件について元の識別子/時刻のsyslog受信と期限削除を照合した。元の7日/daily/vacuum intentへ戻した後も通信が成功した。 これは明示した短いpolicyの自然期限・送信error/復旧と27件の受信確認であり、7日経過、lossless UDP配送、全signal/物理機器の資格ではない。変更した二台設定例はschema検証済みで、このarchive条件のHA実通信は未実行。
+
+## 実設定のprivate DNS peerとNextDNS
+
+保存homertのDNSForwarder/DNSUpstreamを読取専用で照合し、対象suffixのSOAを各既存peerへUDP/TCPで照会する。
+応答なし、NOERROR/SOA、NXDOMAINを区別し、privateなcase fileへsource/name/rcode/soaを保存する。
+native単体profileのcoreへ同じ宣言順の転送先を設定し、実NextDNS/CloudflareのURL・bootstrapとWAN学習参照を接続する。
+試験用local zoneが実suffixを隠さない名前を使い、DHCP/search/zoneの設定と確認側を一緒に更新する。
+秘密を含むsite intent/case/URLはowner専用一時directoryへ置き、公開リポジトリへ保存しない。
+DoH確認は固定provider名ではなく、実configに設定されたHTTPS上流すべてのHealthyを要求する。
+通常巡回のlive ownerへ、`make check-site-dns SITE_DNS_OWNER=<pid> SITE_DNS_STAGE=<stage> SITE_DNS_CLIENT=<client namespace> SITE_DNS_CASES=<private cases.json>`を実行する。
+設定は変更せず、実listenerを読み、両IP UDP/TCPのSOA/negative応答とcore履歴の実sourceを照合する。
+同時にWANのUDP53を短時間captureし、質問・peer応答を確認する。未知の回答IPやSOA serialを固定値にしない。
+事前の無応答を以後の固定SERVFAIL期待にしない。応答が変動するpeerは同時点のpacketと実応答を照合し、安定した相互接続の成功と区別する。新規WAN/NICやhost経路は追加しない。
+
+実行結果: 2026-11-03、基準main `c371753`、通常build `6e0f020bf76c`（製品Go不変）で、保存homertの実private DNS/NextDNS設定を接続した単体39-resource実HGW手順が終了0。実NextDNS/Cloudflareの設定済みDoH上流すべてのHealthyを確認。安定した5転送先について独立LAN端末から両IP・UDP/TCPの20照会を行い、3先のSOA、2先のNXDOMAINとcore履歴の選択sourceを照合した。残る1先は事前UDP/TCP無応答から、試験中UDPのSERVFAILと後続NOERRORへ変化し、WAN captureで指定peer自身のNOERROR/NODATA応答を確認した。この先の固定SERVFAIL期待は試験側の誤りで、安定した4方式の受入には数えない。試験用local zoneは実suffixを隠さない名前へ変更し、DHCP/search/照会側も合わせた。新規WAN・host経路は追加していない。 同じ実行で通常の両IP Internet/DNS、DHCP scopes/sticky、BGP、NTP（host時計変更なし）、Tailscale/管理/運用記録、confirmed rollbackが通過。11巡回/自然PD更新0回、PD SIGKILL2.01秒・通常再起動4.87秒、停止時RA撤去/上流Releaseなし。全daemon再起動、HAでの実private DNS、全110-resource intent・実機資格は未受入。NextDNSは実endpointのprobe疎通で、全LAN照会がNextDNSを選んだという主張ではない。

@@ -609,6 +609,11 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             wan4 = query("control.sock", "/v1/services/service.wan4")["snapshot"]
             assert ipaddress.ip_address(wan4["currentAddress"]).version == 4, "WAN DHCPv4 did not publish an IPv4 lease"
             print("PASS actual HGW DHCPv4 client received and applied its observed WAN lease", flush=True)
+        lan_domain = "home.arpa"
+        if config_path is not None:
+            configured = query("control.sock", "/v1/config")["config"]
+            core = next(r["service"]["dns"] for r in configured["resources"] if r["id"] == "service/dns-core")
+            lan_domain = core["zones"][0]["spec"]["zone"].rstrip(".")
         lease_events = stage / "client-lease-events"
         client_options = stage / "client-dhcp-options"
         hook = stage / "client-dhcp-hook.sh"
@@ -665,7 +670,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         information = run(inside(client, ["busybox", "udhcpc6", "-l", "-f", "-n", "-q", "-i", "client0", "-s", str(info_hook), "-t", "3", "-T", "1"]))
         options = dict(line.split("=", 1) for line in information.splitlines() if line.startswith(("dns=", "search=")))
         servers = [ipaddress.IPv6Address(value) for value in options.get("dns", "").split()]
-        assert servers and "home.arpa" in options.get("search", "").split(), "LAN DHCPv6 information did not supply DNS and the configured search domain: " + str(options)
+        assert servers and lan_domain in options.get("search", "").split(), "LAN DHCPv6 information did not supply DNS and the configured search domain: " + str(options)
         print("PASS independent LAN client received router DNS and search domain via DHCPv6", flush=True)
 
         auto_events = stage / "automatic-client-events"
@@ -693,7 +698,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             if not auto_events.exists():
                 return False
             events = [line.split("|") for line in auto_events.read_text().splitlines()]
-            return any(len(event) == 5 and event[0] == "v4" and event[3:] == ["198.18.0.1", "198.18.0.1"] for event in events) and any(len(event) == 3 and event[0] == "v6" and event[1] and "home.arpa" in event[2].split() for event in events) and any(event[0] == "ra" and len(event) == 2 and event[1] for event in events)
+            return any(len(event) == 5 and event[0] == "v4" and event[3:] == ["198.18.0.1", "198.18.0.1"] for event in events) and any(len(event) == 3 and event[0] == "v6" and event[1] and lan_domain in event[2].split() for event in events) and any(event[0] == "ra" and len(event) == 2 and event[1] for event in events)
         wait(automatic_ready, 60)
         auto_options = [line.split("|") for line in auto_events.read_text().splitlines()]
         auto_dns4 = next(event[4] for event in reversed(auto_options) if event[0] == "v4")
@@ -783,10 +788,10 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
 
         wait_dns()
         if config_path is not None:
-            for name, expected in (("router.home.arpa", "198.18.0.1"), ("storage.home.arpa", "198.18.0.11")):
+            for name, expected in (("router." + lan_domain, "198.18.0.1"), ("storage." + lan_domain, "198.18.0.11")):
                 answer = run(inside(client, ["dig", "@" + lease[3], name, "A", "+short", "+time=3", "+tries=1"]))
                 assert answer.strip() == expected, f"LAN DNS {name} resolved to {answer.strip()!r}, expected configured address {expected}"
-            answer = run(inside(client, ["dig", "-6", "@" + str(router_dns), "router.home.arpa", "AAAA", "+short", "+time=3", "+tries=1"]))
+            answer = run(inside(client, ["dig", "-6", "@" + str(router_dns), "router." + lan_domain, "AAAA", "+short", "+time=3", "+tries=1"]))
             assert ipaddress.IPv6Address(answer.strip()) == router_dns, "LAN DNS router AAAA does not match the router's observed delegated address: " + answer
             print("PASS independent LAN client resolved router IPv4/IPv6 and its DHCP reservation through routerd2 DNS", flush=True)
         if tailnet:
@@ -967,11 +972,15 @@ print(*s.getsockname())
                 answer = run(inside(client, ["dig", family, "@" + server, "www.example.net", "A", "+time=3", "+tries=1"]))
                 assert "status: NOERROR" in answer and re.search(r"\sIN\s+A\s+", answer), "WAN learned DNS did not resolve the public name: " + answer
             wait(lambda: any(q["upstream"] == "wan-learned" and q["responseCode"] == "NOERROR" for q in query("control.sock", "/v1/services/service.dns-core/dns-history?name=www.example.net&limit=20")["queries"]))
+            configured = query("control.sock", "/v1/config")["config"]
+            core = next(r["service"]["dns"] for r in configured["resources"] if r["id"] == "service/dns-core")
+            endpoints = [url.strip() for source in core["spec"]["sources"] for url in source.get("upstreams", []) if url.strip().startswith("https://")]
+            assert endpoints, "native DNS profile has no DoH upstream to exercise"
             def doh_ready():
                 observed = query("services/dns-core.dns.sock", "/v1/status")["resources"][0]["observed"]["upstreams"]
-                return all(endpoint + ":Healthy" in observed for endpoint in ("https://cloudflare-dns.com/dns-query", "https://dns.google/dns-query"))
+                return all(endpoint + ":Healthy" in observed for endpoint in endpoints)
             wait(doh_ready)
-            print("PASS multiple conditional suffixes, nested source precedence, WAN-learned DNS answers and both independent public DoH upstream probes", flush=True)
+            print("PASS multiple conditional suffixes, nested source precedence, WAN-learned DNS answers and all configured public DoH upstream probes", flush=True)
 
         def bgp_peer_states():
             snapshot = query("control.sock", "/v1/services/service.routing").get("snapshot", {})
@@ -1015,7 +1024,7 @@ print(*s.getsockname())
 
         def check_management():
             for namespace, server in ((router, "127.0.0.1"), (client, "198.19.0.1")):
-                answer = run(inside(namespace, ["dig", "@" + server, "router.home.arpa", "A", "+short", "+time=3", "+tries=1"]))
+                answer = run(inside(namespace, ["dig", "@" + server, "router." + lan_domain, "A", "+short", "+time=3", "+tries=1"]))
                 assert answer.strip() == "198.18.0.1", "loopback/management DNS did not resolve the configured LAN name: " + answer
             status = json.loads(run(inside(client, [
                 "ssh", "-F", "/dev/null", "-i", str(management_key), "-o", "BatchMode=yes",
@@ -1080,7 +1089,7 @@ print(*s.getsockname())
             for options in (client_options, auto_dhcp_options):
                 ntp, search = options.read_text().strip().split("|")
                 assert set(ntp.split()) == {"198.18.0.1", "198.18.0.254"}, (options.name, ntp)
-                assert "home.arpa" in search.split(), (options.name, search)
+                assert lan_domain in search.split(), (options.name, search)
             print("PASS primary/reserved and OUI/exact-MAC scopes supplied their configured pool, gateway, DNS, NTP/search; special clients reached public DNS/HTTPS via the independent LAN gateway; DHCP fingerprints persisted", flush=True)
 
         def check_lan_distribution():
@@ -1269,7 +1278,7 @@ print(*s.getsockname())
                     for server in (lease[3], str(router_dns)):
                         for transport in ("+notcp", "+tcp"):
                             answer = subprocess.run(inside(client, ["dig", "@" + server,
-                                "router.home.arpa", "A", "+short", "+time=2", "+tries=1", transport]),
+                                "router." + lan_domain, "A", "+short", "+time=2", "+tries=1", transport]),
                                 capture_output=True, text=True, timeout=4)
                             if answer.returncode or answer.stdout.strip() != expected:
                                 return False
