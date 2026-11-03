@@ -11185,7 +11185,7 @@
     "physical_target_profile": "homert02/03 are identified PVE guests with4vCPU/4GiB, three VirtIO NICs and VirtIO/SCSI disks. Matching isolated PVE product boot/recovery was exercised; actual WAN/LAN attachment, clean installation from a preconverted native configuration, measured load and any additional hardware/architecture qualification remain open.",
     "validation_reporting": "Use docs/test-plan.md for the concise current gate state. Detailed historical checkpoint ledgers are not acceptance authority; keep only current result, limits and repeatable procedure. Never claim unrun gates or partial homert profiles complete.",
     "current_acceptance": {
-      "as_of_utc": "2026-11-03T00:21:44Z",
+      "as_of_utc": "2026-11-03T00:59:24Z",
       "product_code_checkpoint": "c9d7055d2ed3afc168ebf5096ebd9de3088a1af7",
       "homert_source": "User-provided read-only working copies at chatty.lain.local:~/homert02; the current homert02 and homert03 files each contain 110 resources with matching kind counts. Do not publish configuration values or secrets.",
       "completed_gates": [
@@ -11200,12 +11200,7 @@
         "observed_so_far": "On main-derived build 7c1cb3619acb with the generated test profile, the real HGW returned PD Advertise/Reply from UDP source port 49153 to client port 546. One natural T1 Renew/Reply was captured; initial Solicit and Renew had the same DUID, configured IAID 1 and delegated prefix, and the lease deadline advanced. DAD was enabled on WAN/LAN; all observed global addresses were non-tentative with no DAD failures. PD worker SIGKILL, graceful worker restart and full daemon restart restored both clients in 1.32s, 3.61s and 3.99s. Zero-lifetime RA withdrew the kernel prefix without releasing the upstream grant; both independent clients naturally renewed DHCPv4 and completed 676 rounds of IPv4/IPv6 HTTPS and learned-DNS UDP/TCP.",
         "limit": "not direct ONU, target physical NIC, full homert profile or two-node HA qualification"
       },
-      "latest_native_profile_attempt": {
-        "status": "six attempts; latest 15-resource real-HGW profile gate passed with independent clients (exit 0)",
-        "observed": "On build 8ea44d776dc3, the 15-resource profile passed observed WAN DHCPv4, LAN reservation/OUI scope DHCPv4, DHCPv6 information, RA/SLAAC and delegated router DNS; local and conditional DNS including failure isolation/recovery; router DoH default lookup; independent client IPv4/IPv6 HTTPS and A/AAAA DNS over UDP/TCP; WAN blackhole/recovery in 0.79 s; PD worker SIGKILL/graceful restart in 1.57/3.53 s; and whole-daemon restart in 3.78 s. DUID/IAID/prefix stayed stable. Shutdown sent zero-lifetime RA and removed delegated LAN addresses without DHCPv6 Release. Twelve communication rounds; natural DHCPv6 T1 was 7,176 s away, so no natural Renew/Reply or DHCPv4 T1 was claimed.",
-        "change": "The sixth run completed the short native single-router gate after correcting B4 to WAN /128 and adding the IPv6 host-traffic route from the current homert intent. The stage, namespaces and captures were removed. This accepts only the 15-resource profile; implement and test the remaining 110-resource single-router behavior before HA."
-      },
-      "current_changes": "The single-router native example has 15 resources; homert02/03 examples each have 14. The sixth real-HGW run passed its short gate with independent clients: WAN/LAN DHCPv4, DHCPv6/RA/SLAAC, DNS/DoH, DS-Lite IPv4/IPv6, WAN outage, PD worker restarts and whole-daemon restart. Recovery was 0.79/1.57/3.53/3.78 s. Native-profile natural DHCPv6 T1, DHCPv4 T1 and continuous TCP remain unobserved. The complete 110-resource homert profile, direct ONU and target NIC remain unqualified.",
+      "current_changes": "The 16-resource single-router profile now integrates NTP and the actual conntrack TCP liberal intent. Its focused real-HGW/independent-client gate passed, including NTP synchronization and LAN service after whole-daemon restart. make check with race/vet, static build and profile validation passed. Continue the complete current 110-resource homert feature mapping; no PVE/QEMU or additional PBR investigations.",
       "open_work_packages": 34,
       "unqualified_profiles": [
         "homert-single full input",
@@ -11215,12 +11210,17 @@
         "Kubernetes",
         "SAM/federation full path"
       ],
-      "tested_source_head": "8ea44d776dc310fcd809467ec01def160a0424b8",
+      "tested_source_head": "30006ead8a88",
       "native_examples": {
-        "examples/single-router-dslite-dhcp-dns.yaml": 15,
+        "examples/single-router-dslite-dhcp-dns.yaml": 16,
         "examples/homert02-native.yaml": 14,
         "examples/homert03-native.yaml": 14,
         "full_homert_profile": "not present; the examples do not represent the complete current 110-resource intent"
+      },
+      "latest_native_profile_gate": {
+        "status": "16-resource real-HGW profile including NTP passed (exit 0)",
+        "observed": "Build 30006ead8a88: synchronized to WAN-learned NTP at stratum 3; two independent LAN chronyd -Q clients received time before and after whole-daemon restart. Host-mode adjustment was disabled. Actual conntrack TCP liberal sysctl was 1. DHCP/PD/RA/SLAAC, local/conditional/DoH DNS and both-IP HTTPS/DNS UDP/TCP passed. PD SIGKILL/graceful recovery took 3.79/5.86 s; whole-daemon restart through all checks took 18.94 s including NTP client measurement. Two traffic rounds, no natural T1; artifacts were removed.",
+        "change": "Reuse the existing chrony engine and source groups. The runner uses bundled chronyd peers/clients as in ntp-peer.py and fresh typed IPv4/IPv6 socket observations for DNS recovery. NTP fallback was not selected in this run; appliance clock adjustment, full homert intent and target hardware remain unaccepted."
       }
     }
   },

@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 00:21 UTC。対象は implementation-plan.md と同JSONの34 work package。
+更新: 2026-11-03 00:59 UTC。対象は implementation-plan.md と同JSONの34 work package。
 目的は、独立端末を接続しただけで家庭用ルーターの通信が成立し、障害・再起動・更新から復旧する最初の製品を完成させること。
 
 ## 判定原則
@@ -18,17 +18,21 @@
 
 2026-11-03時点で、work packageは in_progress 22件、planned 12件で、製品全体を完了と判定した項目はない。過去の部分合格を全体完成に読み替えない。
 
-- 最新の基準mainは 8ea44d7。ここでの差分は計画、Makefile、試験用ResourceProgram例、実HGW runnerであり、routerd2のGo製品コードは変更していない。
-- 現在の作業ツリー（基準HEAD `8ea44d7`、製品Goコードは`c9d7055`から不変）で `make check` はGo/Python checks、Race Detector、vetを含め終了0。`make build DOCKER='sudo -n docker'`も終了0、`readelf`で3実行物にdynamic dependencyがないことを確認し、nDPI source/license noticesも存在する。
+- 実行版の基準mainは `30006ea`。15-resource実HGW gateとrunnerをcommit/push済み。16-resource例へNTP client/serverと実設定のconntrack TCP liberalを追加し、実HGW統合gateを通過した。製品Goコードは変更していない。
+- 現在の作業ツリー（基準HEAD `30006ea`、製品Goコードは`c9d7055`から不変）で `make check` はGo/Python checks、Race Detector、vetを含め終了0。`make build DOCKER='sudo -n docker'`も終了0、`readelf`で3実行物にdynamic dependencyがないことを確認し、nDPI source/license noticesも存在する。
 - 実supervisor/control/network/Health worker、独立二WAN/Linux peer、TCP/UDP、packet captureによる make check-health-pbr は障害切替・復旧、worker/supervisor再起動、古い通知・期限切れ、confirmed rollbackを通過済み。実対象回線や二台homertの受入ではない。
 - 通常Alpine/PID 1 applianceの隔離PVE試験では、独立PPPoE AC/ISC DHCPv6/Linux clientを使うDHCPv4、PD/Renew、SLAAC、両IP通信、署名更新、明示・自動rollbackを通過済み。対象ONU/NICではない。
 - 実HGWのmacvlanと独立Linux clientで、過去の短時間試験および7,800秒試験がある。今回のmain由来product build `7c1cb3619acb` による自然PD T1観測は、試験用の生成profileで完了した。自然Renew/ReplyをWAN captureで各1回確認し、Renewはclient UDP/546→server/547、対応ReplyはHGW source port 49153→client/546だった。期限が更新され、初回SolicitとRenewのDUID、IAID=1、委譲prefixは同一。旧routerdの受信実装もsender address/portで制限していない。実LinuxではWAN/LANとも`accept_dad=1`、観測したglobal IPv6 addressはnon-tentative、DAD failureなし。PD worker SIGKILL後1.32秒、graceful restart後3.61秒、全daemon restart後3.99秒で両clientの通信が復旧した。upstream grantをReleaseせずzero-lifetime RAとkernel withdrawalを確認。独立する両clientの自然DHCPv4更新と、IPv4/IPv6 HTTPSおよび学習DNSのUDP/TCPを676観測roundで確認した。raw capture/state/stageは削除済み。生成profileの試験であり、native homert設定・連続TCP・ONU直結・対象物理NICのqualificationではない。
-- 2026-11-03に読み直したhomert02/03設定は各110 resourcesで、kind件数は一致する。両方にIPv6 host-traffic policy route（table 120）がある。`homert02-native.yaml` / `homert03-native.yaml` は各14 resources。main上の `single-router-dslite-dhcp-dns.yaml` は13 resources、working native HGW profileは15 resourcesで、いずれも全設定ではない。過去の一時57-resource入力を現行profileや完成証拠に流用しない。第6回native gateは終了0。DHCPv4/PD/RA/DHCPv6/SLAAC、DNS/DoH、DS-Lite IPv4/IPv6通信、WAN遮断復旧、PD workerとdaemon再起動を独立端末で確認した。15-resource profileの合格を110-resource homert受入に読み替えない。
+- 2026-11-03に読み直したhomert02/03設定は各110 resourcesで、kind件数は一致する。両方にIPv6 host-traffic policy route（table 120）がある。`homert02-native.yaml` / `homert03-native.yaml` は各14 resources。`single-router-dslite-dhcp-dns.yaml` はNTP追加後16 resourcesで、いずれも全設定ではない。過去の一時57-resource入力を現行profileや完成証拠に流用しない。第6回native gateは終了0。DHCPv4/PD/RA/DHCPv6/SLAAC、DNS/DoH、DS-Lite IPv4/IPv6通信、WAN遮断復旧、PD workerとdaemon再起動を独立端末で確認した。15-resource profileの合格を110-resource homert受入に読み替えない。
 - ens18/ens20はvirtio NICで、NTT ONU直結と対象物理NICのqualificationは未実施。HGW経由の結果はONU直結の証拠ではない。homert実機、arm64実行、PVE/Kubernetes/Cloud全体も未受入。
 
 ## 実行順と合格条件
 
 今回の実作業は現在の実HGWと隔離Linuxで進める。PVE/QEMUと追加のPBR調査は実行しない。以下の全体受入範囲と、今回実行する環境を混同しない。
+
+NTPを加えた16-resource native profileは、build `30006ead8a88`で終了0。実HGWから学習したNTP源へstratum 3で同期し、LAN 2端末の独立chronyd `-Q` clientが時刻応答を受けた。全daemon再起動後もfreshな同期と両client応答が通った。host modeのproduct/peerは`-x`、clientは`-Q`で、host時計を変更していない。実kernelの`nf_conntrack_tcp_be_liberal=1`も確認。DHCP/PD/RA/DNS/DoH/両IP HTTPS・DNS UDP/TCPを2 round、PD worker SIGKILL/通常再起動（3.79/5.86秒）、zero-lifetime RA/kernel撤去を同じ構成で通した。全daemon restartから全確認完了までは18.94秒で、NTP clientの測定時間を含む。stage/capture/namespaceは撤去済み。NTP fallback sourceは今回は選択されず未確認、appliance時刻補正・自然T1・連続TCP・110-resource全体・ONU/対象NICは未受入。
+
+再実行は `make check-uplink DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18 UPLINK_WAN_MAC=02:72:6f:75:74:03 UPLINK_CONFIG=examples/single-router-dslite-dhcp-dns.yaml UPLINK_SECONDS=20 UPLINK_FULL_RESTART=1`。独立peer/clientは既存`ntp-peer.py`と同じbundle内chronydを使う。DNS復旧は既存の型付きsocket観測で、復旧確認開始後のfreshな両IP listenerを待ってから実問い合わせする。表示用の上流一覧はsocket readinessと扱わない。既に通ったWAN遮断試験はNTP追加gateでは繰り返していない。
 
 ### 1. 単体ルーターを端末からインターネットまで通す
 
@@ -45,7 +49,7 @@ homert02/03の一台分のintentと旧routerdの実装を照らし、native Reso
 
 短時間の機能確認と自然更新を含む長時間確認は別に記録する。未観測の更新や対象機器の挙動を推定で合格にしない。
 
-短時間native gateを、作業中の15-resource例で実HGWへ適用する再実行コマンド:
+第6回はcommit `30006ea`に含まれる15-resource例を次のコマンドで実HGWへ適用した:
 `make check-uplink DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18 UPLINK_WAN_MAC=02:72:6f:75:74:03 UPLINK_CONFIG=examples/single-router-dslite-dhcp-dns.yaml UPLINK_SECONDS=120 UPLINK_WAN_OUTAGE=1 UPLINK_FULL_RESTART=1` を使い、WAN DHCPv4は観測したlease、予約clientは設定した予約と照合する。OUI clientの動的割当はDHCP ACKから読み、宣言したscope内かを確認する。独立端末でDHCPv6 information、SLAAC、RAと一致する委譲IPv6 DNS listener、router A/AAAA、DHCP予約由来DNS、条件付き転送停止/復旧、DoH上流、DS-Lite/IPv6通信、WAN outage、PD workerとdaemon再起動後の復旧を確認する。この例のIPv4 leaseは12時間なので短時間gateではDHCPv4自然T1を主張しない。PD自然T1は上記の生成profile gateで別に完了している。native gateの合否と制限は実行後に追記する。
 
 第6回はmain-derived build `8ea44d776dc3`、実HGWへつないだens18 virtio uplink、隔離macvlan router namespace、独立Linux LAN client 2台で実行し終了0。15-resource ResourceProgramを適用し、WAN DHCPv4 lease、予約/OUI scope DHCPv4、DHCPv6 Information、RA/SLAACと委譲DNSを取得値から確認した。LANからrouterのIPv4/IPv6 DNS、予約record、条件付きDNSの正常応答・上流停止時のfailure isolation・復旧が通った。routerのDoH既定経路と、独立clientのIPv4/IPv6 HTTPSおよびDNS A/AAAA UDP/TCPを確認。WANをblackholeしてIPv4/IPv6が失敗し、解除後0.79秒で復旧、PD identityを保持した。PD worker SIGKILL後1.57秒、graceful restart後3.53秒、全daemon restart後3.78秒で端末通信が復旧し、DUID/IAID/prefixを維持。停止時のzero-lifetime RA、委譲LAN addressのkernel withdrawal、上流DHCPv6 Releaseなしも確認した。12回の通信round中、自然PD Renew/Replyは0回（T1まで約7,176秒）、DHCPv4 T1未到達。試験stage/capture/namespaceは自動撤去済み。制限:15-resource profileだけで、連続TCP、110-resource homert、ONU直結、対象物理NIC qualificationではない。

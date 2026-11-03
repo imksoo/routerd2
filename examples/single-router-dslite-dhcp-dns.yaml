@@ -12,7 +12,7 @@ resources:
     depends_on: [interface/lan0]
     address: {interface: lan0, cidr: 198.18.0.1/24}
   - id: forwarding
-    forwarding: {ipv4: true, ipv6: true, ipv4_rp_filter: 0}
+    forwarding: {ipv4: true, ipv6: true, ipv4_rp_filter: 0, conntrack_tcp_liberal: true}
   - id: firewall
     firewall:
       input:
@@ -182,3 +182,13 @@ resources:
                   ipv6From: {resource: IPv6DelegatedAddress/wan-pd/lan, field: address}
               dhcpDerived:
                 sources: [DHCPv4Server/lan-leases]
+  - id: service/time
+    depends_on: [address/lan]
+    service:
+      name: time
+      ntp:
+        sources:
+          - sources_from: [wan-pd]
+            servers: [{address: 198.18.0.254}]
+        listen: [198.18.0.1]
+        allow: [198.18.0.0/24]

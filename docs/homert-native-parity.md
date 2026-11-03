@@ -22,12 +22,12 @@
 | `NAT44Rule` (7), `NAT44SessionSync` (1) | `nat` resource、`service.vrrp.conntrack_sync` | 対応するnative機構はある。実際のsource/egress matchと同期除外値は未確認で、packet試験も必要。 |
 | `FirewallZone` (3), `FirewallPolicy` (1), `FirewallRule` (2), `IPAddressSet` (2), `LocalServiceRedirect` (1), `FirewallEventLog` (1) | `firewall` rule、address set、local redirect、`service.firewall_log` | native primitiveはあるが、zone/policyとの一対一対応は確立していない。推測したrule setで置き換えない。 |
 | `BGPRouter` (1), `BGPPeer` (1) | `service.bgp` | 機能種別を表すnative serviceはある。router/peer値と実route交換は別途確認が必要。 |
-| `NTPClient` (1), `NTPServer` (1) | `service.ntp` のsource、listener、access prefix | native time serviceはclient/server意図を持つ。実際のsource選択とserving ACLは転記していない。 |
+| `NTPClient` (1), `NTPServer` (1) | 一つの`service.ntp`のsource group、`listen`、`allow` | 実設定は両方chrony。clientはauto学習とfallback、serverはstatic source、LAN address由来listenerとallow prefixを使う。nativeの`sources_from`とfallback server、listener/allowへ対応する。16-resource single profileでWAN学習源への同期とLAN 2端末への時刻応答、全daemon restart後の再同期を実HGWと確認した。fallback sourceと全homert source集合は未受入。 |
 | `TailscaleNode` (1) | `service.tailscale` | native serviceはある。identityとenrollment stateは別に配備する。identity値はこの解析に取り込んでいない。 |
 | `LogSink` (2), `Telemetry` (1), `LogRetention` (1), `TrafficFlowLog` (1), `WebConsole` (1) | `service.otlp_logs`/`syslog`、retention設定、`service.traffic_flow`、`service.web_console` | 対応するtyped service領域はある。sinkからtelemetryへの参照とretention policyは実値での対応が未確認。 |
-| `ManagementAccess` (1) | 対応するResourceProgram payloadを特定できていない | 未対応。Web consoleから推測せず、management/startup契約で明示する。 |
-| `Package` (1) | ResourceProgram外のimage/build package manifest | runtime resourceには未対応。必要packageをimage側で確認し、任意package実行resourceは追加しない。 |
-| `Sysctl` (1) | 意味が一致する場合に限り、typed `forwarding` field | keyと設定値を確認するまで未対応。任意sysctlを設定する汎用resourceはない。 |
+| `ManagementAccess` (1) | explicit listener/firewall設定とconfirmed commitによる管理経路維持 | 旧`CheckManagementPlane`は宣言interfaceの存在・trust/mgmt zone所属・Webのbindを事前検査し、apply本体はinterface一覧を観測する。独立した通信engineではない。nativeの管理listenerとfirewallの明示設定へ置換する範囲と受入は未完了。 |
+| `Package` (1) | native `service.vrrp.conntrack_sync` | 実設定のpackageはUbuntuの`conntrackd`。nativeのGo conntrack同期へ置換し、runtimeのapt操作は提供しない。実際のHA通信とstate同期の受入は別途必要。 |
+| `Sysctl` (1) | `forwarding.conntrack_tcp_liberal` | 実設定は`net.netfilter.nf_conntrack_tcp_be_liberal=1`。typed fieldへ対応し、設定journalとboot再適用で維持する。single profileへ追加し、実HGW gateでrouter namespaceの実kernel値1を確認した。 |
 
 ## 抽出した依存関係の形
 

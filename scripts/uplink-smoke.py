@@ -4,7 +4,8 @@
 The actual product owns RA, DHCPv4, DHCPv6 PD, LAN RA, DNS and DS-Lite. The host's
 management addresses/routes/clock are not changed. Requires an explicit uplink
 and either a native ResourceProgram or an AFTR for the generated fixture, plus
-root/sudo, iproute2, BusyBox, dhcpcd, dnsmasq, curl, dig and tcpdump. A bounded
+root/sudo, iproute2, BusyBox, dhcpcd, dnsmasq, curl, dig and tcpdump. Native-profile
+checks also use independent bundled chronyd peers and clients with clock adjustment disabled. A bounded
 owner removes its namespaces on completion. An optional private state directory
 retains the test router's identity and WAN leases. This is not NIC qualification.
 """
@@ -19,6 +20,7 @@ from pathlib import Path
 import signal
 import sqlite3
 import subprocess
+import tarfile
 import time
 
 
@@ -104,6 +106,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         "ra",
         "dns",
     ]
+    if config_path is not None:
+        roles.append("ntp")
     boot = dict(
         platform="host",
         config=str(config_path or stage / "config.json"),
@@ -118,6 +122,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             for role in roles
         },
     )
+    if config_path is not None:
+        boot["engines"]["ntp"] = str(stage / "chrony-engine.tar")
     (stage / "boot.json").write_text(json.dumps(boot))
     if config_path is None:
         nat_rules = [{"type": "masquerade", "match": {"family": 4, "source": "198.18.0.0/24", "out_interface": "dslite0"}}]
@@ -328,6 +334,23 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             )
 
         private_dns = start_private_dns()
+        if config_path is not None:
+            chrony_root = stage / "chrony-peer"
+            chrony_root.mkdir()
+            with tarfile.open(stage / "chrony-engine.tar") as archive:
+                archive.extractall(chrony_root, filter="data")
+            chrony_loader = next((chrony_root / "lib").glob("ld-musl-*.so.1"))
+            chrony = [str(chrony_loader), "--library-path", str(chrony_root / "lib") + ":" + str(chrony_root / "usr/lib"), str(chrony_root / "usr/sbin/chronyd")]
+            ntp_source = stage / "ntp-source.conf"
+            ntp_source.write_text(
+                "local stratum 8\n"
+                f"bindaddress {dns_peer_address}\nallow 198.18.0.0/24\ncmdport 0\n"
+                f"bindcmdaddress {stage}/ntp-source.sock\npidfile {stage}/ntp-source.pid\n"
+                f"driftfile {stage}/ntp-source.drift\n"
+            )
+            start(client, chrony + ["-d", "-x", "-u", "root", "-f", str(ntp_source)], "ntp-source")
+            ntp_client = stage / "ntp-client.conf"
+            ntp_client.write_text("server 198.18.0.1 iburst\ncmdport 0\n")
         run(["ip", "-n", client, "link", "add", "link", "client0", "name", "client1", "type", "macvlan", "mode", "bridge"])
         run(["ip", "-n", client, "link", "set", "client1", "netns", automatic])
         run(["ip", "-n", automatic, "link", "set", "client1", "address", "02:00:00:00:00:03"])
@@ -457,6 +480,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
 
         wait(ready, 120)
         if config_path is not None:
+            assert run(inside(router, ["sysctl", "-n", "net.netfilter.nf_conntrack_tcp_be_liberal"])).strip() == "1", "configured conntrack TCP liberal mode was not applied"
             wait(lambda: query("control.sock", "/v1/services/service.wan4").get("snapshot", {}).get("active", False))
             wan4 = query("control.sock", "/v1/services/service.wan4")["snapshot"]
             assert ipaddress.ip_address(wan4["currentAddress"]).version == 4, "WAN DHCPv4 did not publish an IPv4 lease"
@@ -613,17 +637,21 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
 
         wait(forwarding_ready, diagnostic=forwarding_diagnostic)
 
-        def dns_ready():
-            observed = query("services/dns.dns.sock", "/v1/status")["resources"][0][
-                "observed"
-            ]
-            return (
-                "Current" in observed.get("bootstrapResolvers", "")
-                if dns_upstream
-                else "udp://" in observed.get("upstreams", "")
-            )
+        def wait_dns():
+            started = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
 
-        wait(dns_ready)
+            def listening():
+                snapshot = query("control.sock", "/v1/services/service.dns").get("snapshot", {})
+                now = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+                if not started < snapshot.get("observed_nanos", 0) <= now < snapshot.get("expires_nanos", 0):
+                    return False
+                listeners = set(snapshot.get("listeners", []))
+                return "[::]:53" in listeners or {lease[3] + ":53", "[" + str(router_dns) + "]:53"} <= listeners
+
+            wait(listening)
+            print("Observed fresh IPv4/IPv6 DNS listener readiness; seconds", round((time.clock_gettime_ns(time.CLOCK_BOOTTIME) - started) / 1e9, 2), flush=True)
+
+        wait_dns()
         if config_path is not None:
             for name, expected in (("router.home.arpa", "198.18.0.1"), ("storage.home.arpa", "198.18.0.11")):
                 answer = run(inside(client, ["dig", "@" + lease[3], name, "A", "+short", "+time=3", "+tries=1"]))
@@ -706,6 +734,24 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         private_dns = start_private_dns()
         wait(lambda: subprocess.run(inside(client, ["dig", "@" + lease[3], "recovered.split.test", "A", "+short", "+time=2", "+tries=1"]), capture_output=True, text=True).stdout.strip() == "192.0.2.77")
         print("PASS independent conditional DNS source, failure isolation and recovery over LAN IPv4/IPv6", flush=True)
+
+        def check_time():
+            after = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+
+            def synchronized():
+                snapshot = query("control.sock", "/v1/services/service.time").get("snapshot", {})
+                return snapshot.get("synchronized", False) and snapshot.get("observed_nanos", 0) > after
+
+            wait(synchronized)
+            snapshot = query("control.sock", "/v1/services/service.time")["snapshot"]
+            assert not snapshot["adjusting_clock"], "host-mode time service attempted to adjust the host clock"
+            print("Observed NTP source", "fixture fallback" if snapshot.get("source") == dns_peer_address else "WAN learned", "stratum", snapshot["stratum"], flush=True)
+            for namespace in (client, automatic):
+                run(inside(namespace, chrony + ["-Q", "-t", "8", "-u", "root", "-f", str(ntp_client)]), timeout=12)
+            print("PASS NTP synchronized and independent LAN chronyd clients received time; host clock adjustment disabled", flush=True)
+
+        if config_path is not None:
+            check_time()
 
         start(router, ["ip", "-ts", "monitor", "route"], "router-routes")
 
@@ -886,7 +932,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         after = query("control.sock", "/v1/services/service.wan-pd")["snapshot"]
         assert (after["client_duid"], after["iaid"]) == (before["client_duid"], before["iaid"]), "PD worker restart lost client identity"
         wait(forwarding_ready, diagnostic=forwarding_diagnostic)
-        wait(dns_ready)
+        wait_dns()
         check_traffic()
         print("PASS actual uplink PD worker SIGKILL recovery, retained DUID/IAID and restored LAN communication; seconds", round(time.time() - restarted_at, 2), flush=True)
         previous = next(
@@ -904,7 +950,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         assert (graceful["client_duid"], graceful["iaid"]) == (before["client_duid"], before["iaid"]), "graceful restart lost PD identity"
         assert {p["prefix"] for p in graceful["prefixes"]} == {p["prefix"] for p in before["prefixes"]}, "graceful restart changed the delegated prefix"
         wait(forwarding_ready, diagnostic=forwarding_diagnostic)
-        wait(dns_ready)
+        wait_dns()
         check_traffic()
         print("PASS actual uplink graceful PD restart, retained DUID/IAID and prefix, restored LAN communication; seconds", round(time.time() - graceful_at, 2), flush=True)
         if full_restart:
@@ -921,8 +967,10 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             assert (restored["client_duid"], restored["iaid"]) == (before["client_duid"], before["iaid"]), "router restart changed PD identity"
             assert {p["prefix"] for p in restored["prefixes"]} == {p["prefix"] for p in before["prefixes"]}, "router restart changed the retained delegation"
             wait(forwarding_ready, diagnostic=forwarding_diagnostic)
-            wait(dns_ready)
+            wait_dns()
             check_traffic()
+            if config_path is not None:
+                check_time()
             print("PASS actual HGW full daemon restart retained identity and restored both clients; seconds", round(time.monotonic() - restart_at, 2), flush=True)
             if tailnet:
                 wait(lambda: tailnet_observation().get("backend_state") == "Running")
@@ -1129,6 +1177,7 @@ def main():
         if args.config:
             profile = stage / "resource-program.yaml"
             run(root + ["install", "-m", "600", str(args.config.resolve()), str(profile)])
+            run(root + ["install", "-m", "500", str(Path("dist/chrony-engine.tar").resolve()), str(stage / "chrony-engine.tar")])
         for source, name in [(Path(__file__), "owner.py"), (Path("dist/dnsmasq-engine.tar"), "dnsmasq-engine.tar")] + [
             (args.binary_dir / n, n)
             for n in ["routerd", "routerd-modules", "routerd-logging"]

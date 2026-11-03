@@ -1,8 +1,8 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
-更新: 2026-11-03 00:21 UTC。mainは `8ea44d7`。作業ツリーで`make check`（Race Detector・vet込み）、static build、native profile検証を完了した。製品Goコードは`c9d7055`から不変。15-resource native profileを実HGWと独立clientで通すgateは第6回で終了0。DNS/DoH・DS-Lite IPv4/IPv6通信・WAN遮断復旧・PD worker/daemon再起動まで通過し、全試験stageを撤去した。これは110-resource homert全体の受入ではない。
+更新: 2026-11-03 00:59 UTC。実行版の基準mainは `30006ea`。16-resource native profileでNTPを含む実HGW/独立clientの統合gateが終了0。`make check`（Race Detector・vet込み）、static build、native profile検証も通過。製品Goコードは`c9d7055`から不変で、既存engineをnative設定へ接続している。110-resource homert全体の受入は未完了。
 
-全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で9日12時間53分が経過し、2026-10-29 16:56:38 UTCの期限から4日7時間25分遅れている。機械可読計画の34 work packageは `in_progress` 22件、`planned` 12件で、完了扱いはない。期限や個別試験の成功だけを完成と数えない。
+全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で9日13時間31分が経過し、2026-10-29 16:56:38 UTCの期限から4日8時間03分遅れている。機械可読計画の34 work packageは `in_progress` 22件、`planned` 12件で、完了扱いはない。期限や個別試験の成功だけを完成と数えない。
 
 ## 現在の棚卸し
 
@@ -10,8 +10,10 @@
 - current-main `c9d7055` の通常Alpine/PID 1 applianceを隔離PVEで受け入れた。独立Linux LAN clientの動的DHCPv4、PPP/IPv4・IPv6 TCP/UDP、ISC DHCPv6 PD/Renew、再起動後のRebind、署名更新、明示rollback、Healthを失わせた候補の自動rollbackを確認した。自動復旧は113.06秒。試験VMは撤去済み。詳しい条件は[実通信試験計画](test-plan.md)に記録する。
 - 実HGWへ接続したmain由来product build `7c1cb3619acb` は、生成profileで独立LAN client、DHCPv4/DHCPv6/SLAAC、条件付きDoH、IPv4 DS-Lite/IPv6通信、WAN outage復旧、worker/full restartと自然PD T1 Renew/Replyを通過した。captureでUDP/49153からのAdvertise/Replyを受け、初回SolicitとRenewでDUID/IAID=1/prefixが一致し、期限更新した。旧routerdにも同じsource-port許容がある。実kernelではWAN/LANの`accept_dad=1`、global IPv6 addressはnon-tentativeでDAD failureなし。worker SIGKILL/graceful restart/full daemon restart後の復旧は1.32/3.61/3.99秒。自然DHCPv4 renew、IPv4/IPv6 HTTPS・学習DNS UDP/TCPを676 roundで確認し、試験後にraw artifactsを削除した。第6回のnative HGW gateは終了0。15-resource profileでWAN DHCPv4、予約/OUI-scope LAN DHCPv4、DHCPv6 Information/SLAAC、LAN DNS/DoH、DS-Lite IPv4/IPv6 HTTPS・DNS UDP/TCP、WAN outage recovery（0.79秒）、PD worker SIGKILL/graceful restart（1.57/3.53秒）、全daemon restart（3.78秒）、DUID/IAID/prefix保持、zero-lifetime RAによるLAN address撤去、upstream Releaseなしを確認した。自然PD T1（約7,176秒後）・DHCPv4 T1・連続TCPは未観測。raw artifactsは削除済み。homert全110 resources、ONU直結、対象物理NIC qualificationも未完了。
 - 2026-11-03に保存中のhomert02/03設定を読取専用で再集計した。各110 resources、全kind countは一致し、DNSForwarderは11件。両方にIPv6 host-traffic policy route（family IPv6/table 120）がある。設定値・秘密を出力・保存しない。
-- main上のnative例は `single-router-dslite-dhcp-dns.yaml` が13 resources、`homert02-native.yaml`と`homert03-native.yaml`が各14 resources。working single-router例はWAN DHCPv4とhost routeを加えて15 resources。過去の57-resource試験用設定は現行例ではなく、110-resource homert受入にも数えない。
+- native例は `single-router-dslite-dhcp-dns.yaml` が16 resources、`homert02-native.yaml`と`homert03-native.yaml`が各14 resources。過去の57-resource試験用設定は現行例ではなく、110-resource homert受入にも数えない。
 - このhostの`ens18`/`ens20`はvirtio NIC。HGW通信は確認できるが、NTT ONU直結、対象NIC・実機資格は未受入。
+
+- NTP追加gateは実WAN学習源（stratum 3）への同期、独立LAN 2 clientの時刻応答、daemon全体restart後の再同期・応答まで終了0。全確認完了18.94秒はclient測定時間を含む。実kernelのconntrack TCP liberal=1も確認。fallback source、appliance clock adjustment、全homert profileは未受入。
 
 ## 仕切り直した実行順
 
