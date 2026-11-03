@@ -1,6 +1,14 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03 10:51 UTC。全体ゴールは継続中。
+更新: 2026-11-03 11:07 UTC。全体ゴールは継続中。
+
+## 失敗した署名候補からの実通信復旧
+
+2026-11-03、通常build `30054e56fdf6` / `799377d12628`の全factory署名bundleと独立RP-PPPoE/ISC/Linux LANで、更新→明示的復帰→失敗候補からの自動選択復旧が終了0。確認済み版へ再度rollbackする候補の起動時に、router namespace内の独立UDP processでDNS port53を占有した。実DNS workerのEADDRINUSEを観測し、11:03:26 UTC開始の既定120秒trialが11:05:26 UTCに失敗して製品自身がrebootを要求した。読取専用CLIで失敗digest、以前のactive、pending/attempt解消を確認。競合process終了後、保存選択/設定を手修復せずPID 1を再起動し、旧runtimeとpaired startupのrecovered記録、revisionの採用、更新後に追加したDNS回答、DUID、DNS UDP/TCPと両IP TCP/UDPが復旧した。high watermark=2、正常poweroff、captureの上流PD Releaseなしも通過。
+
+同sequenceのprepare再送はhigh watermarkで拒否される。確認済み保存版の選択には既存のrollback APIを使い、境界を緩めない。DNS競合時の最初の期限処理ではrelease store busyも記録され、その後の停止処理で失敗状態が保存された。上記の実保存状態と復旧を確認しており、busyを候補正常確認へ読み替えていない。製品Goの変更なし。通常Makefile build/3 static実行物、`make race vet`とPython補助36件が通過。再実行は試験計画の`make check-runtime-update`。
+
+これはOS待受競合による候補失敗と、外部競合解消後の復旧の確認。両buildの製品Goは同一で、同じkernelのPID namespaceを再起動した。実装/ABI変更を跨ぐ更新、kernel/bootloader再起動・停電、競合が続いた状態でのDNS提供、全homert profile/ONU/NIC資格は残る。PVE/QEMUと追加PBR調査、共有host時計の変更は行っていない。
 
 ## 通常runtimeの実通信更新・復帰
 

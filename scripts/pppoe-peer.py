@@ -45,7 +45,7 @@ def peer(stage, auth, dhcp6_server):
     # must additionally create its own: AC secrets/hooks are not client input.
     signal.signal(signal.SIGALRM, deadline)
     updating = (stage.parent / "candidate.tar").exists()
-    signal.alarm(450 if updating else 180)
+    signal.alarm(600 if updating else 180)
     signal.signal(signal.SIGTERM, terminated)
     ns, acns, lan = (prefix + str(os.getpid()) for prefix in ("r2ppp-", "r2ac-", "r2lan-"))
     children, namespaces, frozen = [], [], []
@@ -268,12 +268,12 @@ def peer(stage, auth, dhcp6_server):
                     "--upload-file", str(stage.parent / "candidate.tar"),
                     "http://localhost/v1/releases/stage"], timeout=305))
                 assert target["digest"] == candidate["digest"]
-                for operation, identity in (("prepare", candidate["manifest"]["release_id"]), ("rollback", baseline)):
+                for operation, identity in (("prepare", candidate["manifest"]["release_id"]), ("rollback", baseline), ("failure", candidate["manifest"]["release_id"])):
                     state = api("control.sock", "/v1/releases/status")
                     request = {"expected_generation": state["generation"], "expected_revision": before_config["revision"]}
                     if operation == "prepare":
                         request["release"] = target
-                    pending = api("control.sock", "/v1/releases/" + operation, request, timeout=120)
+                    pending = api("control.sock", "/v1/releases/" + ("prepare" if operation == "prepare" else "rollback"), request, timeout=120)
                     assert pending["pending"]["release"]["release_id"] == identity
                     previous_instance = api("supervisor.sock", "/v1/status")["instance_id"]
                     assert json.loads(run([str(stage.parent / "routerd"), "reboot", "--runtime-dir", str(stage / "run")]))["accepted"]
@@ -281,10 +281,30 @@ def peer(stage, auth, dhcp6_server):
                     assert daemon.returncode == -signal.SIGHUP, daemon.returncode
                     server.terminate()
                     server.wait(timeout=3)
+                    if operation == "failure":
+                        # Reproduce a real startup resource conflict, without
+                        # changing signed bytes or configuration/store files.
+                        occupied = start(ns, ["python3", "-u", "-c", 'import socket,signal;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.bind(("0.0.0.0",53));print("BOUND",flush=True);signal.pause()'], "occupied-dns")
+                        wait(lambda: "BOUND" in (stage / "occupied-dns.log").read_text())
                     daemon = start(ns, command, "console")
                     child_file = Path(f"/proc/{daemon.pid}/task/{daemon.pid}/children")
                     wait(lambda: child_file.read_text().strip())
                     pid1 = int(child_file.read_text().split()[0])
+                    if operation == "failure":
+                        daemon.wait(timeout=180)
+                        assert daemon.returncode == -signal.SIGHUP, daemon.returncode
+                        failed = json.loads(run([str(stage.parent / "routerd"), "release", "status", *selector]))
+                        assert failed["last_failure"]["release"]["digest"] == target["digest"]
+                        assert failed["active"]["release_id"] == baseline and not failed.get("attempt") and not failed.get("pending")
+                        occupied.terminate()
+                        occupied.wait(timeout=3)
+                        # Restore the external fault; boot selection and the
+                        # paired configuration recover through product code.
+                        daemon = start(ns, command, "console")
+                        child_file = Path(f"/proc/{daemon.pid}/task/{daemon.pid}/children")
+                        wait(lambda: child_file.read_text().strip())
+                        pid1 = int(child_file.read_text().split()[0])
+                        identity = baseline
                     wait(lambda: link() is not None and routed(), 60)
                     wait(lambda: any(x["ifname"].startswith("ppp") and x["addr_info"] for x in peer_links()))
                     ppp = next(x["ifname"] for x in peer_links() if x["ifname"].startswith("ppp"))
@@ -292,20 +312,23 @@ def peer(stage, auth, dhcp6_server):
                     ipv6_traffic()
                     traffic()
                     dns_traffic()
-                    wait(lambda: api("control.sock", "/v1/releases/status").get("operation") == "confirm", 120)
+                    if operation != "failure":
+                        wait(lambda: api("control.sock", "/v1/releases/status").get("operation") == "confirm", 120)
                     current = api("supervisor.sock", "/v1/status")
                     assert current["pid"] == 1 and current["release_id"] == identity
                     assert current["instance_id"] != previous_instance
                     assert all(m["release_id"] == identity for m in current["modules"])
                     restored = api("control.sock", "/v1/config")
                     assert restored["config"] == before_config["config"]
-                    assert restored["revision"] == before_config["revision"] + 1
+                    assert restored["revision"] == before_config["revision"] + (2 if operation == "failure" else 1)
                     assert restored["startup"]["revision"] == restored["revision"]
+                    if operation == "failure":
+                        assert restored["startup"]["recovered"]
                     assert pd_record()["snapshot"]["client_duid"] == duid
                     confirmed = api("control.sock", "/v1/releases/status")
                     assert confirmed["active"]["release_id"] == identity
                     assert confirmed["high_watermark"] == 2 and not confirmed.get("attempt") and not confirmed.get("pending")
-                    print("PASS signed runtime " + operation + " selected " + identity + ": automatic health confirmation, persisted configuration/DUID and LAN DNS/IPv4/IPv6 TCP/UDP", flush=True)
+                    print("PASS signed runtime " + operation + " selected " + identity + ": persisted configuration/DUID and LAN DNS/IPv4/IPv6 TCP/UDP", flush=True)
                     before_config = restored
                     if operation == "prepare":
                         # Binary rollback must retain changes made after the update.
@@ -651,7 +674,7 @@ def peer(stage, auth, dhcp6_server):
             print("client6addresses", run(["ip", "-n", lan, "-j", "-6", "address", "show"]), flush=True)
         except (OSError, subprocess.SubprocessError, RuntimeError) as error:
             print("diagnostics unavailable:", error, flush=True)
-        for name in ("console", "ac", "capture", "dhcp6", "http6", "udp6", "dns", "dns-tcp"):
+        for name in ("console", "ac", "capture", "dhcp6", "http6", "udp6", "dns", "dns-tcp", "occupied-dns"):
             p = stage / (name + ".log")
             if p.exists():
                 print(name, p.read_text(errors="replace")[-24000:], flush=True)
@@ -744,7 +767,7 @@ def main():
             directory = stage + "/" + auth
             run(root + ["mkdir", "-m", "700", directory])
             with (args.output / (auth + ".log")).open("w") as output:
-                result = subprocess.run(root + ["unshare", "--mount", "--propagation", "private", "python3", "-I", stage + "/peer.py", "--inside", directory, "--auth", auth] + peer_args, stdout=output, stderr=subprocess.STDOUT, timeout=480 if args.update_binary_dir else 200)
+                result = subprocess.run(root + ["unshare", "--mount", "--propagation", "private", "python3", "-I", stage + "/peer.py", "--inside", directory, "--auth", auth] + peer_args, stdout=output, stderr=subprocess.STDOUT, timeout=630 if args.update_binary_dir else 200)
             packet = subprocess.run(root + ["cat", directory + "/pppoe.pcap"], capture_output=True)
             if packet.returncode == 0:
                 (args.output / (auth + ".pcap")).write_bytes(packet.stdout)

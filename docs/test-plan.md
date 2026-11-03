@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 10:51 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 11:07 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 実行原則
 
@@ -134,9 +134,21 @@ PPP routeはleaseではなく接続所有であり、通知停止だけで存続
 PID namespaceの終了後は同じkernel上でPID 1を再起動し、選択された別entrypoint/全workerのrelease ID、
 実health watcherの自動confirm、元の設定/DUIDとstartup採用によるrevisionの進行、DNSと両IP TCP/UDPを確認する。
 更新後に実設定へDNSレコードを追加して回答を確認し、実rollback APIと同じ再起動経路で以前のruntimeへ戻す。追加した設定・回答・同じ通信とhigh watermark保持を確認する。
-通常終了のpoweroffとPD Releaseなしもcaptureで確認する。update用のowner上限は450秒で、protocolの期限は変更しない。
+通常終了のpoweroffとPD Releaseなしもcaptureで確認する。update用のowner上限は600秒で、protocolの期限は変更しない。
 これは実kernel/process/store/通信の更新受入であり、kernel再起動・bootloader・停電と全homert profileの資格ではない。
 全構成のappliance NTPはCLOCK_REALTIMEを変更するため、共有時計のnamespaceでは実行せず、独立kernel/時計を持つ許可済み実行機が必要。
 PVE/QEMUは実行しない。終了後は以前のbuild copy、両bundle/store、鍵、capture/logを撤去する。
 
 実行結果: 2026-11-03、通常署名bundleを実control APIでupload/stage/prepareし、実PID 1のrebootと再起動で `b3a0053f24c6 → 30054e56fdf6 → b3a0053f24c6` の更新・明示的rollbackが終了0。独立RP-PPPoE/ISC DHCPv6/Linux LANを使用し、全workerのrelease ID、実health watcherの自動confirm、現在の設定/DUID保持、DNS UDP/TCPと両IP TCP/UDP、high watermark=2の保持を確認した。候補でDNSレコードを追加してから旧runtimeへ戻し、その追加設定の両transportでの実回答も維持した。startup採用時は設計どおりrevisionが進む。正常poweroffとcaptureの上流PD Releaseなしも通過。 製品Goは両buildで同一で、異なる通常release IDの実行物を選択・execする経路の確認。PID namespaceを同じkernel上で再起動した試験であり、kernel/bootloader再起動、停電、失敗候補の自動fallback、異なるABI/実装間の更新、全homert profile/ONU/NIC資格は残る。全構成のappliance NTPには独立kernel/時計の実行機が必要で、共有host時計は変更していない。PVE/QEMUは実行していない。
+
+失敗候補の受入: 上記更新・明示的復帰に続き、previousにある確認済み版へ戻す実rollback APIで次の候補を準備する。
+同じsequenceのprepare再送はhigh watermarkで拒否されるため、既存版の選択には専用rollback操作を使う。
+旧runtime終了後、隔離router namespaceだけで独立UDP processがDNS port53を占有する。
+候補のDNS起動失敗から製品が失敗を保存してrebootを要求するまで待つ（製品の既定120秒判定は変更しない）。
+保存状態は読取専用CLIで確認し、失敗対象digest・以前のactive・pending/attemptの解消を照合する。
+独立processを停止して外部競合を解消し、同じ保存状態からPID 1を再起動する。
+以前のruntime、paired startupのrecovered記録、採用revision、更新後に追加したDNS設定/DUIDと
+両IP TCP/UDP/DNSの実回答を確認する。保存選択・設定・署名物の手修復は行わない。
+これはOSの待受競合を原因とする候補失敗と復旧の確認であり、競合が続いたままDNSを提供できるという主張ではない。
+
+実行結果: 2026-11-03、通常build `30054e56fdf6` / `799377d12628`の全factory署名bundleと独立RP-PPPoE/ISC/Linux LANで、更新→明示的復帰→失敗候補からの自動選択復旧が終了0。確認済み版へ再度rollbackする候補の起動時に、router namespace内の独立UDP processでDNS port53を占有した。実DNS workerのEADDRINUSEを観測し、11:03:26 UTC開始の既定120秒trialが11:05:26 UTCに失敗して製品自身がrebootを要求した。読取専用CLIで失敗digest、以前のactive、pending/attempt解消を確認。競合process終了後、保存選択/設定を手修復せずPID 1を再起動し、旧runtimeとpaired startupのrecovered記録、revisionの採用、更新後に追加したDNS回答、DUID、DNS UDP/TCPと両IP TCP/UDPが復旧した。high watermark=2、正常poweroff、captureの上流PD Releaseなしも通過。 これはOS待受競合による候補失敗と、外部競合解消後の復旧の確認。両buildの製品Goは同一で、同じkernelのPID namespaceを再起動した。実装/ABI変更を跨ぐ更新、kernel/bootloader再起動・停電、競合が続いた状態でのDNS提供、全homert profile/ONU/NIC資格は残る。PVE/QEMUと追加PBR調査、共有host時計の変更は行っていない。
