@@ -1253,7 +1253,7 @@ print(*s.getsockname())
             wait(synchronized)
             snapshot = query("control.sock", "/v1/services/service.time")["snapshot"]
             assert not snapshot["adjusting_clock"], "host-mode time service attempted to adjust the host clock"
-            print("Observed NTP source", "fixture fallback" if snapshot.get("source") == dns_peer_address else "WAN learned", "stratum", snapshot["stratum"], flush=True)
+            print("Observed NTP source", snapshot.get("source"), "stratum", snapshot["stratum"], flush=True)
             for namespace in (client, automatic):
                 run(inside(namespace, chrony + ["-Q", "-t", "8", "-u", "root", "-f", str(ntp_client)]), timeout=12)
             print("PASS NTP synchronized and independent LAN chronyd clients received time; host clock adjustment disabled", flush=True)

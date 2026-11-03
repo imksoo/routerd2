@@ -335,7 +335,9 @@ resources:
       ntp:
         sources:
           - sources_from: [wan-pd]
-            servers: [{address: 198.18.0.254}]
+            servers: [{address: ntp.jst.mfeed.ad.jp}, {address: ntp.nict.jp}]
+          - servers: [{address: 198.18.0.254}, {address: ntp.jst.mfeed.ad.jp}, {address: ntp.nict.jp}]
+        dns: [127.0.0.1]
         listen: [198.18.0.1]
         allow: [198.18.0.0/16]
   - id: service/console

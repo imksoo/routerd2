@@ -1,5 +1,7 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
+保存設定で常時使うNTP固定3時刻源を、既存の学習時刻源と同じengineへ接続した。通常build `3555b25e2e91`で単体45-resourceの全daemon再起動と、二台各54-resourceの両方向引継ぎ・新規端末確認が終了0。今回の引継ぎ前後の独立NTP照会timeoutは0回。時刻源の同時使用・実通信・品質の観測と残作業は[引き継ぎ](pve-codex-handoff.md)に記載する。
+
 main `8840131`・通常build `8840131f706a`の各54-resource二台例で、旧現用停止中に初めて接続する端末のDHCPv4/SLAAC/DHCPv6 Information、両IP DNS/Internet、旧現用再加入時の新規lease同期を両方向で受け入れた。既存socket/NAT tuple、設定rollback/confirmと全機能再確認も通過。引継ぎ中のNTP品質・長時間安定性と全体の残作業を継続する。条件・測定値は[引き継ぎ](pve-codex-handoff.md)に記載する。
 
 main `986246c`・通常build `986246cb28dc`の45-resource単体例を実HGWで起動し、独立LAN端末のDHCPv4/SLAAC/Information・両IP Internet/DNS、4 DS-Lite、BGP2 peer、NTP、Tailscale、管理、native nDPI/履歴・syslog/OTLP、設定rollbackと全daemon再起動が終了0。PD SIGKILL1.97秒/通常再起動6.09秒、全daemon後の全項目再確認111.63秒。111.63秒は転送断時間ではない。2巡回/自然PD更新0回。WAN遮断・追加PBR調査は行っていない。

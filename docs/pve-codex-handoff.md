@@ -2,6 +2,18 @@
 
 更新: 2026-11-03。全体ゴールは継続中。
 
+## homertの固定時刻源を単体・二台構成へ接続
+
+保存中の両homert設定と旧routerdの`pkg/controller/chain/ntp.go`を再読した。autoのNTPClientは学習源と公開2hostnameのfallbackを持ち、staticのNTPServerは私設peerと同じ公開2hostnameを常時設定する。native例には後者が欠けていた。既存の一つのchronydへ二つの時刻源宣言を接続し、core DNSで名前解決する。私設peerは隔離環境の独立chronydへ対応づけた。
+
+基準main `3555b25`・通常build `3555b25e2e91`、変更した45-resource単体例で実HGW手順が終了0。実行中engineの固定3源と学習2源、両者と固定peerのNTP packet往復を照合した。独立LAN二端末のNTP・両IP Internet/DNS、他の全設定項目と全daemon再起動が通過。PD SIGKILL2.27秒/通常再起動6.20秒、全daemon後の再確認111.33秒、2巡回/自然PD更新0回。
+
+同じbuildと各54-resource二台例でも両方向の引継ぎ・再加入・新規端末が終了0。待機bは引継ぎ前に固定peerで同期し、skew33.16ppm/root dispersion0.00055秒。引継ぎ後も同じ世代1で、skew0.91ppm/root dispersion0.000012秒を観測した。逆方向の現用aも世代1・skew0.75ppm/root dispersion0.000056秒。今回の独立NTP照会timeoutは0回。初期の現用aでは固定の公開時刻源も選択した。端末照会は従来の`-Q -t 8`を使用する。
+
+設定rollback/confirm・DNS/DoH/BGP/NTP/Tailscale/管理/運用記録も両方向で通過。公開TCP368応答・最大間隔15.18秒、UDP400応答/14期限超過・最大8.51秒。固定WAN TCP399応答・最大6.91秒、UDP404応答/9期限超過・最大8.01秒。TCPは各SYN1回、同一socket/NAT tupleを維持した。全項目再確認61.79秒/71.85秒にはsampling・新規端末確認を含む。
+
+再実行は[試験計画](test-plan.md)の単体・二台手順。`make race vet test-tools`36件、通常static3実行物、3設定例の検証とPython構文検査が通過。既存engineの受信・期限管理を使い、設定例と観測表示を更新した。共有hostの時計補正は無効。今回の離散的な前後観測に続き、全時刻源停止時の保持・長時間品質、applianceの時計補正、全110-resource意図・全34 package・対象ONU/NIC/実機の受入を継続する。
+
 ## 引継ぎ後に初めて接続するLAN端末
 
 main `8840131`・通常Makefile build `8840131f706a`、各54-resource二台例で実HGW手順が終了0。各方向の旧現用daemon停止後に新しいLinux端末を接続し、BusyBoxの実DHCPv4割当・重複なし、通常DAD/SLAAC/default route、DHCPv6 InformationのDNS/search、配布DNSへの両IP UDP/TCPの自端末名・公開名照会、両IP HTTPSを確認した。再加入した旧現用には新規leaseも同期され、非preemptを維持した。新規端末のcaptureでDiscover/Offer/Request/ACK、RA、Information-request/Replyを照合した。

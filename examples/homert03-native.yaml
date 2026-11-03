@@ -765,7 +765,14 @@ resources:
       - sources_from:
         - wan-pd
         servers:
+        - address: ntp.jst.mfeed.ad.jp
+        - address: ntp.nict.jp
+      - servers:
         - address: 198.18.0.254
+        - address: ntp.jst.mfeed.ad.jp
+        - address: ntp.nict.jp
+      dns:
+      - 127.0.0.1
       listen:
       - 0.0.0.0
       allow:
