@@ -200,7 +200,9 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 		s.Modules = make([]ModuleStatus, 0, len(children))
 		for _, c := range children {
 			s.Modules = append(s.Modules, c.status)
-			if !c.retired && c.spec.Required && c.process != nil {
+			// Stopping already revokes this worker's readiness. Its expired
+			// heartbeat must not invalidate observations of healthy siblings.
+			if !c.retired && c.spec.Required && c.process != nil && c.status.State != "stopping" {
 				deadline := c.heartbeat.Add(c.spec.HeartbeatTimeout)
 				if !c.hello {
 					deadline = c.startTime.Add(c.spec.StartupTimeout)

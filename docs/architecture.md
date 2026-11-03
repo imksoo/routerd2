@@ -32,6 +32,8 @@ supervisor は起動時に worker ELF の FD を保持する。起動後の syml
 置換で別 release の worker を同じ process tree に混ぜない。worker はビルドに埋め込まれた
 release ID を専用 FD で通知し、PID/role/name/sequence と heartbeat を検査する。
 FD の閉鎖、startup/heartbeat timeout、exit は状態に残し、役割ごとに再起動する。
+停止処理中のworkerは既にReady=falseであり、その期限切れheartbeatを正常なworkerの
+観測期限へ混ぜない。正常なworkerの元の期限と、全体の未準備状態はそのまま保持する。
 
 PID 1 に通常のプロトコル socket や DNS/BGP engine を置かない。初期版では worker は
 同じ UID で動く。FD と private UDS による分離は ABI とメンテナンス上の境界であり、

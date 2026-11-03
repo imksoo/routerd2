@@ -96,6 +96,7 @@ def owner(stage, uplink):
             command = ["dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null", "--no-hosts", "--no-resolv", "--bind-interfaces", "--listen-address=" + address, "--port=" + str(port)]
             command += ["--address=/#/" + answer] if answer else ["--server=1.1.1.1"]
             start(key, command, "dns-" + str(port))
+        start("gateway", ["tcpdump", "-n", "-l", "-e", "-i", "lan0", "-c", "100", "arp or udp port 53"], "gateway-wire")
         echo = runpy.run_path(str(stage / "peer-fixture.py"))
         for index in range(2):
             key = "bgp" + str(index)
@@ -509,10 +510,10 @@ def owner(stage, uplink):
             assert run(inside("tail", ["dig", family, "@"+server.strip("[]"), "example.net", "A", "+short", "+time=3", "+tries=1"])).strip()
         print("PASS independent tailnet client used the elected node for IPv4/IPv6 exit HTTPS and UDP DNS", flush=True)
     except BaseException:
-        for name in ("tail-flow-a", "tail-flow-b", "tail-flow-peer", "tail-peer"):
+        for name in ("gateway-dhcp", "gateway-wire", "dns-53", "special0", "special1", "special2", "tail-flow-a", "tail-flow-b", "tail-flow-peer", "tail-peer"):
             path = stage / (name+".log")
             if path.exists():
-                print("HA tailnet failure", name, path.read_text(errors="replace")[-10000:], flush=True)
+                print("HA peer failure", name, path.read_text(errors="replace")[-10000:], flush=True)
         packets = stage / "flow.pcap"
         if packets.exists():
             print("HA flow flags", run(["tcpdump", "-nn", "-tt", "-r", str(packets)]), flush=True)

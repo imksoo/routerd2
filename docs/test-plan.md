@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 06:50 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 07:11 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 実行原則
 
@@ -17,6 +17,8 @@
 二台47-resource profileは両方向の同一TCP/UDP/NAT tuple・PD identity・DHCP更新・再加入が一回通過した。その後、条件付きDNS/DoH・BGPを含む再試験で待機側へ戻るBGP通信の破棄、effect ACK timeout、既存TCP断を再現した。常時両側からLANを広告する設定と不要な処理/待ちを修正し、条件付きDNS/DoH・BGPを含む両方向の拡張手順も終了0。Tailscale双方向/exitと管理SSH/Web履歴も含む最新手順は終了0、全項目復旧36.82/36.13秒、TCP最大応答間隔11.68秒。断の短縮と長時間安定性は残作業。一度の合格を安定性へ読み替えない。
 
 最新の`c144132` + 本変更（通常build `c14413250ebd`）では、特別scope3端末の更新/通信・Release/再取得/sticky同一割当と、各現用機のfresh nDPI/履歴/syslog/OTLPまで両方向で終了0。同一TCPはSYN1回・249応答・最大応答間隔10.82秒、UDPは287応答・15期限超過。80.40/73.30秒の全項目確認はsampling/再取得を含む。cold startのBGP/VRRP適用待ち再起動は再発しており、原因修正と長時間安定性の受入が必要。
+
+停止中workerのheartbeatが正常な兄弟の観測期限まで失効させる問題は、実fork/exec workerのSIGSTOPで旧コードの失敗と修正後の成功を確認した。起動中のBGP/VRRP適用待ちは別途残る。診断用の時間計測を除去した通常build `85259c1a892c` + 本変更で、同じ二台profileの両方向手順が終了0。同一TCPはSYN1回・228応答・最大応答間隔11.50秒、UDPは246応答・17期限超過。全項目60.75/73.57秒はsampling/再取得を含み、転送断時間ではない。独立gateway DNSの接続拒否を一度観測したため、次の失敗では既存peerログと上限100packetのgateway captureも照合する。
 
 保存中homert02/03は各110 resources。件数一致ではなく実際の意図を照合する。全意図と34 work packageは未完了。ens18/ens20はvirtioであり、NTT ONU直結・対象NIC・実機性能・arm64・cloud/Kubernetesの資格へ読み替えない。
 

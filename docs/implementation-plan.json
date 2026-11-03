@@ -308,7 +308,8 @@
           "Keep other accepted protocol data typed, compile static condition work and remove the remaining writer snapshot JSON round-trip copying. DHCP client allocation and durable retention still depend on UTC; these changes do not qualify allocation across wall-clock correction, power loss or physical suspend.",
           "Expiry while the network writer itself is unavailable and physical suspend remain unqualified. Recursive prerequisite address/link deadline propagation has local projection checks; equivalent paused-control real-daemon cases are not yet exercised.",
           "Under simultaneous Go checks, the 7000-route large-ACK test exceeded its 30-second confirmed budget and confirm returned 409. Normal make check passed the same control package and full race suite. No authority or test deadlines were extended; load acceptance and cause isolation remain open."
-        ]
+        ],
+        "stopping_worker_observation": "2026-11-03 baseline85259c1 plus current patch: actual fork/exec sibling workers reproduced a frozen worker (SIGSTOP) causing supervisor ExpiresNanos=ObservedNanos after heartbeat timeout despite a healthy ready sibling. Exclude already-stopping workers from the shared heartbeat deadline; their Ready=false and overall readiness=false remain unchanged, and healthy workers retain their original deadlines. Same actual-process regression and existing heartbeat detection passed after change; Race/vet/Python36 and normal static3-binary build passed. No extra state/timer/retry. This fixes one cross-worker invalidation; observed BGP/VRRP effect timeouts and full-profile startup/long-run stability remain open. Temporary timing instrumentation removed. Normal Makefile build85259c1a892c plus current patch also passed the actual HGW paired47-resource both-handoff gate: one TCP SYN,228 replies,maxgap11.50s; UDP246 replies,17 one-second misses,maxgap9.52s; all ordinary/special DHCP,DNS/DoH,BGP,NTP,Tailscale,management,fresh operations checks passed. Full checks60.75/73.57s include sampling/reacquisition. Cold-start AFTR409/WAN/BGP/VRRP restarts were still observed, not stable-startup qualification."
       }
     },
     {
@@ -585,7 +586,10 @@
             "対象VM/実機でPID1 hangからwatchdog resetとtrial fallbackを確認する。"
           ]
         }
-      ]
+      ],
+      "implementation_notes": {
+        "stopping_worker_observation": "2026-11-03 baseline85259c1 plus current patch: actual fork/exec sibling workers reproduced a frozen worker (SIGSTOP) causing supervisor ExpiresNanos=ObservedNanos after heartbeat timeout despite a healthy ready sibling. Exclude already-stopping workers from the shared heartbeat deadline; their Ready=false and overall readiness=false remain unchanged, and healthy workers retain their original deadlines. Same actual-process regression and existing heartbeat detection passed after change; Race/vet/Python36 and normal static3-binary build passed. No extra state/timer/retry. This fixes one cross-worker invalidation; observed BGP/VRRP effect timeouts and full-profile startup/long-run stability remain open. Temporary timing instrumentation removed. Normal Makefile build85259c1a892c plus current patch also passed the actual HGW paired47-resource both-handoff gate: one TCP SYN,228 replies,maxgap11.50s; UDP246 replies,17 one-second misses,maxgap9.52s; all ordinary/special DHCP,DNS/DoH,BGP,NTP,Tailscale,management,fresh operations checks passed. Full checks60.75/73.57s include sampling/reacquisition. Cold-start AFTR409/WAN/BGP/VRRP restarts were still observed, not stable-startup qualification."
+      }
     },
     {
       "id": "NET-01",

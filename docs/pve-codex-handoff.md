@@ -1,6 +1,14 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03 06:50 UTC。全体ゴールは継続中。
+更新: 2026-11-03 07:11 UTC。全体ゴールは継続中。
+
+今回の修正: supervisorが停止中workerの期限切れheartbeatを観測全体の期限へ混ぜ、正常な兄弟workerまで失効させる処理を除いた。停止対象のReady=false、正常workerの元のheartbeat期限、全体の未準備状態は維持する。新しい状態・タイマー・再試行は追加していない。実fork/execのworker一つをSIGSTOPし、heartbeat timeoutから停止中へ入ると正常な兄弟を含むExpiresNanos=ObservedNanosになることを旧コードで再現し、修正後は同じ手順と既存heartbeat検出が通過した。Race Detector/vet/Python補助36件、通常Makefile build、3実行物のstatic linkも通過。
+
+修正後の実通信: 基準main `85259c1` + 本変更、通常Makefile build ID `85259c1a892c`で `python3 scripts/uplink-ha.py --uplink ens18` が終了0。実HGWと独立端末/peerを使う二台47-resource profileで、初期・両方向の停止/再加入後の通常/特別DHCP更新・Release/再取得・sticky割当/fingerprint、両IP公開通信、条件付きDNS/両DoH、BGP、NTP、Tailscale/exit、管理、fresh nDPI/履歴/syslog/OTLPが通過。同一TCPはSYN1回・228応答・最大応答間隔11.50秒、UDPは246応答・17期限超過・最大応答間隔9.52秒。全項目確認60.75/73.57秒はsampling/再取得を含む。cold startでAFTR HTTP409、WAN停止、BGP/VRRP適用timeoutを再観測したため、安定起動/長時間安定性は未受入。
+
+起動診断では、通常kernel適用0.2～0.4秒、負荷/停止時には1.7秒程度まで伸び、依存worker停止中の全体適用見送りも観測した。ただしBGP/VRRP effect timeoutはまだ再発しており、上記の巻き込み修正だけで原因全体を解消したとは扱わない。時間計測コードはすべて除去済み。別の先行実行は特別端末→独立gateway DNSの接続拒否、別実行は初期公開TCPのNo route to hostで終了した。DNS拒否の正確な原因は未確定で、次の実行では独立gatewayの待受/実応答を確認し、障害時のpeerログと100packetに限定したcaptureを既存owner内で取得する。これは合格への読み替えではない。
+
+以下は前checkpointの結果。
 
 最新実行: 基準main `c144132` + 本変更、通常Makefile build ID `c14413250ebd`、各47-resource profileで `python3 scripts/uplink-ha.py --uplink ens18` が終了0。実HGW、独立BusyBox端末4台、FRR2台、chronyd、Headscale/Tailscale、syslog受信機、公式Collectorを使用。両方向の停止・再加入で、通常/特別scopeの実Renew/ACK・DNS/公開HTTPS、特別3端末のRelease/再取得とsticky同一割当、再取得した現用機のfingerprintを確認した。新規公開通信の双方向nDPI計数/TLS SNI、実管理拒否の履歴、元の記録時刻とnode識別を照合したfresh syslog/OTLP logs/metrics/tracesも初期・両方向の切替後に通過した。
 
@@ -52,4 +60,4 @@ NTPのワイルドカード待受を許可する製品修正`19682da`はmainへp
 2. 今回通過した二台の特別scope・nDPI/履歴・syslog/OTLPに続き、未確認の保持期限・archive障害/復旧と長時間動作を実peerで受け入れる。短時間通信の通過と安定性を分ける。
 3. 保存homert全意図と保持dataset、MTU/期限/更新/配布、残る34 work packageを完了する。対象ONU/NIC・実機性能・arm64・cloud等は未受入。各実通信の直前に[試験計画](test-plan.md)全体を読む。PVE/QEMUと追加PBR調査は実行しない。
 
-全体開始から9日19時間21分、記録済み期限から4日13時間53分経過（06:50 UTC）。全体ゴールは継続中。終了したstage/key/capture/log/重複build outputを撤去し、次の観測で必要な実行物・pinned peerだけを残す。
+全体開始から9日19時間42分、記録済み期限から4日14時間14分経過（07:11 UTC）。全体ゴールは継続中。終了したstage/key/capture/log/重複build outputを撤去し、次の観測で必要な実行物・pinned peerだけを残す。

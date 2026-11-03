@@ -345,6 +345,32 @@ func TestSupervisorDetectsMissingHeartbeat(t *testing.T) {
 	}
 }
 
+func TestStoppingWorkerDoesNotExpireHealthySiblingObservation(t *testing.T) {
+	s := startTestSupervisor(t, []Spec{
+		{Name: "healthy", Role: "normal"},
+		{Name: "frozen", Role: "normal", Restart: RestartNever, HeartbeatTimeout: 1500 * time.Millisecond, StopTimeout: time.Second},
+	})
+	status := s.wait(t, func(status Status) bool { return status.Ready })
+	for _, module := range status.Modules {
+		if module.Name == "frozen" {
+			if err := syscall.Kill(module.PID, syscall.SIGSTOP); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	status = s.wait(t, func(status Status) bool {
+		for _, module := range status.Modules {
+			if module.Name == "frozen" {
+				return module.State == "stopping"
+			}
+		}
+		return false
+	})
+	if status.ExpiresNanos <= status.ObservedNanos {
+		t.Fatal("stopping worker expired the healthy sibling observation", status)
+	}
+}
+
 func TestSupervisorCrashLoopUsesIncreasingBackoff(t *testing.T) {
 	s := startTestSupervisor(t, []Spec{{Name: "network", Role: "exit", BackoffMin: 80 * time.Millisecond, BackoffMax: 400 * time.Millisecond, StopTimeout: time.Second}})
 	s.wait(t, func(status Status) bool { return len(status.Modules) == 1 && status.Modules[0].Restarts >= 3 })
