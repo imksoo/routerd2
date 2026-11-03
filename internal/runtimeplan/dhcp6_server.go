@@ -41,6 +41,7 @@ func (r *Runtime) dhcp6ServerInput(name string) (serviceconfig.DHCP6ServerInput,
 	}
 	// This is the last applied source selection, with its original condition
 	// deadline. A poll cannot renew it or authorize an unapplied source epoch.
+	out.Options.DNSReadyUntil = lifetime.Deadline{BootID: clock.BootID}
 	out.Options.Authority = lifetime.Deadline{BootID: clock.BootID, Nanos: uint64(clock.BoottimeNanoseconds)}
 	state, selected := r.resourceStates[plan.resourceID]
 	if r.applied.sourceEpoch != r.sourceEpoch || !selected || !state.Active {
@@ -128,13 +129,17 @@ func (r *Runtime) dhcp6ServerInput(name string) (serviceconfig.DHCP6ServerInput,
 	if err != nil {
 		return out, err
 	}
-	delegatedReady := false
-	var readyUntil lifetime.Deadline
+	delegatedReady, prefixAvailable := false, false
+	var readyUntil, prefixUntil lifetime.Deadline
 	for _, entry := range r.delegatedDNS[plan.dnsDelegation] {
 		address := entry.address
 		if !address.ValidUntil.Live(clock) {
 			continue
 		}
+		if !prefixAvailable || address.ValidUntil.Remaining(clock) > prefixUntil.Remaining(clock) {
+			prefixUntil = address.ValidUntil
+		}
+		prefixAvailable = true
 		if len(plan.selfDNS) > 0 {
 			until, found := dnsReadyUntil(address.Address, listening, clock)
 			if !found {
@@ -148,14 +153,19 @@ func (r *Runtime) dhcp6ServerInput(name string) (serviceconfig.DHCP6ServerInput,
 		}
 		delegatedReady = true
 	}
-	// A prefix installed in the kernel is not yet a working self-DNS service.
-	// Await DAD and actual sockets, then retain both original deadlines through
-	// the worker's receive wait. A stale report cannot authorize an empty Reply.
+	// A prefix and a listening resolver have separate owners. DNS readiness
+	// gates Replies, while allocation facts retain the original PD/resource
+	// authority rather than inheriting a short resolver observation window.
 	if plan.dnsDelegation != "" {
-		if !delegatedReady {
+		if !prefixAvailable {
 			out.Options.Authority = lifetime.Deadline{BootID: clock.BootID, Nanos: uint64(clock.BoottimeNanoseconds)}
 		} else {
-			out.Options.Authority = lifetime.Minimum(clock, out.Options.Authority, readyUntil)
+			out.Options.Authority = lifetime.Minimum(clock, out.Options.Authority, prefixUntil)
+		}
+		if !delegatedReady {
+			out.Options.DNSReadyUntil = lifetime.Deadline{BootID: clock.BootID, Nanos: uint64(clock.BoottimeNanoseconds)}
+		} else {
+			out.Options.DNSReadyUntil = readyUntil
 		}
 	}
 	for _, name := range plan.dns {

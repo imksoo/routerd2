@@ -1,42 +1,8 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
-DHCPv6のアドレス配布を旧routerdと同じbundled dnsmasqへ接続した。独立BusyBoxの実割当/更新、TCP/UDP、worker/daemon再起動後のDUIDと割当保持、既存stateless/DHCPv4、署名bundleの共有engine/sourceを確認した。保存homertのstateless構成は維持する。次はstateful leaseのDNS連携/同期とprefix変更・期限を、既存の配布/DNS所有者へ接続する。NET-06と全体ゴールは継続中。結果・再実行は[試験計画](test-plan.md)と[引き継ぎ](pve-codex-handoff.md)。
+DHCPv6の配布には旧routerdと同じbundled dnsmasqを使い、PDからLAN /64・RA・DHCPv4/v6・DNS・上流peer通信まで接続した。DNSのIPv4/IPv6待受衝突と、短いDNS待受確認期限が有効な割当をDNSから消す所有権の混同を実通信で修正した。PD/元のresource権限とDNS待受確認を別の期限として保ち、元の期限を延長しない。
 
-通常LANの逆引きsuffixをnativeのzone sourceへ接続した。単体45-resourceの実HGW手順と、二台各54-resourceの両方向引継ぎ/逆引き/archive障害・復旧が終了0。公開先と固定WANへの既存TCP/UDP、通常通信と元intentへの復帰も確認した。製品Goの別実装は追加していない。次は残る保存DNS/運用意図、全構成の長時間動作と全34 work packageを進める。結果・限界は[試験計画](test-plan.md)末尾へ集約する。
-
-保存設定の二つのLAN /16とDHCP profileを単体44-resourceへ接続し、実netmask/割当/通信と全daemon再起動後が通過した。保存NAT除外も反映し、私設/機器用宛ての元sourceとInternet/管理/WAN内のSNATを実peerで確認。次は残る保存intentと実接続topologyを照合し、単体で受け入れた構成を二台profileへ接続する。詳細は[引き継ぎ](pve-codex-handoff.md)を参照する。
-
-保存IPv4経路4件を単体native例へ接続した43-resource実HGW手順が終了0。実TCP/UDPとblackholeのLAN ingress/egressを起動時・全daemon再起動後に確認した。次は、保存設定の二つのLAN subnet/DHCP profileと、単体例の同一subnet・別poolの構成差を解消する。詳細は[引き継ぎ](pve-codex-handoff.md)を参照する。
-
-保存homertのLAN→管理側/WAN内機器の転送・送信元NATを単体設定へ接続し、独立peerのTCP/UDPと観測sourceが起動時・全daemon再起動後に通過した。基準main `96d0112`、通常build `96d01127742c`。保存中の個別静的経路とblackholeの統合は次に進める。詳細は[引き継ぎ](pve-codex-handoff.md)を参照する。
-
-保存homertの公開DNS/NTP名前集合とLocalServiceRedirectを単体native設定へ接続し、両端末の両IP DNS/IPv4 NTPと全daemon再起動後の再確認が終了0。基準main `efe9845`、通常build `efe984588553`。詳細・再実行・残作業は[引き継ぎ](pve-codex-handoff.md)と[試験計画](test-plan.md)を参照する。
-
-2026-11-03、基準main `fa246ed` + 部分DNS失敗の準備判定修正、通常Makefile build `fa246ede2a5e`で実daemon/独立dnsmasqのlocal redirect手順が終了0（外側5.12秒）。旧routerdのresolveIPAddressSetは成功した名前のアドレスを使い、独立した失敗をstatusへ残す。native networkも部分membershipを適用していたが、coordinatorのCheckReadyが一件の解決errorで準備/確認を拒否していた。修正前は正常回答とREFUSEDの混在でhealth準備が10秒後も失敗することを再現。修正後はusable membershipを準備済みとし、REFUSEDをnetwork statusへ残したまま、両IP UDP/TCPのローカル転送、選外宛先のWAN転送、実DNS更新による旧転送先の解除/新転送先の適用、confirmed commit/confirm、daemon再起動、転送設定撤去を確認した。WAN captureで対象DNSの漏出なしも確認した。 これは実Linux kernel/実product processと独立dnsmasqの通信であり、実HGW全profileへ保存homertの2つのIPAddressSetとDNS/NTP LocalServiceRedirectを接続した受入は次の残作業。NTP redirect・HA・物理NIC資格には数えない。元fixtureに欠けていたICMPv6入力許可とLAN→WAN転送を明示し、確認応答は別の空structへdecodeするよう修正した。製品側に暗黙許可・DAD回避・待機延長は追加していない。通常build・3実行物static link、make race vetが通過。
-
-2026-11-03、基準main `c371753`、通常build `6e0f020bf76c`（製品Go不変）で、保存homertの実private DNS/NextDNS設定を接続した単体39-resource実HGW手順が終了0。実NextDNS/Cloudflareの設定済みDoH上流すべてのHealthyを確認。安定した5転送先について独立LAN端末から両IP・UDP/TCPの20照会を行い、3先のSOA、2先のNXDOMAINとcore履歴の選択sourceを照合した。残る1先は事前UDP/TCP無応答から、試験中UDPのSERVFAILと後続NOERRORへ変化し、WAN captureで指定peer自身のNOERROR/NODATA応答を確認した。この先の固定SERVFAIL期待は試験側の誤りで、安定した4方式の受入には数えない。試験用local zoneは実suffixを隠さない名前へ変更し、DHCP/search/照会側も合わせた。新規WAN・host経路は追加していない。 同じ実行で通常の両IP Internet/DNS、DHCP scopes/sticky、BGP、NTP（host時計変更なし）、Tailscale/管理/運用記録、confirmed rollbackが通過。11巡回/自然PD更新0回、PD SIGKILL2.01秒・通常再起動4.87秒、停止時RA撤去/上流Releaseなし。全daemon再起動、HAでの実private DNS、全110-resource intent・実機資格は未受入。NextDNSは実endpointのprobe疎通で、全LAN照会がNextDNSを選んだという主張ではない。
-
-保存homertにあった期限削除前のsyslog archive先のnative例への接続漏れを修正した。単体39-resource実HGWの同じ実行で、DNS/終了flow/NFLOG/DHCP識別の4 datasetに対する送信障害中の保持・通信と、復旧後の27件の受信/期限削除を確認した。7日経過・二台archive・全signal資格は残る。詳細は[引き継ぎ](pve-codex-handoff.md)と[試験計画](test-plan.md)を参照する。
-
-署名候補の実DNS待受競合から、既定120秒での失敗・reboot要求・以前のruntime/paired設定への復旧と端末通信まで終了0。保存設定の手修復なしで、新しいDNS設定とDUIDを保持した。実行条件と限界は[引き継ぎ](pve-codex-handoff.md)を参照する。
-
-通常署名runtimeの実control API更新と以前のruntimeへの復帰が、独立PPP/PD/LAN peerで終了0。更新後に追加したDNS設定・DUIDを保持し、両IPの通信と自動confirmを確認した。全homert profile・失敗候補の自動fallback・kernel再起動は残る。詳細は[引き継ぎ](pve-codex-handoff.md)を参照する。
-
-通常署名bundleからの実PID 1起動と独立PPP/PD peerのPAP・CHAPが終了0。MTU変更時の古い状態による経路再追加と、手動再起動時の停止順序を修正した。詳細・再実行・未受入範囲は[引き継ぎ](pve-codex-handoff.md)と[試験計画](test-plan.md)を参照する。全体ゴールは継続中。
-
-更新: 2026-11-03 11:27 UTC。終了0（2026-11-03 07:42〜09:46 UTC）: source/build `df49035`/`df490351c3ff`、単体38-resource profileで実HGWとの自然Renew/Reply1組と期限更新、623巡回の両IP HTTPS・UDP/TCP DNSを確認した。自然更新後の619巡回時点まで全28 worker generation1/Ready=trueを観測。PD SIGKILL2.90秒/通常再起動5.92秒、全daemon後の全項目再確認105.73秒も通過し、identityと両端末/Tailscale通信、停止時のRA撤去を確認した。105.73秒は抑制/samplingを含む全項目時間で、転送断時間ではない。owner/process/namespace/stageは撤去済み。二段DNS・候補設定修正の別受入、既存socket継続、全homert/実機資格とは範囲を区別する。 通常build `842c47e32300`で新しい`make runtime-bundle`が終了0。25役割・5 engine・15 artifacts、527,315,456 byteの署名配布物へsourceと303 license資料を同梱した。実receiverでstage/verify/initialize/statusと後続候補のprepare/cancelが通過し、元のactiveと増加済みwatermarkを維持。独立OpenSSLも署名を検証した。入力はprivate snapshotへ固定し、nDPIのsourceコピーをproduction/build入力へ限定してroot private probeとsite boot treeの非収録を確認した。再実行は[配布手順](runtime-bundle.md)。これは配布物と保存選択の受入であり、このbundleの実機起動・全profile更新は残る。
-
-全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で10日4時間20分、記録済み期限から4日22時間52分経過した。34 work packageはin_progress22件/planned12件。部分受入を全体の完成に数えない。
-
-HA基盤の並行確認: 基準main `9fb64f4`の通常実行物、build ID `9fb64f4267e9`で`make check-ha-state`が終了0。独立Linux namespace/PID1の2 product processとclient/serverで、A→B/B→AのVRRP/NAT引継ぎ、同一TCP socketとUDP mapping、同期済みDHCP leaseの実Renew/ACK、worker/conntrack engine再起動を確認した。TCP再接続なし（captureのSYNは1回）、最大応答待ち1.665秒。UDPは50ms送信/200ms返信予算で3009送信・2942受信・67期限超過、最大無応答1.110秒（このfixture条件での測定）。同期断中の独立割当/更新と復帰、未設定証明書の拒否、実lease期限での失効、3日sticky期限を変えない再起動/引継ぎ、保持中の別client割当と元client再取得も通過。設定削除で同期workerを回収し、元のconntrack sysctlへ復元した。実HGWの38-resource全体を二台化した結果や、14-resource例・実homert二台の資格とは分ける。
-
-## DHCPv6再番号付けと自然失効（2026-11-03）
-
-基準main `aabd595` + 本修正、通常Makefile build `aabd5951463d`、独立dhcpcd・実supervisor/control/network/worker・bundled dnsmasqで`dhcp6-server`が終了0。設定APIでLAN /64・RA・配布DNS/listenerを変更し、端末の自然更新から新prefix取得、旧AAAA撤去、新割当の両DNS/UDP/TCP A・AAAA・PTRとTCP/UDP、同じDUIDを確認した。端末をReleaseなしで停止し、実leaseの保存期限（120秒）後にAAAAが消え、600秒leaseのIPv4 Aは残った。再開後は端末の実割当とDAD完了を読み直し、DNSとTCP/UDPが復旧した。 これは隔離Linuxでの設定によるLAN再番号付けとlease自然失効の受入。上流PDの変更/失効から同じstateful LANへ連鎖する全経路、stateful lease同期/HA、全構成Internet・実機/ONU/NIC/性能と全34 packageは継続中。
-
-## DHCPv6 leaseとDNSの接続（2026-11-03）
-
-基準main `e1d2b91` + DHCPv6/DNS変更、通常Makefile build `e1d2b91a96b5`で、独立dhcpcd端末が製品RA・DHCPv4/v6から両familyのaddress/routeを自動設定した。実配布された両DNSへUDP/TCPで同名A/AAAA・IPv4/v6 PTRを照会し、実割当と一致。hostname変更後の更新と旧名撤去、実Renew/Reply、割当からのTCP/UDP、worker SIGKILL/全daemon再起動後の割当・DUID・DNS復旧も通過した。Information-requestと既存DHCPv4の7手順も終了0。 隔離Linuxの実product process/kernelと独立端末での受入。保存homertのstateless構成にはpoolを追加していない。stateful lease同期、prefix変更/自然失効、HA、全構成Internet/署名起動・更新、ONU/NIC/性能と全34 packageは継続中。 詳細と手順は[試験計画](test-plan.md#dhcpv4v6の同名dns登録)・[引き継ぎ](pve-codex-handoff.md)を参照。
+独立ISC/dhcpcdによるPD自然更新・上流prefix変更・LAN lease失効・上流PD失効/再取得、worker/daemon再起動、名前更新、両IP UDP/TCPのA/AAAA/PTRと上流peerへのIPv6 TCP/UDPが通過した。stateless PD・make check・通常static3実行物も通過。実行版・条件・再実行は[試験計画](test-plan.md)と[引き継ぎ](pve-codex-handoff.md)に集約する。保存homertのstateless構成を維持し、残る単体の機能・運用意図を埋めた後、stateful lease同期を含むHA・実機・配布の残作業へ進む。NET-06と全34 packageのゴールは継続中。
 
 ## 現在の棚卸し
 

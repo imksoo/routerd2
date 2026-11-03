@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/linklocal"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6serverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsmasqengine"
@@ -54,8 +55,10 @@ func statefulConfig(c dhcp6serverconfig.Config, in dhcp6serverconfig.Input, cloc
 			next = max(0, deadlineTime)
 		}
 	}
-	if in.Authority.Nanos != 0 {
-		live(time.Duration(in.Authority.Nanos) - time.Duration(clock.BoottimeNanoseconds))
+	for _, grant := range []lifetime.Deadline{in.Authority, in.DNSReadyUntil} {
+		if grant.Nanos != 0 {
+			live(time.Duration(grant.Nanos) - time.Duration(clock.BoottimeNanoseconds))
+		}
 	}
 	add := func(code string, static []netip.Addr, learned []dhcp6serverconfig.Address) {
 		values := make([]string, 0, len(static)+len(learned))
@@ -198,7 +201,7 @@ func runStateful(ctx context.Context, c dhcp6serverconfig.Config, server []byte,
 			return err
 		}
 		configured, next := statefulConfig(c, in, clock)
-		if !in.Authority.Live(clock) {
+		if !in.Authority.Live(clock) || !in.DNSReadyUntil.Live(clock) {
 			configured = nil
 			next = time.Hour
 		}

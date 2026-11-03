@@ -308,12 +308,16 @@ func (d *daemon) openBoundListeners(ctx context.Context, addrs map[string]listen
 			}
 			d.handleDNS(listener, w, req)
 		})
-		packetConn, err := listenConfig.ListenPacket(ctx, "udp", addr)
+		udpNetwork, tcpNetwork := "udp4", "tcp4"
+		if binding.address.Addr().Is6() {
+			udpNetwork, tcpNetwork = "udp6", "tcp6"
+		}
+		packetConn, err := listenConfig.ListenPacket(ctx, udpNetwork, addr)
 		if err != nil {
 			shutdownBoundListeners(listeners)
 			return nil, fmt.Errorf("listen udp %s: %w", addr, err)
 		}
-		listener, err := listenConfig.Listen(ctx, "tcp", addr)
+		listener, err := listenConfig.Listen(ctx, tcpNetwork, addr)
 		if err != nil {
 			_ = packetConn.Close()
 			shutdownBoundListeners(listeners)

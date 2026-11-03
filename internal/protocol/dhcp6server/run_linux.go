@@ -142,7 +142,7 @@ func Run(ctx context.Context, cfg dhcp6serverconfig.Config, initial dhcp6serverc
 		if err != nil {
 			return err
 		}
-		if !in.Authority.Live(current) {
+		if !in.Authority.Live(current) || !in.DNSReadyUntil.Live(current) {
 			continue
 		}
 		if data.expires != 0 && uint64(current.BoottimeNanoseconds) >= data.expires {

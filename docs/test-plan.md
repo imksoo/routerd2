@@ -217,17 +217,14 @@ archive試験は既存の単体手順を共有し、各引継ぎ後に新しい�
 
 ## アドレス配布型DHCPv6
 
-`make check-dhcp6-server DOCKER='sudo -n docker'`で従来のInformation-requestとアドレス配布の両方を確認する。後者は実supervisor/control/network/worker、通常配布物のdnsmasq engine、独立dhcpcdクライアントとLinux kernelを専用namespaceで接続する。通常DADの実interfaceに/64を持たせ、poolのsuffixを旧routerdと同じconstructor方式で使う。クライアントの実割当を読み、配布範囲・DNS、TCP/UDP、実Renew/Reply、worker/daemon再起動後のDUIDと割当の保持を確認する。captureのserver identifierも保存identityと照合する。dhcpcdは製品RAとDHCPv4/v6からaddress/route/DNSを自動設定する。dhcpcd専用のmount namespaceで`/run`と`/var/lib/dhcpcd`をtmpfsにし、hostのDUID・PID・resolverを変更しない。通知hookはBOUND/RENEWの観測だけを行う。DHCPv6がdefault gatewayを配るとは仮定しない。ホストの時計/管理経路には触れない。
-これはNET-06のアドレス配布機能の受入であり、statelessを使う保存homertへpoolを新設するものではない。DHCPv6のlease同期・再番号付けと全構成でのInternet/更新受入は同じ製品経路で続ける。署名bundleの依存は既存dnsmasq archiveとsource/licenseを`dhcp6_server` roleへ明示的に結び付ける。終了後はpeer/process/state/captureを撤去する。
+`make check-dhcp6-server DOCKER='sudo -n docker' DHCP6_SERVER=/usr/sbin/dhcpd`でInformation-requestとアドレス配布を確認する。後者は独立ISCのPD /60を製品WANが取得し、製品がLAN /64・RA・DHCPv4/v6・DNSを提供する。同じ実supervisor/control/network/worker、通常dnsmasq engineと独立dhcpcdを使い、WAN/LANを専用namespaceで隔離する。WANは試験用静的IPv6と独立peerへのdefault routeをnative設定が所有する。peerは実際に委譲したprefixを製品WANへ戻す経路を持つ。hostの管理経路/時計は変えない。
 
-最新結果: 基準main `e1d2b91` + DHCPv6/DNS変更、通常Makefile build `e1d2b91a96b5`で、独立dhcpcd端末が製品RA・DHCPv4/v6から両familyのaddress/routeを自動設定した。実配布された両DNSへUDP/TCPで同名A/AAAA・IPv4/v6 PTRを照会し、実割当と一致。hostname変更後の更新と旧名撤去、実Renew/Reply、割当からのTCP/UDP、worker SIGKILL/全daemon再起動後の割当・DUID・DNS復旧も通過した。Information-requestと既存DHCPv4の7手順も終了0。 隔離Linuxの実product process/kernelと独立端末での受入。保存homertのstateless構成にはpoolを追加していない。stateful lease同期、prefix変更/自然失効、HA、全構成Internet/署名起動・更新、ONU/NIC/性能と全34 packageは継続中。
+端末はRA・DHCPv4/v6から自動設定し、実割当、配布DNS、両IP UDP/TCP A/AAAA/PTR、上流peerとのIPv6 TCP/UDPを照合する。RAのSLAACとDHCPv6が併存するため、配布poolの実addressを選んで比較する。dhcpcd専用mount namespaceの`/run`と`/var/lib/dhcpcd`はtmpfsとし、hostのDUID・PID・resolverを変更しない。hookは実通知を観測する。名前変更・実更新、worker SIGKILL/daemon再起動後の割当とDUID、captureのserver identifierも確認する。
 
+製品設定は変えず、独立ISCのprefixを変更する。peerのlease DBは保持し、自然更新によるLAN prefix・配布DNS・AAAA・通信の追従を確認する。旧prefixの保存履歴をDNSへ再掲載しない。次にdhcpcdだけをReleaseなしで止め、実保存lease期限まで待ってAAAA撤去と長いIPv4 Aの保持を両DNS UDP/TCPで確認する。再開後は実address/DAD完了を読み直してDNSとTCP/UDPを照合する。最後にISCを停止し、元のPD期限で製品LAN address・AAAAが撤去されることとIPv4 DNSの維持、ISC再開後のPD再取得・DNS・上流peer通信を確認する。clientがcacheしたIA_NAの即時消滅は要求しない。時計・DB・lease fileの注入/手修復は使わない。自然待機を含むowner上限400秒、外側runner420秒。
 
-## DHCPv4/v6の同名DNS登録
+DNSの待受は明示IPv4とIPv6 `::`を併記する。割当観測は元のresource/PD権限とlease UTC期限を保持し、DNS待受確認は送信可否に使う。短い待受確認期限を割当所有権へ流用しない。同名A/AAAAは各addressの元期限で失効する。観測の失敗でworking DHCP engineを止めず、再観測できない情報は元の有限期限で失効させる。
 
-同じ`check-dhcp6-server`のアドレス配布試験で、独立dhcpcdから実FQDNを送信する。DNS sourceには実DHCPv4/v6 serverを両方設定し、実配布されたIPv4/IPv6 DNSへ、同名のA/AAAAと両familyの実割当のPTRをUDP/TCPで照合する。クライアントのhostname変更・実更新と、worker/daemon再起動後も確認する。元のlease UTC期限と各producerの元BOOTTIME期限をアドレスごとに保持し、一方のfamilyの登録で他方を消さない。lease読取や通知の失敗でworking DHCP engineを止めず、再観測できない情報は元期限で失効させる。上流PDからのprefix変更/失効の連鎖・同期と全構成Internetの残作業は別に閉じる。
+対象だけの再実行は`python3 scripts/daemon-tests.py dhcp6-server --test TestDaemonDHCP6StatefulIndependentClient`。必要setupはISC DHCP 4.4.3-P1・dhcpcd・BusyBox・dig・通常build/engine・sudo/root。終了時にpeer/process/state/captureを撤去する。保存homertのstateless構成にはpoolを追加しない。例は[dhcp6-pd-stateful.yaml](../examples/dhcp6-pd-stateful.yaml)。
 
-
-同じDHCPv6手順の後半では、設定APIからLAN /64・RA・配布DNS/listenerをまとめて変更する。端末の自然Renewから旧addressのVL=0と新prefix取得を確認し、新addressのTCP/UDP・A/AAAA/PTRとDUID保持を照合する。旧prefixのlease履歴がengine fileへ残っても、現在の配布prefixに属さないaddressをDNSへ再掲載しない。次に独立dhcpcdだけをSIGSTOPし（Releaseなし）、実120秒leaseの自然失効でAAAAが撤去され、実600秒leaseのAが残ることを両DNSのUDP/TCPで確認する。SIGCONT後の通常更新でDNSとTCP/UDPを再確認する。時計・DB・lease fileの手修復は使わない。自然待機を含めるため、この既存手順のowner上限は280秒、外側runnerは300秒とする。
-
-最新結果: 基準main `aabd595` + 本修正、通常Makefile build `aabd5951463d`、独立dhcpcd・実supervisor/control/network/worker・bundled dnsmasqで`dhcp6-server`が終了0。設定APIでLAN /64・RA・配布DNS/listenerを変更し、端末の自然更新から新prefix取得、旧AAAA撤去、新割当の両DNS/UDP/TCP A・AAAA・PTRとTCP/UDP、同じDUIDを確認した。端末をReleaseなしで停止し、実leaseの保存期限（120秒）後にAAAAが消え、600秒leaseのIPv4 Aは残った。再開後は端末の実割当とDAD完了を読み直し、DNSとTCP/UDPが復旧した。 これは隔離Linuxでの設定によるLAN再番号付けとlease自然失効の受入。上流PDの変更/失効から同じstateful LANへ連鎖する全経路、stateful lease同期/HA、全構成Internet・実機/ONU/NIC/性能と全34 packageは継続中。
+最新結果と実行版は[引き継ぎ](pve-codex-handoff.md)へ集約する。今回の上流は独立ISCのrouted IPv6 peerであり、実homert全構成のInternetやONU/NIC資格とは範囲を分ける。

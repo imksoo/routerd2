@@ -246,7 +246,7 @@ check-bfd: build
 
 .PHONY: check-dhcp6-server
 check-dhcp6-server: build dnsmasq-engine
-	$(PYTHON) scripts/daemon-tests.py dhcp6-server --go '$(GO)'
+	$(PYTHON) scripts/daemon-tests.py dhcp6-server --go '$(GO)' --dhcp6-server '$(DHCP6_SERVER)'
 
 .PHONY: check-dhcp6-ra-pd
 check-dhcp6-ra-pd: build

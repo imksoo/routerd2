@@ -1,0 +1,84 @@
+# Routed IPv6 WAN with a DHCPv6-PD LAN. Select your interfaces, WAN address
+# and gateway. LAN clients obtain DHCPv4, SLAAC/DHCPv6 and local DNS together.
+# Bind both DHCP server roles to the bundled dnsmasq-engine.tar.
+schema_version: 2
+resources:
+  - id: interface/wan
+    interface: {name: wan0}
+  - id: interface/lan
+    interface: {name: lan0}
+  - id: address/wan
+    depends_on: [interface/wan]
+    address: {interface: wan0, cidr: '2001:db8:42::2/64'}
+  - id: address/lan
+    depends_on: [interface/lan]
+    address: {interface: lan0, cidr: '198.18.0.1/24'}
+  - id: route/wan
+    depends_on: [address/wan]
+    route: {destination: '::/0', gateway: '2001:db8:42::1', interface: wan0}
+  - id: forwarding
+    forwarding: {ipv6: true}
+  - id: service/wan-pd
+    depends_on: [address/wan, interface/lan]
+    service:
+      name: wan-pd
+      dhcp6:
+        interface: wan0
+        iaid: 1
+        request_prefix: true
+        prefix_length: 60
+        delegations:
+          - {name: lan, interface: lan0, host_id: 1}
+  - id: service/addresses4
+    depends_on: [address/lan]
+    service:
+      name: addresses4
+      dhcp_server:
+        interface: lan0
+        server_address: 198.18.0.1
+        authoritative: true
+        primary:
+          prefix: 198.18.0.0/24
+          start: 198.18.0.100
+          end: 198.18.0.199
+          lease_seconds: 43200
+          router: 198.18.0.1
+          dns_servers: [198.18.0.1]
+          domain: lan.test
+  - id: service/addresses
+    depends_on: [service/wan-pd, service/dns]
+    service:
+      name: addresses
+      dhcp6_server:
+        interface: lan0
+        pool: {start: '::100', end: '::1ff', lease_seconds: 43200}
+        dns_delegation: {service: wan-pd, delegation: lan}
+        domain_search: [lan.test]
+  - id: service/lan-ra
+    depends_on: [service/wan-pd]
+    service:
+      name: lan-ra
+      ra:
+        interface: lan0
+        managed: true
+        other_config: true
+        router_lifetime_seconds: 1800
+        dns_lifetime_seconds: 1800
+        from: {service: wan-pd, delegation: lan, rdnss_router: true}
+  - id: service/dns
+    depends_on: [address/lan]
+    service:
+      name: dns
+      dns:
+        listen_interface: lan0
+        spec:
+          listen:
+            - {name: lan, addresses: [198.18.0.1, '::'], port: 53}
+          sources:
+            - {name: local, kind: zone, match: [lan.test, ip6.arpa, 0.18.198.in-addr.arpa], zoneRef: [lan]}
+        zones:
+          - name: lan
+            spec:
+              zone: lan.test
+              dhcpDerived:
+                sources: [DHCPv4Server/addresses4, DHCPv6Server/addresses]

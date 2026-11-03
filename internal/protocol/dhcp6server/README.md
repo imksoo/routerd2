@@ -132,7 +132,15 @@ only under current interface prefixes; a retained old-prefix lease row is
 allocation history, not a usable DNS address. Ancillary publication failure does
 not stop allocation; an unrefreshed DNS observation expires.
 
-The same check exercises a configured LAN prefix change through natural
-client renewal, original lease expiry without Release, independent IPv4 DNS
-retention and reacquisition. Stateful lease synchronization, upstream-PD-driven
-renumbering/expiry, Reconfigure and complete deployment qualification remain open.
+The same check obtains the LAN prefix from independent ISC DHCPv6-PD,
+then changes the peer's prefix without changing product configuration. It checks
+natural client renewal, lease expiry without Release, independent IPv4 DNS
+retention, upstream PD expiry and recovery, and routed TCP/UDP to that peer.
+See `examples/dhcp6-pd-stateful.yaml` for the corresponding routed-WAN setup.
+The allocation observation retains resource/PD authority; DNS socket readiness
+separately gates serving. A short resolver heartbeat cannot expire an otherwise
+valid allocation fact. IPv4 and IPv6 listeners use their explicit socket families,
+so an IPv6 wildcard can coexist with a configured IPv4 address.
+
+Stateful lease synchronization/HA, client Reconfigure and complete physical
+and full-profile deployment qualification remain open.

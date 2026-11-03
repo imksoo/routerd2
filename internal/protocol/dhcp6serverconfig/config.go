@@ -3,14 +3,14 @@ package dhcp6serverconfig
 
 import (
 	"errors"
-	"github.com/imksoo/routerd2/internal/boottime"
-	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"net/netip"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/lifetime"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/miekg/dns"
 )
 
@@ -47,10 +47,13 @@ type Domain struct {
 	ValidUntil lifetime.Deadline `json:"valid_until"`
 }
 type Input struct {
-	Authority    lifetime.Deadline `json:"authority"`
-	DNSServers   []Address         `json:"dns_servers,omitempty"`
-	SNTPServers  []Address         `json:"sntp_servers,omitempty"`
-	DomainSearch []Domain          `json:"domain_search,omitempty"`
+	// Authority bounds allocation facts; DNS readiness gates serving without shortening
+	// the lifetime of an already observed allocation fact.
+	Authority     lifetime.Deadline `json:"authority"`
+	DNSReadyUntil lifetime.Deadline `json:"dns_ready_until"`
+	DNSServers    []Address         `json:"dns_servers,omitempty"`
+	SNTPServers   []Address         `json:"sntp_servers,omitempty"`
+	DomainSearch  []Domain          `json:"domain_search,omitempty"`
 }
 
 // MaxLeases is the bundled dnsmasq engine's configured default.
@@ -124,8 +127,10 @@ func validDomain(name string) bool {
 }
 
 func ValidateInput(in Input) error {
-	if in.Authority.Validate() != nil || in.Authority.BootID == "" || !in.Authority.UTC.IsZero() {
-		return errors.New("DHCPv6 serving requires original boot authority")
+	for _, grant := range []lifetime.Deadline{in.Authority, in.DNSReadyUntil} {
+		if grant.Validate() != nil || grant.BootID == "" || !grant.UTC.IsZero() {
+			return errors.New("DHCPv6 serving requires original boot authority and DNS readiness")
+		}
 	}
 	if len(in.DNSServers) > 32 || len(in.SNTPServers) > 32 || len(in.DomainSearch) > 32 {
 		return errors.New("too many learned DHCPv6 option values")

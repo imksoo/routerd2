@@ -57,7 +57,7 @@ SUITES = {
         ("TestDaemonDHCP6RAIndependentPeers", ("wan0",), 300),
         ("TestDaemonDHCP6DuplicateAddressDecline", ("wire0",), 90),
     ),
-    "dhcp6-server": (("TestDaemonDHCP6InformationIndependentClient", ("lan0",), 100), ("TestDaemonDHCP6StatefulIndependentClient", ("lan0",), 300)),
+    "dhcp6-server": (("TestDaemonDHCP6InformationIndependentClient", ("lan0",), 100), ("TestDaemonDHCP6StatefulIndependentClient", ("wan0", "lan0"), 420)),
     "dhcp6-ra-pd": (
         ("TestDaemonDHCP6RAAddsAddressToPD", ("wire0", "lan0"), 160),
         ("TestDaemonConditionalLAN", ("wan0", "lan0"), 145),
@@ -123,7 +123,7 @@ def main():
                 subprocess.run(root + ["install", "-m", "755", str(args.binary_dir.resolve() / name), stage + "/bin/" + name], check=True)
             if args.suite in ("dhcp-server", "dhcp6-server", "management"):
                 subprocess.run(root + ["install", "-m", "644", str(Path("dist/dnsmasq-engine.tar").resolve()), stage + "/bin/dnsmasq-engine.tar"], check=True)
-            if args.suite == "dhcp6-ra-pd":
+            if args.suite in ("dhcp6-ra-pd", "dhcp6-server"):
                 subprocess.run(root + ["install", "-m", "755", str(args.dhcp6_server.resolve()), stage + "/bin/dhcpd"], check=True)
             if args.suite == "event-group":
                 if args.old_eventd is None:

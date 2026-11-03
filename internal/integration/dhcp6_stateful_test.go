@@ -9,18 +9,21 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/imksoo/routerd/pkg/api"
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
-	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6serverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
@@ -29,41 +32,148 @@ import (
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
 	"github.com/vishvananda/netlink"
-	"github.com/vishvananda/netns"
 	"golang.org/x/sys/unix"
-	"syscall"
 )
 
 func TestDaemonDHCP6StatefulIndependentClient(t *testing.T) {
-	if !isolateFixtureTimeout(t, "TestDaemonDHCP6StatefulIndependentClient", 280*time.Second) {
+	if !isolateFixtureTimeout(t, "TestDaemonDHCP6StatefulIndependentClient", 400*time.Second) {
 		return
 	}
+	provider := fixturePeerNamespace(t, "wan0", "server0")
 	client := fixturePeerNamespace(t, "lan0", "client0")
+	healthPBRCapture(t, "wan0")
 	capture := healthPBRCapture(t, "lan0")
 	resolver := dnsconfig.RuntimeConfig{
 		Spec: api.DNSResolverSpec{
-			Listen:  []api.DNSResolverListenSpec{{Name: "lan", Addresses: []string{"198.18.0.1", "2001:db8:80::1"}, Port: 53}},
+			Listen:  []api.DNSResolverListenSpec{{Name: "lan", Addresses: []string{"198.18.0.1", "::"}, Port: 53}},
 			Sources: []api.DNSResolverSourceSpec{{Name: "local", Kind: "zone", Match: []string{"lan.test", "ip6.arpa", "0.18.198.in-addr.arpa"}, ZoneRef: []string{"lan"}}},
 		},
 		Zones: []dnsconfig.RuntimeZone{{Name: "lan", Spec: api.DNSZoneSpec{Zone: "lan.test", DHCPDerived: api.DNSZoneDHCPDerivedSpec{Sources: []string{"DHCPv4Server/addresses4", "DHCPv6Server/addresses"}}}}},
 	}
 	native := config.Native{
-		Network: network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"2001:db8:80::1/64", "198.18.0.1/24"}}, {Name: "lo", Addresses: []string{"2001:db8:ffff::9/128"}}}},
+		Network: network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"198.18.0.1/24"}}, {Name: "wan0", Addresses: []string{"2001:db8:42::2/64"}}}, Routes: []network.Route{{Destination: "::/0", Gateway: "2001:db8:42::1", Interface: "wan0"}}, Forwarding: network.Forwarding{IPv6: new(true)}},
 		Services: []serviceconfig.Service{
 			{Name: "addresses4", DHCPServer: &serviceconfig.DHCPServer{Interface: "lan0", ServerAddress: "198.18.0.1", Authoritative: true, Primary: dhcpserverconfig.Scope{Prefix: "198.18.0.0/24", Start: "198.18.0.100", End: "198.18.0.199", LeaseSeconds: 600, Router: "198.18.0.1", DNSServers: []string{"198.18.0.1"}, Domain: "lan.test"}}},
-			{Name: "addresses", DHCP6Server: &serviceconfig.DHCP6Server{Interface: "lan0", LogDHCP: true, Pool: &dhcp6serverconfig.Pool{Start: netip.MustParseAddr("::100"), End: netip.MustParseAddr("::1ff"), LeaseSeconds: 120}, DNSServers: []netip.Addr{netip.MustParseAddr("2001:db8:80::1")}, DomainSearch: []string{"lan.test"}}},
-			{Name: "lan-ra", RA: &serviceconfig.RouterAdvertisement{Config: ra.Config{Interface: "lan0", Managed: true, OtherConfig: true, RouterLifetimeSeconds: 1800, DNSSLifetimeSeconds: 1800, Prefixes: []ra.Prefix{{Prefix: "2001:db8:80::/64", OnLink: true, Autonomous: false, ValidLifetimeSeconds: 7200, PreferredLifetimeSeconds: 3600}}}}},
-			{Name: "dns", DNS: &serviceconfig.DNS{RuntimeConfig: resolver}},
+			{Name: "addresses", DHCP6Server: &serviceconfig.DHCP6Server{Interface: "lan0", LogDHCP: true, Pool: &dhcp6serverconfig.Pool{Start: netip.MustParseAddr("::100"), End: netip.MustParseAddr("::1ff"), LeaseSeconds: 120}, DNSDelegation: &serviceconfig.DNSDelegation{Service: "wan-pd", Delegation: "lan"}, DomainSearch: []string{"lan.test"}}},
+			{Name: "lan-ra", RA: &serviceconfig.RouterAdvertisement{Config: ra.Config{Interface: "lan0", Managed: true, OtherConfig: true, RouterLifetimeSeconds: 1800, DNSSLifetimeSeconds: 1800}, From: &serviceconfig.RADelegation{Service: "wan-pd", Delegation: "lan", RDNSSRouter: true}}},
+			{Name: "dns", DNS: &serviceconfig.DNS{ListenInterface: "lan0", RuntimeConfig: resolver}},
+			{Name: "wan-pd", DHCP6: &serviceconfig.DHCP6{Interface: "wan0", IAID: 1, RequestPrefix: true, PrefixLength: 60, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", HostID: 1}}}},
 		},
 	}
 	f := startFixtureDaemon(t, config.FromNative(native))
-	self, err := netns.Get()
-	if err != nil {
+	work := t.TempDir()
+	if err := fixtureInsideNamespace(provider, func() error {
+		for name, cidr := range map[string]string{"server0": "2001:db8:42::1/64", "lo": "2001:db8:ffff::9/128"} {
+			link, err := netlink.LinkByName(name)
+			if err != nil {
+				return err
+			}
+			address, err := netlink.ParseAddr(cidr)
+			if err != nil {
+				return err
+			}
+			if err := netlink.AddrAdd(link, address); err != nil {
+				return err
+			}
+		}
+		return os.WriteFile("/proc/sys/net/ipv6/conf/all/forwarding", []byte("1"), 0600)
+	}); err != nil {
 		t.Fatal(err)
 	}
-	defer self.Close()
-	vrrpVIPResponders(t, self, "6", []string{"2001:db8:ffff::9"}, "A")
-	work := t.TempDir()
+	vrrpVIPResponders(t, provider, "6", []string{"2001:db8:ffff::9"}, "A")
+	iscConfig, iscLeases := filepath.Join(work, "isc.conf"), filepath.Join(work, "isc.leases")
+	if err := os.WriteFile(iscLeases, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	var isc *exec.Cmd
+	var iscLog *os.File
+	stopISC := func() {
+		if isc == nil {
+			return
+		}
+		_ = isc.Process.Signal(unix.SIGTERM)
+		_ = isc.Wait()
+		iscLog.Close()
+		if t.Failed() {
+			data, _ := os.ReadFile(iscLog.Name())
+			if len(data) > 6000 {
+				data = data[len(data)-6000:]
+			}
+			t.Logf("independent ISC: %s", data)
+		}
+		isc = nil
+	}
+	t.Cleanup(stopISC)
+	startISC := func(prefix string) {
+		t.Helper()
+		stopISC()
+		body := fmt.Sprintf("default-lease-time 60; preferred-lifetime 45; option dhcp-renewal-time 20; option dhcp-rebinding-time 40; subnet6 2001:db8:42::/64 { prefix6 %s %s /60; }\n", prefix, prefix)
+		if err := os.WriteFile(iscConfig, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		var err error
+		iscLog, err = os.Create(filepath.Join(work, "isc.log"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		isc = exec.Command(os.Getenv("ROUTERD2_DHCP6_SERVER"), "-6", "-f", "-d", "-cf", iscConfig, "-lf", iscLeases, "-pf", filepath.Join(work, "isc.pid"), "server0")
+		isc.Stdout, isc.Stderr = iscLog, iscLog
+		if err := fixtureInsideNamespace(provider, isc.Start); err != nil {
+			t.Fatal(err)
+		}
+	}
+	startISC("2001:db8:80::")
+	var lanPrefix netip.Prefix
+	readPD := func() bool {
+		var status runtimeplan.InstanceStatus
+		if err := f.control.Do(t.Context(), "GET", "/v1/services/service.wan-pd", nil, &status); err != nil {
+			return false
+		}
+		var observed dhcp6config.Snapshot
+		if err := json.Unmarshal(status.Snapshot, &observed); err != nil || len(observed.Prefixes) == 0 {
+			return false
+		}
+		clock, err := boottime.Read()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !observed.Active(clock) {
+			return false
+		}
+		prefix, err := netip.ParsePrefix(observed.Prefixes[0].Prefix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		next := netip.PrefixFrom(prefix.Addr(), 64)
+		if next == lanPrefix {
+			return true
+		}
+		// The delegating peer routes its actual grant back to this router.
+		if err := fixtureInsideNamespace(provider, func() error {
+			link, err := netlink.LinkByName("server0")
+			if err != nil {
+				return err
+			}
+			_, destination, err := net.ParseCIDR(prefix.String())
+			if err != nil {
+				return err
+			}
+			return netlink.RouteReplace(&netlink.Route{LinkIndex: link.Attrs().Index, Dst: destination, Gw: net.ParseIP("2001:db8:42::2")})
+		}); err != nil {
+			t.Fatal(err)
+		}
+		lanPrefix = next
+		return true
+	}
+	until(t, 30*time.Second, readPD)
+	poolAddress := func(ip netip.Addr) bool {
+		if !lanPrefix.Contains(ip) {
+			return false
+		}
+		raw := ip.As16()
+		suffix := binary.BigEndian.Uint64(raw[8:])
+		return suffix >= 0x100 && suffix <= 0x1ff
+	}
 	lease := filepath.Join(work, "client.lease")
 	dns4 := filepath.Join(work, "dns4")
 	hook := filepath.Join(work, "client.sh")
@@ -120,7 +230,7 @@ os.execvp('dhcpcd',sys.argv[1:])`, "dhcpcd", "-B", "-d", "-f", clientConfig, "-c
 				if err == nil && netip.MustParsePrefix("198.18.0.0/24").Contains(ip) {
 					address4 = ip
 				}
-				if err == nil && netip.MustParsePrefix("2001:db8:80::/64").Contains(ip) && value.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) == 0 {
+				if err == nil && poolAddress(ip) && value.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) == 0 {
 					address = ip
 				}
 			}
@@ -128,7 +238,7 @@ os.execvp('dhcpcd',sys.argv[1:])`, "dhcpcd", "-B", "-d", "-f", clientConfig, "-c
 		})
 		return err == nil && address.IsValid() && address4.IsValid()
 	})
-	if address.Compare(netip.MustParseAddr("2001:db8:80::100")) < 0 || address.Compare(netip.MustParseAddr("2001:db8:80::1ff")) > 0 {
+	if !poolAddress(address) {
 		t.Fatal("client outside configured DHCP range", address)
 	}
 	until(t, 5*time.Second, func() bool { _, err := os.Stat(dns4); return err == nil })
@@ -149,7 +259,7 @@ os.execvp('dhcpcd',sys.argv[1:])`, "dhcpcd", "-B", "-d", "-f", clientConfig, "-c
 		t.Fatal("wrong actual DHCPv4 DNS", string(learned4))
 	}
 	server6, err := netip.ParseAddr(options6[1])
-	if err != nil || server6 != netip.MustParseAddr("2001:db8:80::1") {
+	if err != nil || !lanPrefix.Contains(server6) {
 		t.Fatal("wrong actual DHCPv6 DNS", options6[1])
 	}
 	servers := []string{server4.String(), server6.String()}
@@ -180,6 +290,15 @@ os.execvp('dhcpcd',sys.argv[1:])`, "dhcpcd", "-B", "-d", "-f", clientConfig, "-c
 		defer func() {
 			if t.Failed() {
 				t.Log(observed)
+				var serving runtimeplan.InstanceStatus
+				if err := f.control.Do(t.Context(), "GET", "/v1/services/service.addresses", nil, &serving); err == nil {
+					t.Log("DHCPv6 observation:", string(serving.Snapshot))
+				}
+				var input dnsconfig.Input
+				if err := f.control.Do(t.Context(), "GET", "/v1/services/service.dns/dns-input", nil, &input); err == nil {
+					data, _ := json.Marshal(input)
+					t.Log("DNS input:", string(data))
+				}
 			}
 		}()
 		until(t, 8*time.Second, func() bool {
@@ -317,20 +436,11 @@ os.execvp('dhcpcd',sys.argv[1:])`, "dhcpcd", "-B", "-d", "-f", clientConfig, "-c
 	}
 	renew()
 
-	// Change the configured LAN prefix through the real control path. Keep
-	// DHCPv4 working while the constructor range follows the new IPv6 prefix.
-	oldAddress := address
-	native.Network.Interfaces[0].Addresses[0] = "2001:db8:81::1/64"
-	native.Services[1].DHCP6Server.DNSServers = []netip.Addr{netip.MustParseAddr("2001:db8:81::1")}
-	native.Services[2].RA.Prefixes[0].Prefix = "2001:db8:81::/64"
-	native.Services[3].DNS.Spec.Listen[0].Addresses[1] = "2001:db8:81::1"
-	var state control.State
-	if err := f.control.Do(ctx, "GET", "/v1/config", nil, &state); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.control.Do(ctx, "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: state.Revision, RequestID: "renumber-lan", Config: config.FromNative(native)}, nil); err != nil {
-		t.Fatal(err)
-	}
+	// Change the real delegating peer, retaining its lease database. Product
+	// configuration stays unchanged; natural PD/client renewal drives the LAN.
+	oldAddress, oldPrefix := address, lanPrefix
+	startISC("2001:db8:81::")
+	until(t, 90*time.Second, func() bool { return readPD() && lanPrefix != oldPrefix })
 	readRenumbered := func() bool {
 		found := false
 		err := fixtureInsideNamespace(client, func() error {
@@ -341,7 +451,7 @@ os.execvp('dhcpcd',sys.argv[1:])`, "dhcpcd", "-B", "-d", "-f", clientConfig, "-c
 			all, err := netlink.AddrList(link, netlink.FAMILY_V6)
 			for _, value := range all {
 				ip, parseErr := netip.ParseAddr(value.IP.String())
-				if parseErr == nil && netip.MustParsePrefix("2001:db8:81::/64").Contains(ip) && value.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) == 0 {
+				if parseErr == nil && poolAddress(ip) && value.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) == 0 {
 					address = ip
 					found = true
 				}
@@ -351,7 +461,19 @@ os.execvp('dhcpcd',sys.argv[1:])`, "dhcpcd", "-B", "-d", "-f", clientConfig, "-c
 		return err == nil && found && address != oldAddress
 	}
 	until(t, 135*time.Second, readRenumbered)
-	servers[1] = "2001:db8:81::1"
+	options, err := os.ReadFile(lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := strings.Split(strings.TrimSpace(string(options)), "|")
+	if len(fields) != 3 {
+		t.Fatal("missing DHCPv6 DNS after PD change", string(options))
+	}
+	server6, err = netip.ParseAddr(fields[1])
+	if err != nil || !lanPrefix.Contains(server6) {
+		t.Fatal("DNS did not follow the real PD", fields[1], err)
+	}
+	servers[1] = server6.String()
 	checkDNS()
 	traffic()
 	if identity() != original {
@@ -420,6 +542,61 @@ os.execvp('dhcpcd',sys.argv[1:])`, "dhcpcd", "-B", "-d", "-f", clientConfig, "-c
 	// allocation instead of requiring the old one to survive expiry.
 	checkDNS()
 	traffic()
+
+	// Losing the upstream grant withdraws the product's delegated kernel
+	// address and DNS publication, even while clients cache their own lease.
+	stopISC()
+	until(t, 75*time.Second, func() bool {
+		var status runtimeplan.InstanceStatus
+		if err := f.control.Do(t.Context(), "GET", "/v1/services/service.wan-pd", nil, &status); err != nil {
+			return false
+		}
+		var pd dhcp6config.Snapshot
+		if err := json.Unmarshal(status.Snapshot, &pd); err != nil {
+			return false
+		}
+		clock, err := boottime.Read()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pd.Active(clock) {
+			return false
+		}
+		link, err := netlink.LinkByName("lan0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addresses, err := netlink.AddrList(link, netlink.FAMILY_V6)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range addresses {
+			ip, err := netip.ParseAddr(entry.IP.String())
+			if err == nil && lanPrefix.Contains(ip) {
+				return false
+			}
+		}
+		return true
+	})
+	until(t, 8*time.Second, func() bool {
+		answer, err := query(servers[0], dnsName+".lan.test", "AAAA", "+notcp")
+		return err == nil && answer == ""
+	})
+	for _, transport := range []string{"+notcp", "+tcp"} {
+		answer, err := query(servers[0], dnsName+".lan.test", "A", transport)
+		got, parseErr := netip.ParseAddr(answer)
+		if err != nil || parseErr != nil || got != address4 {
+			t.Fatal("upstream PD expiry removed working IPv4 DNS", answer, err)
+		}
+	}
+	startISC("2001:db8:81::")
+	until(t, 30*time.Second, readPD)
+	until(t, 135*time.Second, readRenumbered)
+	checkDNS()
+	traffic()
+	if identity() != original {
+		t.Fatal("upstream PD recovery changed LAN DUID")
+	}
 	capture.mu.Lock()
 	defer capture.mu.Unlock()
 	wanted, err := hex.DecodeString(original)

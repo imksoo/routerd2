@@ -2,6 +2,16 @@
 
 更新: 2026-11-03。全体ゴールは継続中。
 
+## PDからアドレス配布・DNS・上流通信までの接続
+
+実通信で二つの原因を修正した。IPv6 `::`がIPv4 socketも開いて明示IPv4 listenerと衝突していたため、既存のtyped addressからudp4/tcp4とudp6/tcp6を選ぶ。もう一つは、DNS待受の短い確認期限で割当観測まで失効し、実割当と元のPDが有効でもAAAAが欠ける循環だった。Inputの`Authority`は元のresource/PD権限を保持し、`DNSReadyUntil`は両server経路の配布可否に使う。lease観測の期限は前者へ制約し、DNS待受確認の短い窓を割当所有権へ流用しない。producer/consumerを同じ現在契約へ更新し、互換readerや期限延長・retryは加えていない。旧routerdのDNS listener、dnsmasq stateful/both constructorとcallerも照合した。
+
+基準main `e711f54` + DNSのfamily指定/配布権限と待受確認期限の分離、通常Makefile build `e711f545970f`で、独立ISC DHCP 4.4.3-P1・dhcpcd 10.0.6・Linux kernel・実product processによる`dhcp6-server`が終了0。PD /60からのLAN /64、DHCPv4/SLAAC/DHCPv6の自動設定、配布DNSへの両IP UDP/TCP A・AAAA・PTR、名前変更、worker SIGKILL/全daemon再起動後の同一割当/DUIDと実TCP/UDPを確認した。製品設定を変えずISCのprefixを変更し、自然更新で新LAN prefix・配布DNS・AAAAと通信が追従。LAN leaseの自然失効ではAAAAを撤去してIPv4 Aを保持。ISC停止によるPD自然失効では製品LAN addressとAAAAを撤去し、IPv4 DNSを維持した。ISC再開後のPD再取得・DNS・独立上流peerとのIPv6 TCP/UDPも復旧した。
+
+既存stateless PDのISC/radvd/BusyBox/Linux手順（期限切れ・confirmed rollback・委譲DNS）と`make check`（Race/vet/Python36件）、通常static3実行物、設定例検証も通過。再実行は`make check-dhcp6-server DOCKER='sudo -n docker' DHCP6_SERVER=/usr/sbin/dhcpd`。対象だけは`python3 scripts/daemon-tests.py dhcp6-server --test TestDaemonDHCP6StatefulIndependentClient`。新しい例は[dhcp6-pd-stateful.yaml](../examples/dhcp6-pd-stateful.yaml)。手順・隔離は[試験計画](test-plan.md#アドレス配布型dhcpv6)。
+
+隔離Linuxのrouted IPv6 WAN・独立peerでの受入。保存homertはstatelessのまま。全homert構成のInternet、stateful lease同期/HA、client Reconfigure、ONU/NIC/性能と全34 packageの完成は継続中。
+
 ## DHCPv6再番号付け時の古いDNS登録を修正
 
 実端末試験で、dnsmasqが旧addressにVL=0を返した後も元期限付きのlease履歴を保存し、DNSが旧・新AAAAを両方返す問題を再現した。engine lease fileは変更せず、観測時に固定poolのprefix、またはconstructorの現在のinterface prefixに属する割当だけを公開する。旧routerdのlease readerとdnsmasqのconstructor/lease実装を比較した。新しいallocator、lease DB、再試行層は追加していない。
