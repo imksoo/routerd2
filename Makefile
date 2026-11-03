@@ -19,6 +19,7 @@ QEMU_DAEMON_TIMEOUT ?= 180
 QEMU_RELEASE_TIMEOUT ?= 240
 QEMU_STORAGE_TIMEOUT ?= 240
 RELEASE_BUILT_DIR ?= dist/bin
+UPDATE_BASELINE_DIR ?=
 BUNDLE_BOOT ?= images/boot.json
 BUNDLE_OUTPUT ?= dist/routerd-runtime-$(RELEASE_ID)-$(shell $(GO) env GOARCH).tar
 DHCP6_SERVER ?= /usr/sbin/dhcpd
@@ -57,6 +58,7 @@ help:
 	  'make check-dslite-pmtu Verify IPv4 PMTU feedback and same-socket UDP recovery over DS-Lite' \
 	  'make check-pppoe        Verify real PPPoE PAP/CHAP, LAN forwarding and recovery' \
 	  'make check-pppoe-pd     Verify PPP PD recovery, WAN replacement and LAN IPv6 with independent ISC DHCP' \
+	  'make check-runtime-update UPDATE_BASELINE_DIR=...  Verify signed runtime update/rollback with real PPP/PD peers' \
 	  'make check-ha-dhcp-scopes Verify shared secondary DHCP ranges across HA handoff' \
 	  'make check-ha-state    Preserve DHCP/TCP/UDP state across two native routers' \
 	  'make check-ha-pd       Verify shared PD across two routers with different BOOTTIME clocks' \
@@ -213,6 +215,12 @@ check-pppoe: build build-publisher pppoe-engine dnsmasq-engine conntrack-engine 
 .PHONY: check-pppoe-pd
 check-pppoe-pd: build build-publisher pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine chrony-engine
 	$(PYTHON) scripts/pppoe-peer.py --dhcp6-server '$(DHCP6_SERVER)' --output dist/pppoe-pd
+
+.PHONY: check-runtime-update
+check-runtime-update:
+	@test -n '$(UPDATE_BASELINE_DIR)' || { printf '%s\n' 'Set UPDATE_BASELINE_DIR to an existing normal build with a different release ID'; exit 1; }
+	$(MAKE) build build-publisher pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine chrony-engine
+	$(PYTHON) scripts/pppoe-peer.py --auth pap --binary-dir '$(UPDATE_BASELINE_DIR)' --update-binary-dir dist/bin --dhcp6-server '$(DHCP6_SERVER)' --output dist/runtime-update
 
 .PHONY: pppoe-engine
 pppoe-engine:

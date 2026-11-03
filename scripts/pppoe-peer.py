@@ -44,7 +44,8 @@ def peer(stage, auth, dhcp6_server):
     # This whole fixture has a private mount namespace. The product engine
     # must additionally create its own: AC secrets/hooks are not client input.
     signal.signal(signal.SIGALRM, deadline)
-    signal.alarm(180)
+    updating = (stage.parent / "candidate.tar").exists()
+    signal.alarm(450 if updating else 180)
     signal.signal(signal.SIGTERM, terminated)
     ns, acns, lan = (prefix + str(os.getpid()) for prefix in ("r2ppp-", "r2ac-", "r2lan-"))
     children, namespaces, frozen = [], [], []
@@ -258,6 +259,72 @@ def peer(stage, auth, dhcp6_server):
             duid = first["snapshot"]["client_duid"]
             assert duid.startswith("0004") and len(duid) == 36
             print("PASS PPP IPv6CP, ISC DHCP IA_PD, configured LAN RA/SLAAC, routed IPv6 TCP/UDP", flush=True)
+            if updating:
+                before_config = api("control.sock", "/v1/config")
+                baseline = packed["manifest"]["release_id"]
+                candidate = json.loads((stage.parent / "candidate.json").read_text())
+                target = json.loads(run(["curl", "--max-time", "300", "--fail-with-body", "-sS",
+                    "--unix-socket", str(stage / "run/control.sock"), "-X", "POST",
+                    "--upload-file", str(stage.parent / "candidate.tar"),
+                    "http://localhost/v1/releases/stage"], timeout=305))
+                assert target["digest"] == candidate["digest"]
+                for operation, identity in (("prepare", candidate["manifest"]["release_id"]), ("rollback", baseline)):
+                    state = api("control.sock", "/v1/releases/status")
+                    request = {"expected_generation": state["generation"], "expected_revision": before_config["revision"]}
+                    if operation == "prepare":
+                        request["release"] = target
+                    pending = api("control.sock", "/v1/releases/" + operation, request, timeout=120)
+                    assert pending["pending"]["release"]["release_id"] == identity
+                    previous_instance = api("supervisor.sock", "/v1/status")["instance_id"]
+                    assert json.loads(run([str(stage.parent / "routerd"), "reboot", "--runtime-dir", str(stage / "run")]))["accepted"]
+                    daemon.wait(timeout=12)
+                    assert daemon.returncode == -signal.SIGHUP, daemon.returncode
+                    server.terminate()
+                    server.wait(timeout=3)
+                    daemon = start(ns, command, "console")
+                    child_file = Path(f"/proc/{daemon.pid}/task/{daemon.pid}/children")
+                    wait(lambda: child_file.read_text().strip())
+                    pid1 = int(child_file.read_text().split()[0])
+                    wait(lambda: link() is not None and routed(), 60)
+                    wait(lambda: any(x["ifname"].startswith("ppp") and x["addr_info"] for x in peer_links()))
+                    ppp = next(x["ifname"] for x in peer_links() if x["ifname"].startswith("ppp"))
+                    server = dhcp6_start()
+                    ipv6_traffic()
+                    traffic()
+                    dns_traffic()
+                    wait(lambda: api("control.sock", "/v1/releases/status").get("operation") == "confirm", 120)
+                    current = api("supervisor.sock", "/v1/status")
+                    assert current["pid"] == 1 and current["release_id"] == identity
+                    assert current["instance_id"] != previous_instance
+                    assert all(m["release_id"] == identity for m in current["modules"])
+                    restored = api("control.sock", "/v1/config")
+                    assert restored["config"] == before_config["config"]
+                    assert restored["revision"] == before_config["revision"] + 1
+                    assert restored["startup"]["revision"] == restored["revision"]
+                    assert pd_record()["snapshot"]["client_duid"] == duid
+                    confirmed = api("control.sock", "/v1/releases/status")
+                    assert confirmed["active"]["release_id"] == identity
+                    assert confirmed["high_watermark"] == 2 and not confirmed.get("attempt") and not confirmed.get("pending")
+                    print("PASS signed runtime " + operation + " selected " + identity + ": automatic health confirmation, persisted configuration/DUID and LAN DNS/IPv4/IPv6 TCP/UDP", flush=True)
+                    before_config = restored
+                    if operation == "prepare":
+                        # Binary rollback must retain changes made after the update.
+                        changed = copy.deepcopy(restored["config"])
+                        zone = next(r for r in changed["resources"] if r["id"] == "dns")["service"]["dns"]["zones"][0]["spec"]
+                        zone["records"].append({"hostname": "after-update", "ipv4": "10.42.0.99"})
+                        api("control.sock", "/v1/config/commit", {"expected_revision": restored["revision"], "request_id": "post-runtime-update", "config": changed})
+                        before_config = api("control.sock", "/v1/config")
+                    for transport in ([], ["+tcp"]):
+                        assert run(inside(lan, ["dig", "@10.42.0.1", "after-update.router.test", "A", "+short", "+tries=1", "+time=2"] + transport)).strip() == "10.42.0.99"
+                assert json.loads(run([str(stage.parent / "routerd"), "poweroff", "--runtime-dir", str(stage / "run")]))["accepted"]
+                daemon.wait(timeout=12)
+                assert daemon.returncode == -signal.SIGINT, daemon.returncode
+                capture.send_signal(signal.SIGINT)
+                capture.wait(timeout=3)
+                packets = run(["tcpdump", "-n", "-r", str(stage / "pppoe.pcap"), "ip6"])
+                assert "dhcp6 release" not in packets
+                print("PASS update/rollback clean poweroff without upstream PD Release", flush=True)
+                return
             wait(lambda: pd_record()["snapshot"]["renew_at"] != first["snapshot"]["renew_at"], 12)
             ipv6_traffic()
             print("PASS real ISC DHCP Renew extended the delegated prefix", flush=True)
@@ -636,10 +703,13 @@ def main():
     parser.add_argument("--output", type=Path, default=Path("dist/pppoe-peer"))
     parser.add_argument("--engine-dir", type=Path, default=Path("dist"), help="Normal release engine and source archives")
     parser.add_argument("--dhcp6-server", type=Path, help="Run PPP DHCPv6 PD against this independent ISC dhcpd executable")
+    parser.add_argument("--update-binary-dir", type=Path, help="Exercise signed update/rollback to a different normal build")
     args = parser.parse_args()
     if args.inside:
         peer(args.inside, args.auth, args.dhcp6_server)
         return
+    if args.update_binary_dir and not args.dhcp6_server:
+        parser.error("runtime update trial requires the independent DHCPv6 peer")
     args.output.mkdir(parents=True, exist_ok=True)
     root = [] if os.geteuid() == 0 else ["sudo", "-n"]
     stage = run(root + ["mktemp", "-d", "/tmp/routerd-pppoe.XXXXXX"]).strip()
@@ -658,6 +728,14 @@ def main():
         run(root + ["python3", "-c", "from pathlib import Path;import sys;Path(sys.argv[1]).write_text(sys.argv[2])", stage + "/runtime.json", packed])
         trust = run(root + [stage + "/routerd-bundle", "trust", "--private-key-file", key])
         run(root + ["python3", "-c", "from pathlib import Path;import sys;p=Path(sys.argv[1]);p.write_text(sys.argv[2]);p.chmod(0o600)", stage + "/trust.json", trust])
+        if args.update_binary_dir:
+            candidate = run(root + ["python3", str(project / "scripts/build-runtime-bundle.py"),
+                "--boot", str(project / "images/boot.json"), "--binary-dir", str(args.update_binary_dir.resolve()),
+                "--engine-dir", str(args.engine_dir.resolve()), "--licenses", str(project / "dist/licenses"),
+                "--private-key-file", key, "--sequence", "2", "--output", stage + "/candidate.tar"], timeout=180)
+            if json.loads(candidate)["manifest"]["release_id"] == json.loads(packed)["manifest"]["release_id"]:
+                raise RuntimeError("runtime update trial requires different built release identities")
+            run(root + ["python3", "-c", "from pathlib import Path;import sys;Path(sys.argv[1]).write_text(sys.argv[2])", stage + "/candidate.json", candidate])
         peer_args = []
         if args.dhcp6_server:
             run(root + ["install", "-m", "500", os.path.abspath(args.dhcp6_server), stage + "/dhcpd"])
@@ -666,7 +744,7 @@ def main():
             directory = stage + "/" + auth
             run(root + ["mkdir", "-m", "700", directory])
             with (args.output / (auth + ".log")).open("w") as output:
-                result = subprocess.run(root + ["unshare", "--mount", "--propagation", "private", "python3", "-I", stage + "/peer.py", "--inside", directory, "--auth", auth] + peer_args, stdout=output, stderr=subprocess.STDOUT, timeout=200)
+                result = subprocess.run(root + ["unshare", "--mount", "--propagation", "private", "python3", "-I", stage + "/peer.py", "--inside", directory, "--auth", auth] + peer_args, stdout=output, stderr=subprocess.STDOUT, timeout=480 if args.update_binary_dir else 200)
             packet = subprocess.run(root + ["cat", directory + "/pppoe.pcap"], capture_output=True)
             if packet.returncode == 0:
                 (args.output / (auth + ".pcap")).write_bytes(packet.stdout)

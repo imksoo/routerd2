@@ -1,6 +1,14 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03 10:37 UTC。全体ゴールは継続中。
+更新: 2026-11-03 10:51 UTC。全体ゴールは継続中。
+
+## 通常runtimeの実通信更新・復帰
+
+2026-11-03、通常署名bundleを実control APIでupload/stage/prepareし、実PID 1のrebootと再起動で `b3a0053f24c6 → 30054e56fdf6 → b3a0053f24c6` の更新・明示的rollbackが終了0。独立RP-PPPoE/ISC DHCPv6/Linux LANを使用し、全workerのrelease ID、実health watcherの自動confirm、現在の設定/DUID保持、DNS UDP/TCPと両IP TCP/UDP、high watermark=2の保持を確認した。候補でDNSレコードを追加してから旧runtimeへ戻し、その追加設定の両transportでの実回答も維持した。startup採用時は設計どおりrevisionが進む。正常poweroffとcaptureの上流PD Releaseなしも通過。
+
+再実行は`make check-runtime-update UPDATE_BASELINE_DIR=<以前の通常build> DOCKER='sudo -n docker'`。候補はsource `30054e5`の通常Makefile buildで3実行物のstatic linkを確認した。試験側の固定revision要求を除き、実startup採用記録とrevisionの対応へ修正した。大きなbundleの送信はstreaming uploadを使う。補助`make test-tools`36件、`make race vet`、通常Makefile buildと3実行物のstatic linkが通過。製品Goは変更せず、既存の更新/復旧処理を実peerへ接続した。
+
+製品Goは両buildで同一で、異なる通常release IDの実行物を選択・execする経路の確認。PID namespaceを同じkernel上で再起動した試験であり、kernel/bootloader再起動、停電、失敗候補の自動fallback、異なるABI/実装間の更新、全homert profile/ONU/NIC資格は残る。全構成のappliance NTPには独立kernel/時計の実行機が必要で、共有host時計は変更していない。PVE/QEMUは実行していない。
 
 ## 通常署名bundleの実PID 1・PPP/PD受入
 

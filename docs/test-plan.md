@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 10:37 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 10:51 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 実行原則
 
@@ -124,3 +124,19 @@ PPP routeはleaseではなく接続所有であり、通知停止だけで存続
 接続消滅時の撤去とPD自身の実期限は別々に確認する。ログ/captureは終了後に簡潔な結果へまとめて撤去する。
 
 実行結果: 2026-11-03、基準main `b3a0053` + 本変更の通常build `b3a0053f24c6`で、全25役割・5 engineの署名bundleを実receiverでstage/initializeし、Linux namespaceの実PID 1から起動した。独立RP-PPPoE/ISC DHCPv6/Linux LAN端末とのPAP・CHAPが両方終了0。DNS UDP/TCP、両IP TCP/UDP、自然Renew、server停止によるPD期限切れ/再取得、worker交換/DUID保持/古い通知拒否、confirmed rollback、PD/RA削除復元、PPP MTU変更、手動/control再起動、正常poweroffが通過。captureでMTU変更・手動/control再起動のRA zero-lifetime通知がPADTより前であり、上流Releaseなしと確認した。 これは実kernel/PID 1と独立peerでの配布boot・PPP/PD復旧の受入。ISPのPPPoE、ONU/NIC実機、全homert profileの署名更新/rollback、全34 packageの完成は残る。homert上流候補へPPPoEや追加NICは導入していない。
+
+## 通常runtimeの署名更新・復帰
+
+異なるrelease IDを持つ通常buildの3実行物とoffline publisherをowner専用directoryへ保持し、
+`make check-runtime-update DOCKER='sudo -n docker' UPDATE_BASELINE_DIR=<保持したbuild directory>`を実行する。
+現在の通常buildを候補として同じfactory catalog/engine/source/licenseと署名鍵でsequence1/2を作成する。
+独立RP-PPPoE/ISC/Linux LANの初期通信後、実control APIで候補をupload/stage/prepareし、実PID 1へreboot要求を送る。
+PID namespaceの終了後は同じkernel上でPID 1を再起動し、選択された別entrypoint/全workerのrelease ID、
+実health watcherの自動confirm、元の設定/DUIDとstartup採用によるrevisionの進行、DNSと両IP TCP/UDPを確認する。
+更新後に実設定へDNSレコードを追加して回答を確認し、実rollback APIと同じ再起動経路で以前のruntimeへ戻す。追加した設定・回答・同じ通信とhigh watermark保持を確認する。
+通常終了のpoweroffとPD Releaseなしもcaptureで確認する。update用のowner上限は450秒で、protocolの期限は変更しない。
+これは実kernel/process/store/通信の更新受入であり、kernel再起動・bootloader・停電と全homert profileの資格ではない。
+全構成のappliance NTPはCLOCK_REALTIMEを変更するため、共有時計のnamespaceでは実行せず、独立kernel/時計を持つ許可済み実行機が必要。
+PVE/QEMUは実行しない。終了後は以前のbuild copy、両bundle/store、鍵、capture/logを撤去する。
+
+実行結果: 2026-11-03、通常署名bundleを実control APIでupload/stage/prepareし、実PID 1のrebootと再起動で `b3a0053f24c6 → 30054e56fdf6 → b3a0053f24c6` の更新・明示的rollbackが終了0。独立RP-PPPoE/ISC DHCPv6/Linux LANを使用し、全workerのrelease ID、実health watcherの自動confirm、現在の設定/DUID保持、DNS UDP/TCPと両IP TCP/UDP、high watermark=2の保持を確認した。候補でDNSレコードを追加してから旧runtimeへ戻し、その追加設定の両transportでの実回答も維持した。startup採用時は設計どおりrevisionが進む。正常poweroffとcaptureの上流PD Releaseなしも通過。 製品Goは両buildで同一で、異なる通常release IDの実行物を選択・execする経路の確認。PID namespaceを同じkernel上で再起動した試験であり、kernel/bootloader再起動、停電、失敗候補の自動fallback、異なるABI/実装間の更新、全homert profile/ONU/NIC資格は残る。全構成のappliance NTPには独立kernel/時計の実行機が必要で、共有host時計は変更していない。PVE/QEMUは実行していない。
