@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 02:04 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 02:18 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 判定と実行原則
 
@@ -15,9 +15,9 @@
 
 ## 現在の実通信と限界
 
-28-resource native profile、main由来build `ce1589c1bcab`で4 DS-Liteの実HGW統合gateが終了0。独立した4つのWAN /128 sourceと3 AFTRへの4 tunnelを設定し、各deviceへsocketをbindしたTCP/HTTPS・UDP/DNSが初回と全daemon restart後にすべて往復した。各委譲source宛てのIPv4-in-IPv6 returnを既存captureで確認。LANの既定経路通信、DNS複数上流/learnedDNS/両DoH、BGP、Tailscale subnet/exit、管理・履歴、WAN学習NTP stratum 3も通過した。PD worker SIGKILL/通常再起動後のLAN復旧2.92/4.88秒、full restartから全確認完了44.21秒（DoH probe待ち・NTP測定込み）。2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。hostのens18/ens20 addressとdefault routeの一致を確認し、stage/key/CA mount/peer DB/capture/namespaceを撤去した。
+28-resource native profile、基準main `6c16477` + 2-peer設定、build ID `6c1647776767`で実HGW統合gateが終了0。独立FRR8.4.4/Zebra 2台がLAN広告をRIB/kernelへ取り込み、productのbest pathでLAN 2端末の新規TCP/UDPがNATなしで往復した。各bgpdを1台ずつ停止し、停止側のsession状態・残るpeerのkernel経路と両端末の新規通信を0.52/0.82秒で確認した。通常設定で再加入し、両session/RIB/FIB/通信が復旧。全daemon restart後にも両peerと通信が戻った。4 DS-Liteの各TCP/HTTPS・UDP/DNS、DNS複数上流/learnedDNS/両DoH、Tailscale subnet/exitとidentity、管理・履歴、WAN学習NTP stratum 3も通過。PD worker SIGKILL/通常再起動後のLAN復旧3.46/5.74秒、full restartから全確認完了44.31秒（DoH probe待ち・NTP測定込み）。2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。stage/key/CA mount/peer DB/capture/namespaceは撤去済み。
 
-製品Goコードは`28cb655`から不変。同checkpointの`make check`（Go/Python、Race Detector、vet）を引き継ぎ、今回の`make test-tools`（36件）・通常Makefile build・設定検証が終了0。3実行物は`readelf`でdynamic dependencyなし、nDPI source/license noticesを確認した。補助検査は実通信の代替ではない。
+今回の`make check`（Go/Python、Race Detector、vet）、`make test-tools`（36件）、通常Makefile build、設定検証が終了0。製品Goコードは`28cb655`から不変。3実行物は`readelf`でdynamic dependencyなし、nDPI source/license noticesを確認した。補助検査は実通信の代替ではない。
 
 homert02/03の保存中の実設定は各110 resources。native単体例は28 resourcesであり、resource数の一致を移植目標にはしないが、全意図の受入は未完了。34 work packageもin_progress22/planned12のまま。ens18/ens20はvirtio NICで、NTT ONU直結、対象NIC/実機、arm64、HA、cloud/Kubernetes全体を資格済みとは扱わない。
 
@@ -37,7 +37,7 @@ make check-uplink DOCKER='sudo -n docker' \
 - LAN: BusyBox予約clientとdhcpcdのOUI scope client。取得値をACK/実addressから読む。通常のDADを有効にし、DHCPv6 Information/SLAAC/RDNSS/DNSSLを確認する。
 - DNS: dnsmasqの独立上流を停止・復旧し、両IPのcacheと未取得名のSERVFAIL隔離を確認する。cache確認だけ`dig +nocookie`を使い、毎回異なるCookieを別cache keyにする試験側の不一致を避ける。通常DNSのUDP/TCP、local/reservation A/AAAA、DoH、loopback/管理DNSと履歴API/Webも確認する。
 - 管理: 一時鍵でSSH `show status`、Web履歴とLANからWebへの遮断。SSHは管理address設定前から指定addressで待受し、初回generation=1/restarts=0。再起動後もhost key・履歴を保持する。
-- BGP: 独立FRR8.4.4/ZebraとLAN198.18.0.0/24/peer203.0.113.0/24を相互広告し、両kernelのnext hop、独立FRR受信RIB、LAN 2端末のNATなしTCP/UDPを確認する。旧routerdのexport/connected allowlistをまとめる明示広告、import nextHopRewrite、GR intentを既存engineへ設定する。1 IPv4 peerの試験で、2 peers全体や長時間GR保持/期限は未受入。
+- BGP: 独立FRR8.4.4/ZebraとLAN198.18.0.0/24/peer203.0.113.0/24を相互広告し、両kernelのnext hop、独立FRR受信RIB、LAN 2端末のNATなしTCP/UDPを確認する。旧routerdのexport/connected allowlistをまとめる明示広告、import nextHopRewrite、GR intentを既存engineへ設定する。2 IPv4 peersの単体統合と各peerの停止/再加入を確認済み。長時間GR保持/期限・両peer同時断・既存TCP socketの無損失継続は未受入。
 - NTP: 実WAN学習源へのfreshな同期と独立chronyd2 clientへの応答。host modeのengine/peerは`-x`、clientは`-Q`で時計を変更しない。fallback選択とappliance時計補正は別確認。
 - Tailscale: 独立Headscale/Tailscale1.104.2。LAN IPv4 subnetとexitを広告し、acceptDNS/acceptRoutes=falseを保つ。OS標準CAの引継ぎを確認するため、ownerだけのmountへ元のCAと試験CAを合わせる。hostのtrust storeは変えず、auth key/control DBはprivate `/run`/stageへ置く。
 - Tailscaleのpeer→LANはupstream既定のsubnet SNATを使う。旧routerdも既定値を上書きしていない。LAN→peer IPv6は明示NATでproductのtailnet addressを使い、IPv6 LAN subnetの双方向広告とは区別する。両IP exit HTTPS/UDP DNS、node identityと再起動後の通信も確認する。public controlとcontrol hostname bootstrap DNSは未受入。
@@ -61,6 +61,14 @@ WAN captureは最大8MB、tailnet captureも最大8MBへ制限する。PD captur
 最初の試行ではbackupをDHCPと誤って設定し、ens20からのDiscoverに応答がなく取得待ちで停止した。homertのDHCPv4Clientは0件でbackupは静的IPv4。既存計画にもens20のRA/DHCP無応答が記録されていた。誤ったDHCP設定・追加runner引数を削除し、4 DS-Liteの確認を独立して進める。backupの最小不足setupは、この試験hostで利用できる静的address/gatewayとその上流。未使用addressを推測して割り当てない。hostのens18/ens20 address/default routeは試験前後で照合する。
 
 2回目は既存のDNS復旧確認で、5354の独立dnsmasqを再起動した直後のqueryにconnection refusedが返り停止した。起動関数がprocess生成だけで返っていたため、同じ関数で独立peer自身への実query応答を確認してから返す。固定sleepや製品側retryは追加しない。各portのlogも分ける。DS-Liteの初回確認をDNS障害注入より前へ移し、無関係なfixture起動問題で経路観測が後回しにならないようにする。
+
+## BGP 2 peerの構成と停止・再加入確認
+
+基準main `6c16477`の28-resource native profileに2番目のpeerを設定する。旧routerdの`Controller.desiredPeers`とnativeの`selectedRoute`/kernel projectionを読み、同じBGPPeer配下の各peerへ共通のASN/import/export規則を適用し、実際のbest pathだけをkernelへ渡す動作を確認した。
+
+独立FRR/Zebraを2つのnamespaceへ置き、192.0.2.2/.3で同じ203.0.113.0/24を広告する。product側bgp0と192.0.2.1/24は既存native設定の所有物。2台目はpeer側veth上のmacvlanへ接続し、別process/別kernel FIBで動かす。両FRRがLAN198.18.0.0/24を受信してkernelへ入れたこと、productのbest path経由でLAN 2端末の新規TCP/UDPがNATなしで往復することを確認する。
+
+各peerのbgpdを1台ずつSIGTERM停止し、停止側のsession状態とkernel経路が残るpeerへ収束することを観測して両端末の通信を確認する。停止したbgpdを通常設定で再起動し、両session/RIB/FIB/通信の復旧を確認する。初回にこの停止・復帰を実施し、全daemon再起動後には両peerと通信の再収束を確認する。最初から特定のpeerが選ばれることや、再加入後に元peerへ戻ることは要求しない。GR保持期限・両peer同時断・既存TCP socketの無損失継続はこの試験から主張しない。4 DS-Lite、DNS、Tailscale、管理、NTP、通常Internetを同じnative profileで維持する。実行・capture上限・撤去は現行gate手順を使い、PVE/QEMUと追加PBR調査は行わない。
 
 ## 別に確認済みの範囲
 

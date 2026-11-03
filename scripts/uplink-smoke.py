@@ -350,34 +350,48 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             return process
 
         if config_path is not None:
-            bgp_peer = "r2bgp-" + str(os.getpid())
-            run(["ip", "netns", "add", bgp_peer])
-            namespaces.append(bgp_peer)
-            run(["ip", "-n", bgp_peer, "link", "set", "lo", "up"])
-            run(["ip", "link", "add", "bgp0", "netns", router, "type", "veth", "peer", "name", "underlay0", "netns", bgp_peer])
-            run(["ip", "-n", bgp_peer, "address", "add", "192.0.2.2/24", "dev", "underlay0"])
-            run(["ip", "-n", bgp_peer, "link", "set", "underlay0", "up"])
-            run(["ip", "-n", bgp_peer, "address", "add", "203.0.113.1/24", "dev", "lo"])
-            # /run is this owner's private mount. FRR drops to its installed
-            # user; keep its ordinary public test config outside the key stage.
-            frr_root = Path("/run/routerd-bgp-peer")
-            frr_root.mkdir(mode=0o755)
-            run(["chown", "frr:frr", str(frr_root)])
-            (frr_root / "zebra.conf").write_text("hostname independent\nlog stdout\n")
-            (frr_root / "bgpd.conf").write_text(
-                "hostname independent\nlog stdout\nrouter bgp 64512\n bgp router-id 192.0.2.2\n"
-                " no bgp ebgp-requires-policy\n neighbor 192.0.2.1 remote-as 64500\n"
-                " address-family ipv4 unicast\n  network 203.0.113.0/24\n  neighbor 192.0.2.1 activate\n exit-address-family\n"
-            )
-            zebra_socket = str(frr_root / "zserv.api")
-            start(bgp_peer, ["/usr/lib/frr/zebra", "-u", "frr", "-g", "frr", "-z", zebra_socket,
-                "--vty_socket", str(frr_root), "-i", str(frr_root / "zebra.pid"), "-f", str(frr_root / "zebra.conf"), "--log", "stdout"], "bgp-zebra")
-            wait(lambda: (frr_root / "zserv.api").exists())
-            start(bgp_peer, ["/usr/lib/frr/bgpd", "-S", "-z", zebra_socket, "--vty_socket", str(frr_root),
-                "-i", str(frr_root / "bgpd.pid"), "-f", str(frr_root / "bgpd.conf"), "--log", "stdout"], "bgp-peer")
+            bgp_peers, bgp_processes = [], {}
             echo = runpy.run_path(str(stage / "peer-fixture.py"))
-            start(bgp_peer, ["python3", "-u", "-c", echo["ECHO_SERVER"], "203.0.113.1"], "bgp-echo")
-            wait(lambda: "READY" in (stage / "bgp-echo.log").read_text())
+
+            def start_bgp(namespace, address, root):
+                return start(namespace, ["/usr/lib/frr/bgpd", "-S", "-z", str(root / "zserv.api"),
+                    "--vty_socket", str(root), "-i", str(root / "bgpd.pid"),
+                    "-f", str(root / "bgpd.conf"), "--log", "stdout"], "bgp-peer-" + address)
+
+            for index, address in enumerate(("192.0.2.2", "192.0.2.3")):
+                namespace = "r2bgp" + str(index) + "-" + str(os.getpid())
+                run(["ip", "netns", "add", namespace])
+                namespaces.append(namespace)
+                run(["ip", "-n", namespace, "link", "set", "lo", "up"])
+                if index == 0:
+                    run(["ip", "link", "add", "bgp0", "netns", router, "type", "veth", "peer", "name", "underlay0", "netns", namespace])
+                    peer_interface = "underlay0"
+                else:
+                    peer_interface = "peer0"
+                    run(inside(bgp_peers[0][0], ["ip", "link", "add", "link", "underlay0", "name", peer_interface,
+                        "netns", namespace, "type", "macvlan", "mode", "bridge"]))
+                run(["ip", "-n", namespace, "address", "add", address + "/24", "dev", peer_interface])
+                run(["ip", "-n", namespace, "link", "set", peer_interface, "up"])
+                run(["ip", "-n", namespace, "address", "add", "203.0.113.1/24", "dev", "lo"])
+                # FRR drops privileges. Its public test config lives in the
+                # owner's private /run mount, outside the private key stage.
+                root = Path("/run/routerd-bgp-peer" + str(index))
+                root.mkdir(mode=0o755)
+                run(["chown", "frr:frr", str(root)])
+                (root / "zebra.conf").write_text("hostname independent\nlog stdout\n")
+                (root / "bgpd.conf").write_text(
+                    "hostname independent\nlog stdout\nrouter bgp 64512\n bgp router-id " + address + "\n"
+                    " no bgp ebgp-requires-policy\n neighbor 192.0.2.1 remote-as 64500\n"
+                    " address-family ipv4 unicast\n  network 203.0.113.0/24\n  neighbor 192.0.2.1 activate\n exit-address-family\n"
+                )
+                start(namespace, ["/usr/lib/frr/zebra", "-u", "frr", "-g", "frr", "-z", str(root / "zserv.api"),
+                    "--vty_socket", str(root), "-i", str(root / "zebra.pid"), "-f", str(root / "zebra.conf"), "--log", "stdout"], "bgp-zebra-" + address)
+                wait(lambda: (root / "zserv.api").exists())
+                bgp_processes[address] = start_bgp(namespace, address, root)
+                bgp_peers.append((namespace, address, root))
+                name = "bgp-echo-" + address
+                start(namespace, ["python3", "-u", "-c", echo["ECHO_SERVER"], "203.0.113.1"], name)
+                wait(lambda: "READY" in (stage / (name + ".log")).read_text())
 
         private_dns = start_private_dns(5353, "192.0.2.77")
         if config_path is not None:
@@ -845,20 +859,45 @@ s.close()
             wait(doh_ready)
             print("PASS multiple conditional suffixes, nested source precedence, WAN-learned DNS answers and both independent public DoH upstream probes", flush=True)
 
-        def check_bgp():
-            def paths_ready():
-                inbound = json.loads(run(["ip", "-n", router, "-j", "route", "show", "203.0.113.0/24"]))
-                outbound = json.loads(run(["ip", "-n", bgp_peer, "-j", "route", "show", "198.18.0.0/24"]))
-                return any(r.get("gateway") == "192.0.2.2" and r.get("dev") == "bgp0" for r in inbound) and any(r.get("gateway") == "192.0.2.1" for r in outbound)
+        def bgp_peer_states():
+            snapshot = query("control.sock", "/v1/services/service.routing").get("snapshot", {})
+            return {p["address"]: p["state"] for p in snapshot.get("peers", [])}
 
-            wait(paths_ready)
-            peer_view = json.loads(run(inside(bgp_peer, ["vtysh", "--vty_socket", str(frr_root), "-d", "bgpd", "-c", "show bgp ipv4 unicast 198.18.0.0/24 json"])))
-            assert peer_view.get("paths"), "independent FRR did not receive the LAN advertisement"
+        def selected_bgp_peer():
+            paths = json.loads(run(["ip", "-n", router, "-j", "route", "show", "203.0.113.0/24"]))
+            return next((r.get("gateway", "") for r in paths if r.get("dev") == "bgp0"), "")
+
+        def bgp_traffic():
             for namespace, interface in ((client, "client0"), (automatic, "client1")):
                 addresses = json.loads(run(["ip", "-n", namespace, "-j", "-4", "address", "show", "dev", interface]))
                 source = next(a["local"] for link in addresses for a in link["addr_info"] if a["local"] != dns_peer_address)
                 run(inside(namespace, ["python3", "-c", echo["ECHO_CLIENT"], "203.0.113.1", source, source]))
-            print("PASS native BGP exchanged routes with independent FRR/Zebra; both kernels installed peer next hops and both LAN clients completed TCP/UDP without NAT", flush=True)
+
+        def check_bgp():
+            wait(lambda: bgp_peer_states() == {p[1]: "SESSION_STATE_ESTABLISHED" for p in bgp_peers})
+            wait(lambda: selected_bgp_peer() in bgp_processes)
+            for namespace, address, root in bgp_peers:
+                wait(lambda: any(r.get("gateway") == "192.0.2.1" for r in json.loads(run(["ip", "-n", namespace, "-j", "route", "show", "198.18.0.0/24"]))))
+                peer_view = json.loads(run(inside(namespace, ["vtysh", "--vty_socket", str(root), "-d", "bgpd", "-c", "show bgp ipv4 unicast 198.18.0.0/24 json"])))
+                assert peer_view.get("paths"), "independent FRR did not receive the LAN advertisement: " + address
+            bgp_traffic()
+            print("PASS two independent FRR peers received LAN routes; BGP selected a learned kernel path and both LAN clients completed TCP/UDP without NAT", flush=True)
+
+        def check_bgp_peer_recovery():
+            for namespace, address, root in bgp_peers:
+                other = next(p[1] for p in bgp_peers if p[1] != address)
+                stopped_at = time.monotonic()
+                bgp_processes[address].terminate()
+                bgp_processes[address].wait(timeout=5)
+                def remaining_ready():
+                    states = bgp_peer_states()
+                    return states.get(address) != "SESSION_STATE_ESTABLISHED" and states.get(other) == "SESSION_STATE_ESTABLISHED" and selected_bgp_peer() == other
+                wait(remaining_ready, 30)
+                bgp_traffic()
+                print("PASS BGP peer stopped; remaining peer carried both clients' TCP/UDP; seconds", round(time.monotonic() - stopped_at, 2), flush=True)
+                bgp_processes[address] = start_bgp(namespace, address, root)
+                check_bgp()
+            print("PASS each independent BGP peer stopped and rejoined with routes and client traffic restored", flush=True)
 
         def check_management():
             for namespace, server in ((router, "127.0.0.1"), (client, "198.19.0.1")):
@@ -899,6 +938,7 @@ s.close()
             check_dns_sources()
             check_management()
             check_bgp()
+            check_bgp_peer_recovery()
             check_time()
 
         start(router, ["ip", "-ts", "monitor", "route"], "router-routes")
@@ -1213,7 +1253,7 @@ s.close()
         )
     except Exception:
         try:
-            for name in ("automatic-client-events", "automatic-resolv.conf", "router-routes.log", "bgp-peer.log", "bgp-zebra.log"):
+            for name in ("automatic-client-events", "automatic-resolv.conf", "router-routes.log", *(p.name for p in stage.glob("bgp-peer-*.log")), *(p.name for p in stage.glob("bgp-zebra-*.log"))):
                 path = stage / name
                 if path.exists():
                     print("Failed uplink", name, "\n".join(path.read_text(errors="replace").splitlines()[-25:]), flush=True)
