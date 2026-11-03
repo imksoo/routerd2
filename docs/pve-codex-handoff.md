@@ -1,6 +1,8 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03 07:52 UTC。全体ゴールは継続中。
+更新: 2026-11-03 08:14 UTC。全体ゴールは継続中。
+
+2026-11-03、製品code `df49035`・通常build `df490351c3ff`で `make check-doh-outage` が終了0。実Cloudflare/GoogleへTLS通信し、片側ずつTCP443を遮断して各16packetのdropとDown、解除後の両Healthyを確認した。cache無効の独立dig端末は全段階でUDP/TCPのNOERROR/A回答を取得。Cloudflare停止直後の初回回答1.043秒、以後の確認回答0.025〜0.063秒。新DNS node/client/process/stageは撤去済み。元の38-resource自然PD試験への障害注入は行っていない。公開DoH IPv4 transportの独立受入であり、DS-Lite/HA全体の障害受入には転用しない。 再実行条件は[試験計画](test-plan.md#公開dohの片側停止復旧)に記載。Go製品codeは変更していない。今回の補助チェック `make test-tools` は36件通過。
 
 実行継続中（2026-11-03 07:52 UTC確認）: コミット済み`df49035`の通常build `df490351c3ff`、単体38-resource profileで`--seconds 0 --full-restart --tailnet`を07:42 UTCに起動した。初期機能一式、31通信roundまで通過し、28 worker全てgeneration1/Ready=trueを確認。実PD T1は09:42:40 UTCの予定で、まだ更新・最終再起動までの完了結果ではない。ownerの最小stage/log/captureは実行終了まで保持し、終了後に結果を確認して撤去する。待機中も独立する残作業を進める。
 

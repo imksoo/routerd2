@@ -85,6 +85,7 @@ help:
 	  'make check-ra-aftr     Verify learned RA/DNS to DS-Lite LAN forwarding and expiry' \
 	  'make check-ra-route-refresh Verify routed AFTR TCP/UDP during independent RA renewal' \
 	  'make check-uplink UPLINK_INTERFACE=... (UPLINK_CONFIG=... or UPLINK_AFTR=...) [UPLINK_SECONDS=0 waits for live PD renewal]  Use an explicit local uplink with a private MAC/LAN' \
+	  'make check-doh-outage DOH_OWNER_PID=... DOH_PARENT_NAMESPACE=...  Check public DoH outages on a separate node in a live uplink fixture' \
 	  'make check-dhcp-relay  Verify DHCP peers, fragmentation and VRF isolation' \
 	  'make licenses          Collect dependency licenses and their manifest' \
 	  'make build             Build the native commands for the current platform' \
@@ -257,6 +258,11 @@ check-uplink: build dnsmasq-engine $(if $(UPLINK_CONFIG),chrony-engine) $(if $(f
 	@test -n '$(UPLINK_INTERFACE)' -a \( -n '$(UPLINK_CONFIG)' -o -n '$(UPLINK_AFTR)' \) || { printf '%s\n' 'UPLINK_INTERFACE and either UPLINK_CONFIG or UPLINK_AFTR must select the authorized local access network'; exit 1; }
 	@if test -n '$(UPLINK_CONFIG)'; then test -z '$(UPLINK_AFTR)' -a -z '$(UPLINK_DNS_UPSTREAM)' || { printf '%s\n' 'UPLINK_CONFIG supplies its own AFTR, DNS and features'; exit 1; }; $(RELEASE_BUILT_DIR)/routerd config validate '$(UPLINK_CONFIG)'; fi
 	$(PYTHON) scripts/uplink-smoke.py --uplink '$(UPLINK_INTERFACE)' $(if $(UPLINK_CONFIG),--config '$(UPLINK_CONFIG)',--aftr '$(UPLINK_AFTR)') --seconds '$(UPLINK_SECONDS)' $(if $(UPLINK_CONFIG),,--dns-upstream '$(UPLINK_DNS_UPSTREAM)') --wan-mac '$(UPLINK_WAN_MAC)' $(if $(UPLINK_STATE_DIR),--state-dir '$(UPLINK_STATE_DIR)') $(if $(filter 1,$(UPLINK_WAN_OUTAGE)),--wan-outage) $(if $(filter 1,$(UPLINK_FULL_RESTART)),--full-restart) $(if $(filter 1,$(UPLINK_TAILNET)),--tailnet)
+
+.PHONY: check-doh-outage
+check-doh-outage:
+	@test -n '$(DOH_OWNER_PID)' -a -n '$(DOH_PARENT_NAMESPACE)' || { printf '%s\n' 'Select the live uplink fixture owner PID and client namespace'; exit 1; }
+	sudo -n nsenter --mount=/proc/$(DOH_OWNER_PID)/ns/mnt unshare --mount --propagation private $(PYTHON) '$(CURDIR)/scripts/doh-outage-peer.py' --parent '$(DOH_PARENT_NAMESPACE)' --bin-dir '$(abspath $(RELEASE_BUILT_DIR))'
 
 .PHONY: check-uplink-ha
 check-uplink-ha: build dnsmasq-engine conntrack-engine chrony-engine tailscale-engine tailscale-peers

@@ -11197,25 +11197,25 @@
     "physical_target_profile": "homert02/03 are identified PVE guests with4vCPU/4GiB, three VirtIO NICs and VirtIO/SCSI disks. Matching isolated PVE product boot/recovery was exercised; actual WAN/LAN attachment, clean installation from a preconverted native configuration, measured load and any additional hardware/architecture qualification remain open.",
     "validation_reporting": "Use docs/test-plan.md for the concise current gate state. Detailed historical checkpoint ledgers are not acceptance authority; keep only current result, limits and repeatable procedure. Never claim unrun gates or partial homert profiles complete.",
     "current_acceptance": {
-      "as_of_utc": "2026-11-03T03:40:19Z",
-      "product_code_checkpoint": "b03debf1598204125f2f00363fd7ca036e3ad26e",
+      "as_of_utc": "2026-11-03T08:13:30Z",
+      "product_code_checkpoint": "df490351c3ffb40f0d24ce3d7ba86f9c08e12351",
       "homert_source": "User-provided read-only working copies at chatty.lain.local:~/homert02; the current homert02 and homert03 files each contain 110 resources with matching kind counts. Do not publish configuration values or secrets.",
       "completed_gates": [
         "The product code checkpoint passed make check including Go/Python checks, race detector and vet.",
-        "The isolated Alpine/PID1 PVE single-node networking and signed update/rollback gates recorded in docs/test-plan.md passed.",
-        "The actual supervisor/control/network/Health two-WAN PBR failover/recovery gate with independent peers, TCP/UDP and packet capture recorded in docs/test-plan.md passed."
+        "Earlier checkpoints passed isolated Alpine/PID1 PVE single-node networking and signed update/rollback gates; these are not acceptance of the current full profile. PVE/QEMU is excluded from current work.",
+        "Earlier checkpoints passed actual supervisor/control/network/Health two-WAN PBR failover/recovery with independent peers, TCP/UDP and captures. This is not qualification of the latest full homert profile; no additional PBR investigation is planned."
       ],
       "active_actual_hgw_run": {
-        "as_of_utc": "2026-11-03T03:25:30Z",
-        "build_identity": "b03debf15982",
-        "profile_and_runner_commit": "5861b7ef38a60f79372db94f8ee79a58e5ca32e6",
-        "command": "python3 scripts/uplink-smoke.py --uplink ens18 --config examples/single-router-dslite-dhcp-dns.yaml --seconds 7800 --wan-mac 02:72:6f:75:74:03 --full-restart --tailnet",
-        "status": "running; owner process and live PD bound/IAID1 verified; natural T1 and final exit status pending",
-        "local_progress_log": "/tmp/routerd2-natural-uplink.log",
-        "ownership": "Protect the active private stage, binaries, keys, state, namespace and bounded captures until this run finishes. Revalidate the actual process before treating it as stopped; do not duplicate the same MAC/uplink trial. Remove raw data after acceptance is summarized.",
-        "limit": "not full homert, HA, continuous existing sockets, direct ONU, target physical NIC or hardware qualification"
+        "as_of_utc": "2026-11-03T08:13:30Z",
+        "build_identity": "df490351c3ff",
+        "product_code_checkpoint": "df490351c3ffb40f0d24ce3d7ba86f9c08e12351",
+        "command": "python3 scripts/uplink-smoke.py --uplink ens18 --config examples/single-router-dslite-dhcp-dns.yaml --seconds 0 --wan-mac 02:72:6f:75:74:03 --full-restart --tailnet",
+        "status": "Live owner PID1120320 verified. Natural PD T1 at 2026-11-03T09:42:40Z and final restart/exit remain pending. Latest periodic observation: ready=true, all28 worker generations1.",
+        "local_progress_log": "/tmp/routerd2-aftr-natural.log",
+        "ownership": "Protect the live owner and its private stage until terminal. Independent DoH outage checks use a separate product node and do not change this router or its packet rules. Remove detailed output after concise results are recorded.",
+        "limit": "Not full homert, HA long-duration, continuous existing sockets, direct ONU or target hardware qualification."
       },
-      "current_changes": "38-resource native profile、基準main b03debf + LAN配布設定、build ID b03debf15982で実HGW統合gateが終了0。通常・予約・OUI・特定MACの独立端末5台で、通常gateway/DNS .1と特別gateway/DNS .253を実ACKから設定し、公開HTTPS/UDP DNSが往復した。通常/予約端末はNTP2アドレスとdomain-searchも取得。実Releaseで3日分の保持期限が保存され、端末IP撤去後も別MACの同アドレス要求には別leaseを配り、元MACには保持アドレスを再配布した。全daemon restart後も特別端末3台のRenew/ACK・通信とfingerprint APIが復旧した。LAN RAのhigh優先度/MTU1500/valid最大7200秒/preferred最大3600秒を実packetで確認。上流選択、4 DS-Lite、DNS/DoH、nDPI/計数/SNI、fresh syslog/OTLP、BGP/NTP/Tailscaleも通過。PD worker SIGKILL/通常再起動後の復旧2.96/5.85秒、全daemon restartから全確認102.76秒（60秒抑制と30秒sampling等を含む）。2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。自然T1・既存socket継続・3日/7日経過削除・全homert/HA/実機資格は今回の範囲外。",
+      "current_changes": "df49035 retains BGP/VRRP original request deadlines, gives AFTR input/publication one owner, and makes supervisor status requests run on its state owner. make check/Race/vet and normal static build passed. Final paired47-resource actual-HGW gate passed both handoffs; no AFTR409/BGP/VRRP timeout observed in inspected stop reasons. Long natural-PD stability remains running.",
       "open_work_packages": 34,
       "unqualified_profiles": [
         "homert-single full input",
@@ -11332,6 +11332,14 @@
         "peers": "Actual HGW port49153, BusyBox/dhcpcd LAN clients and independent Headscale/Tailscale/FRR/DNS/NTP/Collector",
         "limit": "BGP reached generation17; not stable all-service qualification, latest RA/SNAT/HA full-profile qualification or physical ONU/NIC qualification.",
         "cleanup": "Owned processes/namespaces/private stage removed."
+      },
+      "public_doh_outage": {
+        "as_of_utc": "2026-11-03T08:14:39Z",
+        "product_code_checkpoint": "df490351c3ffb40f0d24ce3d7ba86f9c08e12351",
+        "build_identity": "df490351c3ff",
+        "command": "make check-doh-outage DOH_OWNER_PID=<live-owner> DOH_PARENT_NAMESPACE=<live-client>",
+        "result": "Exit0. Separate actual product DNS node, independent dig client, real public Cloudflare/Google. Cache disabled. Each IPv4 TCP443 endpoint blocked separately:16 dropped packets each; target Down, alternate Healthy; UDP/TCP NOERROR/A answers persisted. Both Healthy after each restore. Initial failover response1.043s; subsequent measured responses0.025..0.063s. Processes/namespaces/private stage removed.",
+        "limit": "Separate IPv4-transport DNS node using the existing independent gateway. Not all private suffixes, both-upstream outage, IPv6 transport or complete DS-Lite/HA-profile qualification."
       }
     }
   },
