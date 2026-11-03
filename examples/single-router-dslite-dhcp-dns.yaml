@@ -59,6 +59,7 @@ resources:
         - {from: tailscale0, to: dslite0}
         - {from: tailscale0, to: wan0}
         - {from: lan0, to: tailscale0}
+        - {from: lan0, to: mgmt0}
         - {from: lan0, to: bgp0}
         - {from: bgp0, to: lan0}
         - {from: lan0, to: lan0}
@@ -85,6 +86,13 @@ resources:
         - {from: lan0, to: dslite0}
   - id: lan-dslite-nat
     nat:
+      - type: snat
+        address: 198.19.0.1
+        match: {family: 4, source: 198.18.0.0/24, destination: 198.19.0.0/24, out_interface: mgmt0}
+      # Single-WAN mode uses its current DHCP address. Set the local subnet
+      # to the attached HGW's network before deployment.
+      - type: masquerade
+        match: {family: 4, source: 198.18.0.0/24, destination: 192.168.1.0/24, out_interface: wan0}
       - type: snat
         address: 198.18.0.1
         match: {family: 4, source: 198.18.0.0/24, in_interface: lan0, out_interface: lan0}
@@ -413,7 +421,7 @@ resources:
       in_interface: lan0
       hysteresis_millis: 60000
       sources: [198.18.0.0/24]
-      exclude_destinations: [198.18.0.0/24, 198.19.0.0/24, 192.0.2.0/24, 203.0.113.0/24, 100.64.0.0/10]
+      exclude_destinations: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 198.18.0.0/24, 198.19.0.0/24, 192.0.2.0/24, 203.0.113.0/24, 100.64.0.0/10]
       groups:
         - name: dslite-pd-balanced
           weight: 120

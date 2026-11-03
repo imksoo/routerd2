@@ -1,5 +1,7 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
+保存homertのLAN→管理側/WAN内機器の転送・送信元NATを単体設定へ接続し、独立peerのTCP/UDPと観測sourceが起動時・全daemon再起動後に通過した。基準main `96d0112`、通常build `96d01127742c`。保存中の個別静的経路とblackholeの統合は次に進める。詳細は[引き継ぎ](pve-codex-handoff.md)を参照する。
+
 保存homertの公開DNS/NTP名前集合とLocalServiceRedirectを単体native設定へ接続し、両端末の両IP DNS/IPv4 NTPと全daemon再起動後の再確認が終了0。基準main `efe9845`、通常build `efe984588553`。詳細・再実行・残作業は[引き継ぎ](pve-codex-handoff.md)と[試験計画](test-plan.md)を参照する。
 
 2026-11-03、基準main `fa246ed` + 部分DNS失敗の準備判定修正、通常Makefile build `fa246ede2a5e`で実daemon/独立dnsmasqのlocal redirect手順が終了0（外側5.12秒）。旧routerdのresolveIPAddressSetは成功した名前のアドレスを使い、独立した失敗をstatusへ残す。native networkも部分membershipを適用していたが、coordinatorのCheckReadyが一件の解決errorで準備/確認を拒否していた。修正前は正常回答とREFUSEDの混在でhealth準備が10秒後も失敗することを再現。修正後はusable membershipを準備済みとし、REFUSEDをnetwork statusへ残したまま、両IP UDP/TCPのローカル転送、選外宛先のWAN転送、実DNS更新による旧転送先の解除/新転送先の適用、confirmed commit/confirm、daemon再起動、転送設定撤去を確認した。WAN captureで対象DNSの漏出なしも確認した。 これは実Linux kernel/実product processと独立dnsmasqの通信であり、実HGW全profileへ保存homertの2つのIPAddressSetとDNS/NTP LocalServiceRedirectを接続した受入は次の残作業。NTP redirect・HA・物理NIC資格には数えない。元fixtureに欠けていたICMPv6入力許可とLAN→WAN転送を明示し、確認応答は別の空structへdecodeするよう修正した。製品側に暗黙許可・DAD回避・待機延長は追加していない。通常build・3実行物static link、make race vetが通過。

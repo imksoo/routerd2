@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 12:28 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 12:43 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 実行原則
 
@@ -196,3 +196,11 @@ DoH確認は固定provider名ではなく、実configに設定されたHTTPS上�
 同じ転送確認をdaemon再起動後にも行う。短時間の巡回は自然PD/DHCPv4更新や物理NIC・ONU資格に数えず、HA用設定への統合は別に受け入れる。
 
 2026-11-03の実行結果: 基準main `efe9845` + native設定/fixture変更、通常build `efe984588553`（製品Go不変）で、保存homertの公開DNS/NTPの名前集合とLocalServiceRedirectを組み込んだ単体39-resource実HGW手順が終了0。両LAN端末から、実membershipの公開DNSアドレスを直接指定しても両IP UDP/TCPでローカルzoneの回答を得た。独立chronydの公開NTP宛て照会とconntrackのローカル転送も、保存設定と同じIPv4 allow範囲で確認。両方を全daemon再起動後にも再確認した。 全daemon後の全項目再確認111.77秒は転送断時間ではない。20秒の2巡回・自然PD更新0回。詳細と未受入範囲は[引き継ぎ](pve-codex-handoff.md)を参照する。
+
+## LANから管理側・WAN内機器への送信元NAT
+
+単体native例は、保存homertのRFC1918宛先除外とLAN→管理側forward/SNATを設定する。WAN内SNATは単体の現用DHCPアドレスを使うmasqueradeで表し、宛先subnetは接続するHGWのネットワークへ設定する。HAのWAN VIPを使う固定SNATとは範囲を分ける。
+前項と同じ`make check-uplink`（`UPLINK_FULL_RESTART=1`）で、既存管理peerと既存WAN gateway namespaceの実DHCPアドレスに汎用TCP/UDP peerを起動する。管理peerのnamespaceとは別の自動LAN clientから通信し、peerがOS socketから得た送信元を、設定した管理アドレス/実WAN leaseと比較する。管理peer自身からの自己宛て通信で合格にしない。
+通常の管理SSH/WebとLANからの管理console拒否、公開Internet/DNS/NTP、設定rollbackを維持し、全daemon再起動後にも両peerのTCP/UDP・観測sourceを再確認する。物理HGWの管理UIやHAのWAN VIP切替を検証したことにはしない。新規WAN/NIC・host routeは追加しない。
+
+2026-11-03: 上記の単体39-resource手順は終了0。通常build `96d01127742c`で、管理側/実WAN内peerへのTCP/UDPとpeer観測sourceをcold start・全daemon再起動後に確認。全項目再確認111.47秒は転送断時間ではない。詳細・限界は[引き継ぎ](pve-codex-handoff.md)を参照する。

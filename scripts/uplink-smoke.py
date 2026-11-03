@@ -383,6 +383,11 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         if config_path is not None:
             bgp_peers, bgp_processes = [], {}
             echo = runpy.run_path(str(stage / "peer-fixture.py"))
+            gateway_addresses = json.loads(run(["ip", "-n", gateway, "-j", "-4", "address", "show", "dev", "gateway-wan"]))
+            wan_local_peer = next(a["local"] for link in gateway_addresses for a in link["addr_info"] if a["family"] == "inet")
+            for namespace, address, name in ((client, "198.19.0.2", "management-device"), (gateway, wan_local_peer, "wan-local-device")):
+                start(namespace, ["python3", "-u", "-c", echo["ECHO_SERVER"], address], name)
+                wait(lambda name=name: "READY" in (stage / (name + ".log")).read_text())
 
             def start_bgp(namespace, address, root):
                 return start(namespace, ["/usr/lib/frr/bgpd", "-S", "-z", str(root / "zserv.api"),
@@ -1051,6 +1056,14 @@ print(*s.getsockname())
             assert denied.returncode != 0, "management console was reachable through the LAN interface"
             print("PASS loopback/management DNS, cache during upstream outage, persistent query history, SSH host identity and Web access restricted to management interface", flush=True)
 
+        def check_local_devices():
+            wan = query("control.sock", "/v1/services/service.wan4")["snapshot"]
+            for destination, translated in (("198.19.0.2", "198.19.0.1"), (wan_local_peer, wan["currentAddress"])):
+                # The other LAN namespace owns the management peer. Use the
+                # automatic client so packets actually traverse the router.
+                run(inside(automatic, ["python3", "-c", echo["ECHO_CLIENT"], destination, translated]))
+            print("PASS independent LAN client reached management and WAN-local devices over TCP/UDP; peers observed the configured management and current WAN source addresses", flush=True)
+
         special_clients = []
         def start_special_client(index, mac, requested=""):
             namespace = "r2special" + str(index) + "-" + str(os.getpid())
@@ -1192,6 +1205,7 @@ print(*s.getsockname())
             check_dns_sources()
             check_lan_distribution()
             check_management()
+            check_local_devices()
             check_bgp()
             check_bgp_peer_recovery()
             check_operations()
@@ -1482,6 +1496,7 @@ print(*s.getsockname())
             if config_path is not None:
                 check_dns_sources()
                 check_management()
+                check_local_devices()
                 check_bgp()
                 check_dslite_paths()
                 wait(lambda: all(query("control.sock", "/v1/services/service.health-dslite" + str(i)).get("snapshot", {}).get("active", False) for i in range(3)))
@@ -1493,7 +1508,7 @@ print(*s.getsockname())
                     wait(lambda: len(events.read_text().splitlines()) > count)
                 check_special_clients()
                 check_time()
-            check_local_redirects()
+                check_local_redirects()
             print("PASS actual HGW full daemon restart retained identity and restored both clients; seconds", round(time.monotonic() - restart_at, 2), flush=True)
             if tailnet:
                 wait(lambda: tailnet_observation().get("backend_state") == "Running")

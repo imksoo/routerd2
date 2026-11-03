@@ -1,6 +1,12 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03 12:28 UTC。全体ゴールは継続中。
+更新: 2026-11-03 12:43 UTC。全体ゴールは継続中。
+
+## 管理側・WAN内機器への単体転送/NAT
+
+2026-11-03、基準main `96d0112` + native設定/fixture変更、通常build `96d01127742c`（製品Go不変）で、LAN→管理側/WAN内機器の単体39-resource実HGW手順が終了0。保存homertのRFC1918宛先除外、管理側forward/SNATを単体例へ接続し、単体WAN内宛ては現用DHCPアドレスを使うmasqueradeで表した。既存管理peerと既存WAN gateway namespaceの実DHCPアドレスへ、別namespaceの自動LAN clientからTCP/UDPで通信し、peerがsocketで観測した送信元が管理アドレス/実WAN leaseであることを確認。全daemon再起動後にも同じ通信が通過した。管理peer自身の自己宛て通信は使っていない。
+
+管理SSH/Web、LANからの管理console拒否、公開DNS/NTP転送・Internet、DHCP/BGP/運用記録/Tailscaleも通過。confirmed rollback期限切れ30.23秒/control再起動5.68秒、PD SIGKILL2.27秒/通常再起動6.00秒、全daemon後の全項目再確認111.47秒。全項目時間は転送断時間ではない。20秒の2巡回・自然PD更新0回。通常build・3実行物static link、make test-tools race vet・py_compileが通過。これは実HGW接続下の隔離Linux peerでのNAT受入であり、物理HGW管理UI、HAのWAN VIPによる固定SNAT・全homert intentの受入ではない。 再実行は[試験計画](test-plan.md)の「LANから管理側・WAN内機器への送信元NAT」。既存peer/インターフェースを使い、host route・PVE/QEMU・追加PBR調査は増やしていない。
 
 ## 保存homertのDNS/NTP転送を単体構成へ接続
 
