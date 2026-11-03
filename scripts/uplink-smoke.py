@@ -975,6 +975,14 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
             assert " Out " not in observed, observed
             print("PASS configured host/private/on-link routes carried TCP/UDP with peer-observed sources; blackhole TCP/UDP entered LAN and never left the router", flush=True)
 
+        def check_reverse_dns():
+            for server in (lease[3], str(router_dns)):
+                for transport in ("+notcp", "+tcp"):
+                    for address, name in (("198.18.0.1", "router"), ("198.18.0.11", "storage")):
+                        answer = run(inside(client, ["dig", "@" + server, "-x", address, "+short", "+time=3", "+tries=1", transport]))
+                        assert answer.strip().rstrip(".").lower() == name + "." + lan_domain, (address, answer)
+            print("PASS static and real DHCP-derived PTR over IPv4/IPv6 UDP/TCP", flush=True)
+
         wait_dns()
         if config_path is not None:
             for name, expected in (("router." + lan_domain, "198.18.0.1"), ("storage." + lan_domain, "198.18.0.11")):
@@ -982,6 +990,7 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
                 assert answer.strip() == expected, f"LAN DNS {name} resolved to {answer.strip()!r}, expected configured address {expected}"
             answer = run(inside(client, ["dig", "-6", "@" + str(router_dns), "router." + lan_domain, "AAAA", "+short", "+time=3", "+tries=1"]))
             assert ipaddress.IPv6Address(answer.strip()) == router_dns, "LAN DNS router AAAA does not match the router's observed delegated address: " + answer
+            check_reverse_dns()
             print("PASS independent LAN client resolved router IPv4/IPv6 and its DHCP reservation through routerd2 DNS", flush=True)
             check_local_devices()
             check_static_routes()
@@ -1566,6 +1575,7 @@ print(*s.getsockname())
             if config_path is not None:
                 check_dns_sources()
                 check_management()
+                check_reverse_dns()
                 check_local_devices()
                 check_static_routes()
                 check_bgp()
@@ -1586,7 +1596,7 @@ print(*s.getsockname())
                 check_tailnet()
                 print("PASS combined WAN/PD/LAN/tailnet whole-daemon restart retained identity and restored bidirectional TCP/UDP and Internet exit", flush=True)
         if retention_check:
-            print(run(["python3", "-I", str(stage / "retention-check.py"), "--stage", str(stage), "--router", router, "--client", client], timeout=180), end="", flush=True)
+            print(run(["python3", "-I", str(stage / "retention-check.py"), "--stage", str(stage), "--router", router, "--client", client, "--archive-log", str(stage / "received-syslog.jsonl")], timeout=180), end="", flush=True)
         returned = any(
             run(
                 [

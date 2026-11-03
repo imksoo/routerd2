@@ -1,6 +1,18 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03 15:18 UTC。全体ゴールは継続中。
+更新: 2026-11-03 15:48 UTC。全体ゴールは継続中。
+
+## ローカル逆引きと保持障害の接続
+
+保存homertのlocal-zoneのmatchと旧routerdのsource選択→zone回答を読み直し、native単体/二台設定へ通常LANの逆引きsuffixを追加した。既存のPTR/実lease処理を使い、製品Goの別経路や受信制限は加えていない。上流候補も変更していない。保存設定の順序はDS-Lite群120→別DS-Lite80→既存LAN静的gateway60、PPPoE候補なし、ens20は管理用。
+
+通常Makefile build `7649acd44e52`、単体45-resource実HGW手順が終了0。独立端末から静的名と実DHCP名のPTRを両IP UDP/TCPで確認し、全daemon再起動後の通常通信・identity保持も通過した。全項目再確認111.63秒は転送断時間ではない。その後のarchive障害中もDNS/両IP HTTPSと元の4 datasetを保持し、復旧後はDNS10件・終了flow10件・firewall4件・fingerprint5件の元ID/時刻を受信して期限削除、元の保持intentと通信へ復帰した。2巡回/自然PD更新0回。実行snapshotにはPTRの再起動後再照会がなく、その項目は未実行。
+
+再実行手順と限界は[試験計画](test-plan.md)末尾。共有archive確認は送信先logを明示引数で受け取り、二台でも新しい現用機が実取得した記録を使う。期限削除後の管理履歴は新しい実queryで確認する。設定確定前には同じ候補revisionの実healthyを待ち、確認期限30秒と製品の拒否条件を維持する。先行二台実行は候補通信・期限切れ復元後、状態劣化によるconfirm422で終了し、同時刻にevent保存deadline超過を観測した。DNS回答だけを確定可能状態の証明にせず、同じ構成の最終再実行は終了0。
+
+2026-11-03、通常build `7649acd44e52`（製品Go不変）、各54-resource実HGW二台手順が終了0。両方向で静的/実DHCP PTRの両IP UDP/TCP、設定期限切れ復元/confirm、通常通信・identity保持、archive障害/復旧と元の保持intentへの復帰を確認した。元ID/時刻の受信と期限削除はbでDNS/終了flow/firewall/fingerprint=10/10/4/3件、aで10/10/8/4件。公開TCP500応答/最大応答間隔15.77秒、UDP543応答/17期限超過/最大10.52秒、固定WAN TCP543応答/最大13.60秒、UDP549応答/11期限超過/最大9.51秒（UDP返信予算1秒）。TCPはいずれもSYN1回、同一socket/NAT tupleを維持。全項目128.03/82.84秒はNTP/保持確認を含み転送断時間ではない。 短時間のLinux namespace/kernel・実HGW・独立peerでの受入であり、全110-resource intent、全private DNS、長時間安定性、物理ONU/NIC・性能と全34 packageの完成は残る。
+
+補助検査は`make test-tools race vet`、`make fmt-check`、通常Makefile build/3実行物static linkと単体/二台設定検証が通過した。製品Goは変更せず、逆引きは既存の通信実装を設定へ正しく接続した。
 
 ## 固定共有WAN IPv4と固定SNAT
 

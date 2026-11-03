@@ -1561,7 +1561,8 @@
         "query_retention": "2026-10-30 history-native84 reuses old logstore.ApplyRetention in the resolver owner. Actual product plus independent DNS UDP/TCP client, routed UDP and UDP archive passed natural expiry, original-column archive, vacuum, unreachable archive/no deletion, recovery, resolver restart and policy removal. No reliable UDP acknowledgement or other history dataset acceptance. Related Race/vet/static builds/signed-six-ELF passed.",
         "native86_integrated": "Reused routerd logstore.RecordBatch/ApplyRetention for Firewall history with collection independent of storage; old OTLP LogSink.Emit was inactive so Telemetry remains the only sender. Final route-read-flat-native86 real independent IPv4/IPv6 clients verified records/TCP flags, restart persistence, archive outage retention and recovery; independent OTLP collector verified outage/recovery/removal and no duplicate delivery, parallel UDP69 replies/0 failures. Not metrics/traces/DPI or full-profile physical qualification.",
         "current_hgw_paired47": "2026-11-03 baseline c144132 + current patch, build c14413250ebd: paired47-resource real HGW gate exited0. Initial owner and both handoff owners produced fresh native nDPI bidirectional counters/TLS SNI, actual firewall drop history, node-labelled syslog and official Collector OTLP logs/metrics/traces. Original record times exclude older results and the other node. Observations followed real public HTTPS/DNS and management rejection. Normal30s sampling retained; no lossless delivery claim. Long-run, retention/archive and full34-package acceptance remain incomplete. See docs/pve-codex-handoff.md."
-      }
+      },
+      "paired_profile_archive_acceptance": "2026-11-03 build7649acd44e52, paired54 real-HGW profiles exited0. Each promoted owner retained actual DNS/ended-flow/firewall/fingerprint rows during archive-only unreachability, recovered original IDs/timestamps before expiry and restored original retention intent with communication. Rows b10/10/4/3 and a10/10/8/4. Persistent public/fixed-WAN TCP/UDP survived both handoffs/config/retention edits. No seven-day/lossless archive/all-signal/full-site qualification."
     },
     {
       "id": "EXT-01",
@@ -11247,14 +11248,14 @@
     "physical_target_profile": "homert02/03 are identified PVE guests with4vCPU/4GiB, three VirtIO NICs and VirtIO/SCSI disks. Matching isolated PVE product boot/recovery was exercised; actual WAN/LAN attachment, clean installation from a preconverted native configuration, measured load and any additional hardware/architecture qualification remain open.",
     "validation_reporting": "Use docs/test-plan.md for the concise current gate state. Detailed historical checkpoint ledgers are not acceptance authority; keep only current result, limits and repeatable procedure. Never claim unrun gates or partial homert profiles complete.",
     "current_acceptance": {
-      "as_of_utc": "2026-11-03T14:06:38Z",
+      "as_of_utc": "2026-11-03T15:48:52Z",
       "homert_source": "User-provided read-only working copies at chatty.lain.local:~/homert02; the current homert02 and homert03 files each contain 110 resources with matching kind counts. Do not publish configuration values or secrets.",
       "completed_gates": [
         "Go runtime checkpoint842c47e passed make check and final runtimeplan Race. This unchanged Go code plus the bundle producer passed normal build, test-tools/race/vet and actual publisher/receiver operations.",
         "Earlier checkpoints passed isolated Alpine/PID1 PVE single-node networking and signed update/rollback gates; these are not acceptance of the current full profile. PVE/QEMU is excluded from current work.",
         "Earlier checkpoints passed actual supervisor/control/network/Health two-WAN PBR failover/recovery with independent peers, TCP/UDP and captures. This is not qualification of the latest full homert profile; no additional PBR investigation is planned."
       ],
-      "current_changes": "候補準備で全ての観測を空にしていた処理を除き、同じworker設定のproducerと、同じ設定・依存関係の適用済みresourceだけを元の有限期限のまま評価する。準備段階は現在の条件履歴・イベント/derived ownerを進めない。小さな回帰確認では旧関数が無関係なMTU編集で稼働中consumerを停止することを再現し、修正後は維持、WAN自体の変更では旧観測を流用しないことを確認した。世代番号は他の退役workerからも引き継ぐため、番号だけで個々の再起動回数を推定しない。",
+      "current_changes": "Native local-zone sources now select the saved IPv4 reverse suffix and use the existing static/live-lease PTR receive path. The existing archive check is reused for the single profile and each promoted HA owner; no new WAN NIC, upstream candidate or protocol engine was added. Confirmation checks observe actual health for the same pending revision within the original30-second trial; neither the product rejection conditions nor trial deadline were relaxed.",
       "open_work_packages": 34,
       "unqualified_profiles": [
         "homert-single full input",
@@ -11264,18 +11265,18 @@
         "Kubernetes",
         "SAM/federation full path"
       ],
-      "tested_source_head": "ac0b1a0 plus WAN-shared BGP, four private-prefix declarations and actual FRR/client checks; runtime Go unchanged",
+      "tested_source_head": "7649acd plus native reverse-zone source and real-client/archive runner changes; normal build7649acd44e52; product Go unchanged",
       "native_examples": {
-        "examples/single-router-dslite-dhcp-dns.yaml": 43,
-        "examples/homert02-native.yaml": 48,
-        "examples/homert03-native.yaml": 48,
+        "examples/single-router-dslite-dhcp-dns.yaml": 45,
+        "examples/homert02-native.yaml": 54,
+        "examples/homert03-native.yaml": 54,
         "full_homert_profile": "not present; the examples do not represent the complete current 110-resource intent"
       },
       "latest_native_profile_gate": {
-        "status": "43-resource WAN-shared BGP/private non-NAT and whole-daemon restart passed (exit0)",
-        "source": "ac0b1a0; normal buildac0b1a0980ed; Go unchanged",
-        "observed": "2026-11-03、基準main `ac0b1a0` + native設定/fixture変更、通常build `ac0b1a0980ed`（製品Go不変）で、BGPを保存設定と同じ既存WAN共有へ接続した単体43-resource実HGW手順が終了0。専用bgp0と相互forwardルールを削除し、BGP用benchmark addressをwan0へ設定。独立FRR2台も同じ既存uplink上の隔離peerへ接続した。4つの私設prefix（/24・/12・/16・/24）の実kernel gateway/interface、peerの通常LAN /16受信、両LAN clientの各prefixへのNATなしTCP/UDPを照合した。10/8 blackholeと192.168/16 on-linkより具体的なBGP routeが使われることも確認。",
-        "limit": "20-second observation/2 rounds/0 natural PD renewals. Full checks111.26s is not forwarding outage. Real site BGP peers, paired integration and hardware qualification remain open."
+        "status": "45-resource real-HGW single-profile checks and archive failure/recovery passed (exit0)",
+        "source": "7649acd plus native reverse-zone source and real-client/archive runner changes; normal build7649acd44e52; product Go unchanged",
+        "observed": "Static and actual DHCP-derived IPv4 PTR answers over IPv4/IPv6 UDP/TCP after startup. Whole-daemon restart retained identity and restored ordinary communication. Archive failure retained real DNS, ended-flow, firewall and fingerprint rows while DNS and both-family HTTPS worked; restored receiver obtained original identities/timestamps before expiry (10/10/4/5). Original seven-day/daily intent and communication restored.",
+        "limit": "20-second ordinary observation/2 rounds/0 natural PD renewals. Full restart checks111.63s is not forwarding outage. Executed snapshot did not repeat PTR after restart. Direct ONU, target NIC, seven days elapsed and lossless UDP archive are unqualified."
       },
       "upstream_selection_correction": "Existing LAN static gateway, not ens20. Implemented and verified group weights 120 -> 80 -> 60 -> 120 with 60s hysteresis, actual Health workers, both LAN clients TCP/UDP, conntrack marks and kernel next hops. No new WAN NIC or site IP allocation prerequisite.",
       "latest_ha_foundation_gate": {
@@ -11391,6 +11392,14 @@
         "source": "c371753; executed normal build6e0f020bf76c; Go unchanged",
         "result": "2026-11-03、基準main `c371753`、通常build `6e0f020bf76c`（製品Go不変）で、保存homertの実private DNS/NextDNS設定を接続した単体39-resource実HGW手順が終了0。実NextDNS/Cloudflareの設定済みDoH上流すべてのHealthyを確認。安定した5転送先について独立LAN端末から両IP・UDP/TCPの20照会を行い、3先のSOA、2先のNXDOMAINとcore履歴の選択sourceを照合した。残る1先は事前UDP/TCP無応答から、試験中UDPのSERVFAILと後続NOERRORへ変化し、WAN captureで指定peer自身のNOERROR/NODATA応答を確認した。この先の固定SERVFAIL期待は試験側の誤りで、安定した4方式の受入には数えない。試験用local zoneは実suffixを隠さない名前へ変更し、DHCP/search/照会側も合わせた。新規WAN・host経路は追加していない。",
         "limit": "同じ実行で通常の両IP Internet/DNS、DHCP scopes/sticky、BGP、NTP（host時計変更なし）、Tailscale/管理/運用記録、confirmed rollbackが通過。11巡回/自然PD更新0回、PD SIGKILL2.01秒・通常再起動4.87秒、停止時RA撤去/上流Releaseなし。全daemon再起動、HAでの実private DNS、全110-resource intent・実機資格は未受入。NextDNSは実endpointのprobe疎通で、全LAN照会がNextDNSを選んだという主張ではない。"
+      },
+      "latest_reverse_dns_archive_ha_gate": {
+        "status": "passed (exit0)",
+        "build_identity": "7649acd44e52",
+        "source": "7649acd plus native zone-source/runner changes; product Go unchanged",
+        "command": "python3 scripts/uplink-ha.py --uplink ens18 --retention-check",
+        "observed": "2026-11-03、通常build `7649acd44e52`（製品Go不変）、各54-resource実HGW二台手順が終了0。両方向で静的/実DHCP PTRの両IP UDP/TCP、設定期限切れ復元/confirm、通常通信・identity保持、archive障害/復旧と元の保持intentへの復帰を確認した。元ID/時刻の受信と期限削除はbでDNS/終了flow/firewall/fingerprint=10/10/4/3件、aで10/10/8/4件。公開TCP500応答/最大応答間隔15.77秒、UDP543応答/17期限超過/最大10.52秒、固定WAN TCP543応答/最大13.60秒、UDP549応答/11期限超過/最大9.51秒（UDP返信予算1秒）。TCPはいずれもSYN1回、同一socket/NAT tupleを維持。全項目128.03/82.84秒はNTP/保持確認を含み転送断時間ではない。",
+        "limit": "短時間のLinux namespace/kernel・実HGW・独立peerでの受入であり、全110-resource intent、全private DNS、長時間安定性、物理ONU/NIC・性能と全34 packageの完成は残る。"
       }
     }
   },
@@ -11398,7 +11407,7 @@
     {
       "stage": 1,
       "profile": "homert-single-implementation",
-      "next": "Carry the accepted dual /16 LAN, private NAT exemptions, routes/local redirects and WAN-shared BGP into paired homert native profiles, preserving role-dependent advertisements and stateful return paths. Compare remaining saved static WAN/identity intent during that work. Use actual non-PVE Linux/HGW peers and both recovery directions; do not extend this BGP check into a separate large-route/GR campaign. No new router WAN NIC, PVE/QEMU or PBR investigations; all34 packages remain in scope.",
+      "next": "Finish remaining saved homert DNS and operational intent using the accepted single45/paired54 native profiles. Preserve existing upstream selection (DS-Lite group120 -> DS-Lite80 -> LAN static gateway60); no new WAN NIC or PPPoE candidate is needed for these saved profiles. No PVE/QEMU or additional PBR investigation. All34 packages remain in scope.",
       "acceptance": "Cold-start the complete single-router profile with an independent WAN peer and Linux client. Verify WAN/LAN DHCPv4 scopes and reservations, DHCPv6-PD/Information identity and natural renew, RA/DAD/SLAAC, local/conditional/DoH DNS, all DS-Lite paths and IPv6, Health/PBR, NAT/MTU/MSS, BGP/NTP/Tailscale/management where configured, and worker/daemon restart and recovery from actual packets, client results, kernel routes and firewall state. Keep ONU/physical-NIC qualification separate."
     },
     {

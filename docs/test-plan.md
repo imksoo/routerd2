@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 15:18 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 15:48 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 実行原則
 
@@ -251,3 +251,15 @@ blackholeは実clientからTCP/UDPを送り、timeout、kernel blackhole route�
 同じbuildで`python3 scripts/uplink-ha.py --uplink ens18`を実行し、現用側だけの固定/32、peerが学習した共有MAC、各引継ぎ後のsourceを確認する。公開TCP/UDPに加えて、固定WANへのTCP接続/UDP socketを設定変更前から維持し、両方向の停止/再加入後に同一NAT tupleと通信の再開を照合する。captureはSYNの再送を許容し、各TCP接続の初期sequenceが一つであることを確認する。固定WAN peerはPython標準socketの独立processであり、物理HGWの管理機能や本番回線の既存sessionの資格とは分ける。
 
 2026-11-03: 通常build `d92b0b2a894e`（製品Go不変）、単体45-resourceと二台各54-resourceの上記手順が両方終了0。固定source、所有権と共有MAC、起動/再起動後と両方向切替後の同一TCP/UDP・NAT tupleを確認した。詳細・限界は[引き継ぎ](pve-codex-handoff.md)を参照する。
+
+
+## ローカル逆引きと二台構成のarchive障害
+
+保存homertのlocal-zoneが持つ正引きdomainとIPv4逆引きsuffixを、そのままnativeのzone sourceへ接続する。benchmarkの通常LANは`18.198.in-addr.arpa`。旧routerdと同様にsourceのmatchでzoneを選び、既存の静的レコードと生きているDHCP leaseからPTRを返す。新しい受信制限や逆引き専用の別経路は加えない。
+単体は上記`make check-uplink-retention ... UPLINK_FULL_RESTART=1 UPLINK_TAILNET=1`、二台は`make check-uplink-ha DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18 UPLINK_RETENTION=1`を使う。通常buildが同一でrunnerだけを修正した場合は`python3 scripts/uplink-ha.py --uplink ens18 --retention-check`で再実行できる。
+独立端末から静的名と実DHCP名をIPv4/IPv6のDNS listenerへUDP/TCPで逆引きする。HA端末は取得時にhostnameを通知し、実ACKのアドレスを使う。両方向の引継ぎ後にも同じ照会を行う。
+archive試験は既存の単体手順を共有し、各引継ぎ後に新しい現用機が実通信から得た4 datasetを使う。障害中の記録保持と通常DNS/Internet、復旧後の元ID/時刻の受信・期限削除、元の7日/daily設定への復帰を確認する。fingerprintは新しい現用機で実Release/再取得した記録を使い、DBへ注入しない。期限削除後の管理履歴確認には新しい実queryを発生させ、期限切れ前の履歴が残る前提を置かない。既存の公開/固定WAN TCP/UDPは全操作中継続する。
+
+単体結果: 2026-11-03、基準main `7649acd` + zone source/runner変更、通常build `7649acd44e52`（製品Go不変）で45-resource実HGW手順が終了0。起動後の静的/DHCP PTRを両IP UDP/TCPで確認。全daemon再起動後の通常通信確認111.63秒、続くarchive障害/復旧ではDNS10件・終了flow10件・firewall4件・fingerprint5件の元ID/時刻と期限削除、元の保持設定と通信への復帰を確認した。111.63秒は全項目時間で転送断時間ではない。2巡回/自然PD更新0回。今回実行したsnapshotはPTRの再起動後再照会を含まないため、その項目は未実行。ONU直結・NIC・7日経過・lossless archiveの資格とは区別する。
+
+二台結果: 2026-11-03、通常build `7649acd44e52`（製品Go不変）、各54-resource実HGW二台手順が終了0。両方向で静的/実DHCP PTRの両IP UDP/TCP、設定期限切れ復元/confirm、通常通信・identity保持、archive障害/復旧と元の保持intentへの復帰を確認した。元ID/時刻の受信と期限削除はbでDNS/終了flow/firewall/fingerprint=10/10/4/3件、aで10/10/8/4件。公開TCP500応答/最大応答間隔15.77秒、UDP543応答/17期限超過/最大10.52秒、固定WAN TCP543応答/最大13.60秒、UDP549応答/11期限超過/最大9.51秒（UDP返信予算1秒）。TCPはいずれもSYN1回、同一socket/NAT tupleを維持。全項目128.03/82.84秒はNTP/保持確認を含み転送断時間ではない。 短時間のLinux namespace/kernel・実HGW・独立peerでの受入であり、全110-resource intent、全private DNS、長時間安定性、物理ONU/NIC・性能と全34 packageの完成は残る。

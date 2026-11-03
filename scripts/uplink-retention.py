@@ -21,6 +21,7 @@ def main():
     parser.add_argument("--stage", type=Path, required=True)
     parser.add_argument("--router", required=True)
     parser.add_argument("--client", required=True)
+    parser.add_argument("--archive-log", type=Path, required=True)
     args = parser.parse_args()
     stage = args.stage
     router, client = args.router, args.client
@@ -94,7 +95,7 @@ def main():
             signal, _, _, key, timestamp, _ = dataset
             result = set()
             marker = ": info " + signal + " "
-            for line in (stage / "received-syslog.jsonl").read_text().splitlines(keepends=True):
+            for line in args.archive_log.read_text().splitlines(keepends=True):
                 if not line.endswith("\n"):
                     continue
                 message = json.loads(line).get("message", "")

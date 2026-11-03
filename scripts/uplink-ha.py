@@ -63,7 +63,7 @@ def run(command, timeout=15):
     return p.stdout
 
 
-def owner(stage, uplink):
+def owner(stage, uplink, retention_check):
     def interrupted(*_):
         raise KeyboardInterrupt()
     signal.signal(signal.SIGTERM, interrupted)
@@ -271,7 +271,7 @@ def owner(stage, uplink):
         hook = stage / "client.sh"
         hook.write_text('#!/bin/sh\ncase "$1" in deconfig) ip -4 address flush dev "$interface"; ip -4 route flush dev "$interface";; bound|renew) ip address replace "$ip/$subnet" dev "$interface"; ip route replace default via "$router" dev "$interface" src "$ip"; printf "%s %s %s\\n" "$ip" "$router" "$dns" > "' + str(lease) + '";; esac\n')
         hook.chmod(0o500)
-        dhcp_client = start("client", ["busybox", "udhcpc", "-f", "-i", "client0", "-s", str(hook), "-p", str(stage / "client.pid")], "client-dhcp")
+        dhcp_client = start("client", ["busybox", "udhcpc", "-f", "-i", "client0", "-s", str(hook), "-p", str(stage / "client.pid"), "-x", "hostname:ha-client"], "client-dhcp")
         wait(lease.exists)
         def advertised_dns():
             advertised = re.findall(r"rdnss option[^\n]* lifetime (\d+)s, addr: ([0-9a-f:]+)", (stage / "client-ra.log").read_text())
@@ -291,6 +291,12 @@ def owner(stage, uplink):
             wait(advertised_dns)
             dns6 = advertised_dns()
             assert run(inside("client", ["dig", "-6", "@"+dns6, "example.net", "AAAA", "+short", "+time=3", "+tries=1"])).strip()
+            for server in (dns, dns6):
+                for transport in ("+notcp", "+tcp"):
+                    for target, hostname in (("198.18.0.1", "router"), (address, "ha-client")):
+                        answer = run(inside("client", ["dig", "@" + server, "-x", target, "+short", "+time=3", "+tries=1", transport]))
+                        assert answer.strip().rstrip(".").lower() == hostname + ".home.arpa", (target, answer)
+            print("PASS HA static and real DHCP-derived PTR over IPv4/IPv6 UDP/TCP", flush=True)
             run(inside("client", chrony + ["-Q", "-t", "8", "-u", "root", "-f", str(ntp_client)]), 12)
             print("PASS HA client NTP response", flush=True)
             node = elected()
@@ -393,6 +399,11 @@ def owner(stage, uplink):
                     changes = api(node, "control.sock", "/v1/events?producer_epoch=" + restored["producer_epoch"] + "&after_sequence=0")
                     assert any(e["type"] == "rolled_back_timeout" and e.get("request_id") == request_id for e in changes["events"]), changes
                 else:
+                    def ready_to_confirm():
+                        state = api(node, "control.sock", "/v1/config")
+                        assert state["revision"] == applied["revision"] and state.get("confirmation"), "candidate expired before healthy confirmation"
+                        return state["healthy"]
+                    wait(ready_to_confirm, 20)
                     confirmed = api(node, "control.sock", "/v1/config/confirm", {"revision": applied["revision"], "request_id": request_id})
                     assert not confirmed.get("confirmation") and confirmed["config"] == applied["config"] and confirmed["healthy"], confirmed
                     restored = api(node, "control.sock", "/v1/config/commit", {
@@ -456,8 +467,9 @@ def owner(stage, uplink):
             address = "10.255.255.2" if node == "a" else "10.255.255.3"
             for target, server in ((node, "127.0.0.1"), ("admin", address)):
                 assert run(inside(target, ["dig", "@"+server, "router.home.arpa", "A", "+short", "+time=3", "+tries=1"])).strip() == "198.18.0.1"
-            history = api(node, "control.sock", "/v1/services/service.dns-core/dns-history?name=available.split.test.&limit=20")
-            assert history.get("queries"), "actual DNS queries were not retained"
+            answer = run(inside("admin", ["dig", "@"+address, "available.split.test", "A", "+short", "+time=3", "+tries=1"]))
+            assert answer.strip() in ("192.0.2.77", "192.0.2.78"), "management DNS omitted the conditional answer"
+            wait(lambda: api(node, "control.sock", "/v1/services/service.dns-core/dns-history?name=available.split.test.&limit=20").get("queries"))
             page = run(inside("admin", ["curl", "--noproxy", "*", "--fail", "--max-time", "4", "-sS", "http://"+address+":8080/dns-queries?service=service.dns-core&name=available.split.test.&limit=20"]))
             assert 'data-query="' in page and any(answer in page for answer in ("192.0.2.77", "192.0.2.78")), "Web console omitted the real DNS answer"
             denied = subprocess.run(inside("client", ["curl", "--interface", "client0", "--noproxy", "*", "--max-time", "2", "-sS", "http://"+address+":8080/"]), capture_output=True)
@@ -646,6 +658,10 @@ def owner(stage, uplink):
                 wait(lambda: lease_file.stat().st_mtime_ns > before)
             check_special_clients(fingerprints=True)
             print("PASS HA special-client Release/reacquisition retained sticky addresses and recorded fingerprints on the new owner", flush=True)
+            if retention_check:
+                print(run(["python3", "-I", str(stage / "retention-check.py"), "--stage", str(stage / survivor),
+                    "--router", names[survivor], "--client", names["client"], "--archive-log", str(stage / "syslog.jsonl")], timeout=180), end="", flush=True)
+
             print("PASS full native HA handoff", previous, "->", survivor,
                   "elapsed", round(time.monotonic()-handoff_started, 2), "failed probes", failed_probes,
                   "same TCP/UDP NAT tuples, PD identity and real DHCP renewal", flush=True)
@@ -735,13 +751,16 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--uplink",required=True)
     p.add_argument("--inside",type=Path)
+    p.add_argument("--retention-check",action="store_true")
     a=p.parse_args()
     if a.inside:
-        owner(a.inside,a.uplink);return
+        owner(a.inside,a.uplink,a.retention_check);return
     root=[] if os.geteuid()==0 else ["sudo","-n"]
     stage=Path(run(root+["mktemp","-d","/tmp/routerd-full-ha.XXXXXX"]).strip())
     try:
         files=[(Path(__file__),"owner.py"),(Path("scripts/syslog-peer.py"),"syslog-peer.py"),(Path("scripts/internet-flow.py"),"internet-flow.py"),(Path("scripts/tailscale-peer.py"),"peer-fixture.py")]
+        if a.retention_check:
+            files.append((Path("scripts/uplink-retention.py"), "retention-check.py"))
         files += [(Path("dist/bin")/n,n) for n in ("routerd","routerd-modules","routerd-logging")]
         files += [(Path("dist")/n,n) for n in ("dnsmasq-engine.tar","conntrack-engine.tar","chrony-engine.tar","tailscale-engine.tar")]
         files += [(Path("dist/peer-env/tailscale")/n,n) for n in ("headscale","tailscale","tailscaled")]
@@ -749,7 +768,7 @@ def main():
         for source,name in files:
             run(root+["install","-m","500",str(source.resolve()),str(stage/name)])
         print("Full native HA stage",stage,flush=True)
-        subprocess.run(root+["unshare","--mount","--propagation","private","python3","-I",str(stage/"owner.py"),"--inside",str(stage),"--uplink",a.uplink],check=True,timeout=640)
+        subprocess.run(root+["unshare","--mount","--propagation","private","python3","-I",str(stage/"owner.py"),"--inside",str(stage),"--uplink",a.uplink]+(["--retention-check"] if a.retention_check else []),check=True,timeout=640)
     finally:
         run(root+["python3","-I","-c","import shutil,sys;shutil.rmtree(sys.argv[1])",str(stage)])
 

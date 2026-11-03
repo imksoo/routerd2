@@ -662,6 +662,7 @@ resources:
           kind: zone
           match:
           - home.arpa
+          - 18.198.in-addr.arpa
           zoneRef:
           - home
         - name: branch-forwarder

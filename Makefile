@@ -286,7 +286,7 @@ check-uplink-ha: build dnsmasq-engine conntrack-engine chrony-engine tailscale-e
 	@test -n '$(UPLINK_INTERFACE)' || { printf '%s\n' 'UPLINK_INTERFACE must select the authorized local access network'; exit 1; }
 	$(RELEASE_BUILT_DIR)/routerd config validate examples/homert02-native.yaml
 	$(RELEASE_BUILT_DIR)/routerd config validate examples/homert03-native.yaml
-	$(PYTHON) scripts/uplink-ha.py --uplink '$(UPLINK_INTERFACE)'
+	$(PYTHON) scripts/uplink-ha.py --uplink '$(UPLINK_INTERFACE)' $(if $(filter 1,$(UPLINK_RETENTION)),--retention-check)
 
 .PHONY: check-ra-route-refresh
 check-ra-route-refresh: build
