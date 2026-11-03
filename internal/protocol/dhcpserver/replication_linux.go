@@ -47,34 +47,6 @@ type replication struct {
 	cancel       context.CancelFunc
 }
 
-func standbyMarker(cfg Config) string {
-	return filepath.Join(filepath.Dir(cfg.StatePath), ".standby")
-}
-
-func servedMarker(cfg Config) string {
-	return filepath.Join(filepath.Dir(cfg.StatePath), ".served")
-}
-
-func markStandby(cfg Config) error {
-	return replaceFile(standbyMarker(cfg), []byte("standby\n"))
-}
-
-func markServed(cfg Config) error {
-	return replaceFile(servedMarker(cfg), []byte("served\n"))
-}
-
-func clearStandby(cfg Config) error {
-	if err := os.Remove(standbyMarker(cfg)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	dir, err := os.Open(filepath.Dir(cfg.StatePath))
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
-}
-
 func replaceFile(path string, data []byte) error {
 	f, err := os.CreateTemp(filepath.Dir(path), ".lease-*")
 	if err != nil {
@@ -115,8 +87,8 @@ func readTransfer(ctx context.Context, cfg Config) (leaseTransfer, error) {
 }
 
 func saveTransfer(ctx context.Context, cfg Config, state leaseTransfer) error {
-	// A standby can retain a pre-migration lease until this authenticated
-	// exchange. This write runs only before serving or after the active engine
+	// Restrict retained leases to the current scopes. This write runs only
+	// before serving or after the active engine
 	// has stopped, so the persisted file remains the sole allocation state.
 	state.Leases, _ = pruneScopeLeaseData(cfg, state.Leases)
 	current, err := readTransfer(ctx, cfg)
@@ -201,10 +173,6 @@ func startReplication(ctx context.Context, cfg Config) (*replication, error) {
 				return
 			}
 			if err := saveTransfer(req.Context(), cfg, incoming); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			if err := markStandby(cfg); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}

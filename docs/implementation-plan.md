@@ -1,8 +1,15 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
-更新: 2026-11-03 03:40 UTC。syslog/OTLP、native nDPIの通信分類・計数・TLS SNIとfirewall履歴を同一単体profileへ接続し、実HGW/独立端末・受信peer、全daemon restart後の新規Health記録まで受入済み。通常/予約/特別scope・保持・RA配布も受入済み。次は全profileの自然更新・通信継続を進める。全homert/HAの受入は継続中。
+2026-11-03 05:13 UTC: 通常Makefile build ID `6ca951d3082a` + 本変更で、各47-resource profileを実HGWと独立BusyBox端末へ接続した両方向HA試験が終了0。現用daemon停止a→bは16.65秒、b→aは9.10秒でIPv4/IPv6 HTTPS・UDP/TCP DNS・広告されたIPv6 DNS・VIP NTPが復旧した（各1回の途中probe失敗）。同一公開HTTPS TCP接続は再接続なし、captureのSYNは1回、27応答・最大応答間隔7.96秒。同一UDP socketは31応答・13欠落・最大応答間隔7.51秒（1秒返信予算）。両方向でconntrack NAT tuple/mark、PD DUID/IAID/prefix、実DHCP Renew/ACKを維持し、旧現用の再加入・同期・非preemptを確認した。無停止・無損失の結果ではない。
 
-全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で9日16時間11分、記録済み期限から4日10時間43分経過した。34 work packageはin_progress22件/planned12件。部分受入を全体の完成に数えない。
+実障害から修正したのは、PD同期counterの所有者ごとの比較、IPv6専用macvlanにも必要なARP identity設定、元現用不在時にDHCPを停止し続けるmarker/fenceの撤去。設定はRA DNS寿命1800秒、固定B4 SNAT、静的backupの共有VIP SNAT（転送client interfaceに限定）へ修正した。旧routerdのVMAC ARP設定・PD/lease同期経路も比較した。Race Detector・vet、通常build、3実行物のstatic link、Python補助検査36件が通過。追加の`--peer-loss`独立手順は今回未実行。
+
+未受入: 二台profileの特別scope、条件付きDNS/DoH・BGP・Tailscale・履歴/telemetry全経路と長時間安定性、全homert/対象ONU/NIC。非同期DHCPの未受信割当を失った場合の重複回避は保証しない。自然PD T1は別の旧build/profileで観測継続中であり、本変更全体の資格には転用しない。旧buildの長時間観測でBGP等のworker再起動が増えており、effect ACK timeoutの原因は未解決。終了したHAのnamespace/process/key/stageは撤去済み。
+
+
+更新: 2026-11-03 05:13 UTC。syslog/OTLP、native nDPIの通信分類・計数・TLS SNIとfirewall履歴を同一単体profileへ接続し、実HGW/独立端末・受信peer、全daemon restart後の新規Health記録まで受入済み。通常/予約/特別scope・保持・RA配布も受入済み。次は全profileの自然更新・通信継続を進める。全homert/HAの受入は継続中。
+
+全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で9日17時間44分、記録済み期限から4日12時間16分経過した。34 work packageはin_progress22件/planned12件。部分受入を全体の完成に数えない。
 
 HA基盤の並行確認: 基準main `9fb64f4`の通常実行物、build ID `9fb64f4267e9`で`make check-ha-state`が終了0。独立Linux namespace/PID1の2 product processとclient/serverで、A→B/B→AのVRRP/NAT引継ぎ、同一TCP socketとUDP mapping、同期済みDHCP leaseの実Renew/ACK、worker/conntrack engine再起動を確認した。TCP再接続なし（captureのSYNは1回）、最大応答待ち1.665秒。UDPは50ms送信/200ms返信予算で3009送信・2942受信・67期限超過、最大無応答1.110秒（このfixture条件での測定）。同期断中の独立割当/更新と復帰、未設定証明書の拒否、実lease期限での失効、3日sticky期限を変えない再起動/引継ぎ、保持中の別client割当と元client再取得も通過。設定削除で同期workerを回収し、元のconntrack sysctlへ復元した。実HGWの38-resource全体を二台化した結果や、14-resource例・実homert二台の資格とは分ける。
 
@@ -24,7 +31,7 @@ mainを取得し、直近の変更を統合した。34 work packageの状態は�
 | 1 | 単体DNSのcache・query log、loopback/管理listener、SSH/Web管理 | 独立端末から解決・履歴閲覧・鍵認証、上流停止中のcache、管理interface制限、daemon再起動後の復旧 | 実HGWで合格、main反映済み |
 | 2 | 複数DNS suffix/upstream、4本のDS-Liteとbackup回線、BGP、Tailscaleの単体設定 | 現行homertの各通信経路を独立peer/端末から通す。既存engineへ接続し、不足箇所だけ実装 | DNS/4 DS-Liteの優先選択とLAN静的gateway/BGP 2 peers/Tailscaleの単体経路は合格。他は未接続部分あり |
 | 3 | 単体全体のcold start、自然更新、MTU/通信継続、更新・復旧 | 同一profileで端末の通常利用を維持し、変更後に戻る | 部分試験のみ |
-| 4 | 二台HAのVIP/lease/PD/conntrackと既存TCP/UDP | 両方向の停止・復帰、新規端末と既存通信を同時に確認 | 未受入 |
+| 4 | 二台HAのVIP/lease/PD/conntrackと既存TCP/UDP | 両方向の停止・復帰、新規端末と既存通信を同時に確認 | 同期済み端末と既存通信は両方向通過。新規端末・全機能は残作業 |
 | 5 | 残る34 work packageの機能・配布先ごとの残差 | 対応peer/配布先で受入。利用できない対象と最小追加setupを明記 | 未完了 |
 
 一回の変更単位は「設定から利用者の結果まで」とする。失敗時はpacket・socket・経路・workerのうち原因を決める観測だけを追加し、原因が分からないまま同じ試験を繰り返さない。自然T1の待ち時間には独立する実装を進める。試験を増やすことや報告書を作ることを進捗の代用にしない。合格した単位をcommit/pushしてから次へ移る。全体完成の見積りは、単体の全通信経路とHAの未解決原因が把握できた時点で更新する。

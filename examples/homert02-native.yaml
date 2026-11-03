@@ -254,17 +254,21 @@ resources:
       to: dslite0
 - id: lan-dslite-nat
   nat:
-  - type: masquerade
+  - type: snat
+    address: 198.18.0.1
     match:
       family: 4
       source: 198.18.0.0/24
+      in_interface: vip0
       out_interface: lan0
-  - type: masquerade
+  - type: snat
+    address: 192.0.0.2
     match:
       family: 4
       source: 198.18.0.0/24
       out_interface: dslite0
-  - type: masquerade
+  - type: snat
+    address: 192.0.0.2
     match:
       family: 4
       source: 100.64.0.0/10
@@ -278,17 +282,20 @@ resources:
     match:
       family: 6
       out_interface: tailscale0
-  - type: masquerade
+  - type: snat
+    address: 192.0.0.2
     match:
       family: 4
       source: 198.18.0.0/24
       out_interface: dslite1
-  - type: masquerade
+  - type: snat
+    address: 192.0.0.2
     match:
       family: 4
       source: 198.18.0.0/24
       out_interface: dslite2
-  - type: masquerade
+  - type: snat
+    address: 192.0.0.2
     match:
       family: 4
       source: 198.18.0.0/24
@@ -368,6 +375,7 @@ resources:
       managed: false
       other_config: true
       router_lifetime_seconds: 1800
+      dns_lifetime_seconds: 1800
       router_preference: high
       mtu: 1500
       from:

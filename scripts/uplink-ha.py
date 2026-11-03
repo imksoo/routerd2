@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Run paired native homert profiles against a real HGW and independent peers."""
 import argparse
+import ipaddress
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import tarfile
@@ -80,7 +82,7 @@ def owner(stage, uplink):
         run(["ip", "link", "add", "link", uplink, "name", "wan0", "netns", names["gateway"], "type", "macvlan", "mode", "bridge"])
         run(inside("gateway", ["ip", "link", "set", "wan0", "address", "02:72:6f:75:74:06", "up"]))
         hook = stage / "gateway.sh"
-        hook.write_text('#!/bin/sh\ncase "$1" in bound|renew) ip address replace "$ip/$subnet" dev "$interface"; set -- $router; ip route replace default via "$1" dev "$interface";; esac\n')
+        hook.write_text('#!/bin/sh\ncase "$1" in deconfig) ip -4 address flush dev "$interface"; ip -4 route flush dev "$interface";; bound|renew) ip address replace "$ip/$subnet" dev "$interface"; set -- $router; ip route replace default via "$1" dev "$interface";; esac\n')
         hook.chmod(0o500)
         start("gateway", ["busybox", "udhcpc", "-f", "-i", "wan0", "-s", str(hook), "-p", str(stage / "gateway.pid")], "gateway-dhcp")
         wait(lambda: bool(json.loads(run(inside("gateway", ["ip", "-j", "route", "show", "default"])))))
@@ -176,9 +178,9 @@ def owner(stage, uplink):
         print("PASS admitted native HA owner", elected(), flush=True)
         lease = stage / "client.lease"
         hook = stage / "client.sh"
-        hook.write_text('#!/bin/sh\ncase "$1" in bound|renew) ip address replace "$ip/$subnet" dev "$interface"; ip route replace default via "$router" dev "$interface" src "$ip"; printf "%s %s %s\\n" "$ip" "$router" "$dns" > "' + str(lease) + '";; esac\n')
+        hook.write_text('#!/bin/sh\ncase "$1" in deconfig) ip -4 address flush dev "$interface"; ip -4 route flush dev "$interface";; bound|renew) ip address replace "$ip/$subnet" dev "$interface"; ip route replace default via "$router" dev "$interface" src "$ip"; printf "%s %s %s\\n" "$ip" "$router" "$dns" > "' + str(lease) + '";; esac\n')
         hook.chmod(0o500)
-        start("client", ["busybox", "udhcpc", "-f", "-i", "client0", "-s", str(hook), "-p", str(stage / "client.pid")], "client-dhcp")
+        dhcp_client = start("client", ["busybox", "udhcpc", "-f", "-i", "client0", "-s", str(hook), "-p", str(stage / "client.pid")], "client-dhcp")
         wait(lease.exists)
         def traffic():
             address,gateway,dns = lease.read_text().split()
@@ -190,6 +192,12 @@ def owner(stage, uplink):
                 print("PASS HA client HTTPS", family, flush=True)
             for transport in ([],["+tcp"]):
                 assert run(inside("client", ["dig", "@"+dns, "example.net", "A", "+short", "+time=3", "+tries=1"]+transport)).strip()
+            def advertised_dns():
+                advertised = re.findall(r"rdnss option[^\n]* lifetime (\d+)s, addr: ([0-9a-f:]+)", (stage / "client-ra.log").read_text())
+                return next((str(ipaddress.ip_address(address)) for seconds,address in reversed(advertised) if int(seconds) > 0), None)
+            wait(advertised_dns)
+            dns6 = advertised_dns()
+            assert run(inside("client", ["dig", "-6", "@"+dns6, "example.net", "AAAA", "+short", "+time=3", "+tries=1"])).strip()
             run(inside("client", chrony + ["-Q", "-t", "8", "-u", "root", "-f", str(ntp_client)]), 12)
             print("PASS HA client NTP response", flush=True)
             print("PASS HA client lease and IPv4/IPv6 HTTPS, UDP/TCP DNS via", elected(), flush=True)
@@ -200,33 +208,111 @@ def owner(stage, uplink):
             return usable and bool(json.loads(run(inside("client", ["ip", "-j", "-6", "route", "show", "default"]))))
         wait(client_ipv6_ready, 90)
         traffic()
-        first = elected()
-        handoff_started = time.monotonic()
-        daemons[first].send_signal(signal.SIGTERM)
-        daemons[first].wait(timeout=30)
-        print("Stopped node kernel", first, run(inside(first, ["ip", "-br", "address"])), flush=True)
-        # A deliberately stopped member is no longer a readiness participant.
-        daemons.pop(first)
-        def peer_active():
-            node = "b" if first=="a" else "a"
-            return api(node, "control.sock", "/v1/services/service.lan-ha").get("snapshot",{}).get("active",False)
-        wait(peer_active)
-        survivor = "b" if first=="a" else "a"
-        wait(client_ipv6_ready)
-        failed_probes = 0
-        def recovered():
-            nonlocal failed_probes
+        neighbor = json.loads(run(inside("client", ["ip", "-j", "neigh", "show", "to", "198.18.0.1", "dev", "client0"])))
+        assert len(neighbor) == 1 and neighbor[0].get("lladdr") == "00:00:5e:00:01:2a", neighbor
+        print("PASS client learned the IPv4 VIP MAC rather than its IPv6 sibling", flush=True)
+        def primary_upstream_selected():
+            firewall = api(elected(), "control.sock", "/v1/network").get("desired", {}).get("firewall", {})
+            flows = firewall.get("flow_routes", [])
+            return bool(flows) and all(flow.get("buckets") and set(flow["buckets"]) <= {272, 273, 274} for flow in flows)
+        wait(primary_upstream_selected)
+        flow_processes = {}
+        capture = start("client", ["tcpdump", "-n", "-Z", "root", "-U", "-i", "client0", "-c", "256", "-w", str(stage / "flow.pcap"), "host 1.1.1.1 and tcp and tcp[tcpflags] & (tcp-syn | tcp-fin | tcp-rst) != 0"], "flow-capture")
+        for mode in ("tcp", "udp"):
+            flow_processes[mode] = start("client", ["python3", "-I", str(stage / "internet-flow.py"), mode, "--progress", str(stage / (mode + ".json"))], mode + "-flow")
+        def progress(mode):
+            if flow_processes[mode].poll() is not None:
+                raise RuntimeError((stage / (mode + "-flow.log")).read_text())
+            path = stage / (mode + ".json")
+            return json.loads(path.read_text()) if path.exists() else {}
+        wait(lambda: all(progress(mode).get("received", 0) >= 2 for mode in flow_processes))
+        initial_flows = {mode: progress(mode) for mode in flow_processes}
+        def nat_mapping(node, mode):
+            address, port = initial_flows[mode]["endpoint"]
+            output = run(inside(node, ["conntrack", "-L", "-p", mode, "--orig-src", address, "--orig-dst", "1.1.1.1", "--sport", str(port), "--dport", "443" if mode == "tcp" else "53"]))
+            tuples = re.findall(r"src=(\S+) dst=(\S+) sport=(\d+) dport=(\d+)", output)
+            mark = re.search(r"\bmark=(\d+)", output)
+            assert len(tuples) == 2 and mark, output
+            return {"reply": tuples[1], "mark": int(mark[1])}
+        mappings = {mode: nat_mapping(elected(), mode) for mode in flow_processes}
+        assert all(mapping["mark"] in {272, 273, 274} for mapping in mappings.values()), mappings
+        def pd_identity(node):
+            s = api(node, "control.sock", "/v1/services/service.wan-pd")["snapshot"]
+            return s["client_duid"], s["iaid"], {ipaddress.ip_network(p["prefix"]) for p in s.get("prefixes", [])}
+        print("Initial public NAT tuples", mappings, flush=True)
+        original_pd = pd_identity(elected())
+        original_address = lease.read_text().split()[0]
+        def standby_synced(node):
+            if daemons[node].poll() is not None:
+                raise RuntimeError("rejoining product exited: " + node)
             try:
-                traffic()
-                return True
-            except (RuntimeError, AssertionError) as error:
-                failed_probes += 1
-                print("HA recovery probe failed", round(time.monotonic()-handoff_started, 2), str(error), flush=True)
+                pd = api(node, "control.sock", "/v1/services/service.wan-pd").get("snapshot", {})
+                dhcp = api(node, "control.sock", "/v1/services/service.lan-leases").get("snapshot", {})
+            except RuntimeError:
                 return False
-        wait(recovered)
-        print("PASS full native HA initial handoff", first, "->", survivor,
-              "elapsed", round(time.monotonic()-handoff_started, 2), "failed probes", failed_probes, flush=True)
+            sync = pd.get("sync", {})
+            leases = stage / node / "state/services/lan-leases/dnsmasq.leases"
+            mirrored = leases.exists() and any(line.split()[2] == original_address for line in leases.read_text().splitlines() if len(line.split()) >= 3)
+            return pd.get("state") == "standby" and sync.get("epoch", 0) > 0 and not sync.get("error") and dhcp.get("standby") and mirrored
+        for _ in range(2):
+            previous = elected()
+            survivor = "b" if previous == "a" else "a"
+            wait(lambda: standby_synced(survivor))
+            handoff_started = time.monotonic()
+            daemons[previous].send_signal(signal.SIGTERM)
+            daemons[previous].wait(timeout=30)
+            daemons.pop(previous)
+            wait(lambda: elected() == survivor)
+            failed_probes = 0
+            def recovered():
+                nonlocal failed_probes
+                try:
+                    traffic()
+                    return True
+                except (RuntimeError, AssertionError) as error:
+                    failed_probes += 1
+                    print("HA recovery probe failed", round(time.monotonic()-handoff_started, 2), str(error), flush=True)
+                    return False
+            wait(recovered)
+            counts = {mode: progress(mode)["received"] for mode in flow_processes}
+            wait(lambda: all(progress(mode)["received"] > counts[mode] for mode in flow_processes))
+            for mode in flow_processes:
+                assert progress(mode)["endpoint"] == initial_flows[mode]["endpoint"]
+                assert nat_mapping(survivor, mode) == mappings[mode]
+            assert pd_identity(survivor) == original_pd, "takeover changed the shared DUID/IAID/prefix"
+            renewed_before = lease.stat().st_mtime_ns
+            dhcp_client.send_signal(signal.SIGUSR1)
+            wait(lambda: lease.stat().st_mtime_ns > renewed_before)
+            assert lease.read_text().split()[0] == original_address
+            print("PASS full native HA handoff", previous, "->", survivor,
+                  "elapsed", round(time.monotonic()-handoff_started, 2), "failed probes", failed_probes,
+                  "same TCP/UDP NAT tuples, PD identity and real DHCP renewal", flush=True)
+            daemons[previous] = start(previous, [str(stage / "routerd"), "boot", "--file", str(stage / previous / "boot.json")], "router-" + previous)
+            wait(lambda: standby_synced(previous))
+            assert elected() == survivor, "rejoining member preempted the configured non-preemptive owner"
+            print("PASS rejoined member synchronized without preemption", previous, flush=True)
+        capture.send_signal(signal.SIGINT)
+        capture.wait(timeout=5)
+        tcp_port = initial_flows["tcp"]["endpoint"][1]
+        packets = run(["tcpdump", "-nn", "-r", str(stage / "flow.pcap"), f"src port {tcp_port} and dst port 443 and tcp[tcpflags] & tcp-syn != 0"])
+        assert len(packets.splitlines()) == 1, packets
+        print("PASS one TCP SYN through both handoffs", {mode: progress(mode) for mode in flow_processes}, flush=True)
     except BaseException:
+        packets = stage / "flow.pcap"
+        if packets.exists():
+            print("HA flow flags", run(["tcpdump", "-nn", "-tt", "-r", str(packets)]), flush=True)
+        for mode in ("tcp", "udp"):
+            flow = stage / (mode + ".json")
+            if not flow.exists():
+                continue
+            details = json.loads(flow.read_text())
+            print("HA flow progress", mode, details, flush=True)
+            for node in ("a", "b"):
+                if names[node] not in namespaces:
+                    continue
+                address, port = details["endpoint"]
+                result = subprocess.run(inside(node, ["conntrack", "-L", "-p", mode, "--orig-src", address, "--sport", str(port)]), capture_output=True, text=True)
+                print("HA flow NAT", node, mode, result.stdout, flush=True)
         capture = stage / "client-ra.log"
         if capture.exists():
             print("HA received RA", capture.read_text()[-12000:], flush=True)
@@ -275,7 +361,7 @@ def main():
     root=[] if os.geteuid()==0 else ["sudo","-n"]
     stage=Path(run(root+["mktemp","-d","/tmp/routerd-full-ha.XXXXXX"]).strip())
     try:
-        files=[(Path(__file__),"owner.py"),(Path("scripts/syslog-peer.py"),"syslog-peer.py")]
+        files=[(Path(__file__),"owner.py"),(Path("scripts/syslog-peer.py"),"syslog-peer.py"),(Path("scripts/internet-flow.py"),"internet-flow.py")]
         files += [(Path("dist/bin")/n,n) for n in ("routerd","routerd-modules","routerd-logging")]
         files += [(Path("dist")/n,n) for n in ("dnsmasq-engine.tar","conntrack-engine.tar","chrony-engine.tar","tailscale-engine.tar")]
         files += [(Path("dist/peer-env/tailscale")/n,n) for n in ("headscale","tailscale","tailscaled")]

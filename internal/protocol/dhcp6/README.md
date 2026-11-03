@@ -188,8 +188,12 @@ source clock sample together with the local request-start clock. Takeover
 derives local deadlines from this mapping; network/processing delay shortens
 rather than extends the grant. UTC is not involved. An identical revision keeps
 its original mapping even after repeated fetches or standby restart. Active
-startup advances the persisted ownership epoch; snapshots advance revision.
-Older epochs/revisions and conflicting equal revisions are rejected. These
+startup advances that owner's persisted epoch; snapshots advance revision.
+Ordering applies within the same source. Two owners can independently reach
+the same epoch/revision during simultaneous startup; a standby accepts the
+currently elected authenticated peer and persists its source together with
+that sequence. Older epochs/revisions and conflicting equal revisions from
+the same source are rejected. These
 counters prevent accepted checkpoint replay; they do not fence two isolated
 VRRP masters. The active member continues its ordinary upstream protocol when
 sync is unavailable. Standby reports the last successful receive time and any

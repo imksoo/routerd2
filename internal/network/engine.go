@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/netip"
 	"os"
 	"sort"
 	"sync"
@@ -537,13 +536,9 @@ func (p *apply) reconcile(d Desired) error {
 	}
 	wantedSettings := map[settingKey]int{}
 	wantedAddresses := map[addressKey]bool{}
-	ipv4Interfaces := map[string]bool{}
 	for _, l := range d.Interfaces {
 		for _, address := range l.Addresses {
 			wantedAddresses[addressKey{l.Name, address}] = true
-			if netip.MustParsePrefix(address).Addr().Is4() {
-				ipv4Interfaces[l.Name] = true
-			}
 		}
 		if l.AdminState != AdminUnmanaged {
 			wantedSettings[settingKey{Kind: "up", Interface: l.Name}] = 1
@@ -571,10 +566,10 @@ func (p *apply) reconcile(d Desired) error {
 			wantedSettings[settingKey{Kind: "hop_limit", Interface: l.Name}] = *l.IPv6HopLimit
 		}
 	}
-	// Linux otherwise answers or sends ARP on a parent using an IPv4 address
-	// owned by its macvlan, exposing the wrong MAC for that address.
+	// Linux's weak-host ARP also lets an IPv6-only sibling answer for an IPv4
+	// VIP. Every managed macvlan and its parent must retain their own identity.
 	for _, link := range d.Links {
-		if link.Kind == "macvlan" && ipv4Interfaces[link.Name] {
+		if link.Kind == "macvlan" {
 			for _, name := range []string{link.Parent, link.Name} {
 				wantedSettings[settingKey{Kind: "arp_ignore", Interface: name}] = 1
 				wantedSettings[settingKey{Kind: "arp_announce", Interface: name}] = 2

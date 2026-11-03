@@ -61,7 +61,7 @@ help:
 	  'make check-ha-pd-preparation Verify interrupted B4 preparation and overlapping DAD' \
 	  'make check-ha-egress   Verify shared PD, DS-Lite and independent backup WAN handoff' \
 	  'make qemu-ha-pve QEMU_PVE_HOST=... Verify two isolated PVE appliance HA power cuts' \
-	  'make check-ha-dhcp-failover Verify stale-owner DHCP protection and reconciliation' \
+	  'make check-ha-dhcp-failover Verify DHCP renewal through owner loss and reconciliation' \
 	  'make check-health-pbr  Required two-WAN real-daemon TCP/UDP failover gate' \
 	  'make check-vrrp-unicast Verify VRRP peer failover and finite WAN identity' \
 	  'make check-tailscale   Verify signed Tailscale subnet/exit traffic, identity and revoke with independent peers' \
@@ -468,7 +468,7 @@ check-ha-pd-preparation: build build-publisher conntrack-engine dnsmasq-engine
 
 .PHONY: check-ha-dhcp-failover
 check-ha-dhcp-failover: build build-publisher conntrack-engine dnsmasq-engine
-	$(PYTHON) scripts/ha-state-peer.py --dhcp6-server '$(DHCP6_SERVER)' --pd-dslite --stale-owner
+	$(PYTHON) scripts/ha-state-peer.py --dhcp6-server '$(DHCP6_SERVER)' --pd-dslite --peer-loss
 
 TAILSCALE_ARCH ?= $(shell $(GO) env GOARCH)
 TAILSCALE_DIR ?= dist

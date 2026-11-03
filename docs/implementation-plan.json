@@ -11260,6 +11260,42 @@
           "physical ONU/NIC qualification"
         ],
         "open_observation": "One initial bring-up had BGP/VRRP effect acknowledgement timeout and worker restart; review full-profile coordinator/application and shutdown ordering."
+      },
+      "latest_full_profile_ha_continuity_gate": {
+        "as_of_utc": "2026-11-03T05:13:00Z",
+        "status": "passed_exit_0",
+        "build_identity": "6ca951d3082a plus current patch",
+        "resources_per_node": 47,
+        "command": "make check-uplink-ha DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18",
+        "recovery_seconds": [
+          16.65,
+          9.1
+        ],
+        "tcp": {
+          "responses": 27,
+          "syn_count": 1,
+          "maximum_reply_gap_seconds": 7.9567
+        },
+        "udp": {
+          "responses": 31,
+          "missed": 13,
+          "reply_budget_seconds": 1,
+          "maximum_reply_gap_seconds": 7.5137
+        },
+        "observed": "Both graceful owner stops, same public TCP/UDP socket and NAT tuple/mark, real DHCP renewal, same PD DUID/IAID/prefix, member rejoin/sync without preemption; IPv4/IPv6 HTTPS, UDP/TCP and advertised IPv6 DNS, VIP NTP recovered.",
+        "fixes": [
+          "Source-scoped PD checkpoint ordering",
+          "ARP identity on IPv6-only macvlan siblings",
+          "Remove DHCP peer-availability startup fence",
+          "RA DNS lifetime and fixed B4/shared-VIP SNAT limited to forwarded clients"
+        ],
+        "not_qualified": [
+          "Uninterrupted/lossless traffic",
+          "Unknown DHCP allocations lost during asynchronous replication outage",
+          "All two-node DNS/DoH/BGP/Tailscale/scopes/history/telemetry paths and stability",
+          "Physical ONU/NIC qualification"
+        ],
+        "open_observation": "Older natural-renewal build remains live; BGP and DS-Lite workers restarted during that observation. Effect acknowledgement timeout cause unresolved."
       }
     }
   },

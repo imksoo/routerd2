@@ -50,7 +50,10 @@ uses UTC, as dnsmasq's lease file does; cross-node UTC skew is not qualified.
 VRRP selects serving authority; the lease synchronization link is not a second
 ownership election. When reachable, the standby's retained bindings and history
 are merged before startup. An unavailable peer is reported in sync status while
-local DHCP continues with the configured pool. When synchronization returns,
+the elected node starts from its durable checkpoint and local DHCP continues
+with the configured pool. This also applies after the node has served as a
+standby; no separate marker makes a failed former owner a startup prerequisite.
+When synchronization returns,
 the engine stops before its lease file is merged and resumes with both members'
 received facts. Unsupported domains and a positively identified concurrently
 serving peer are rejected.

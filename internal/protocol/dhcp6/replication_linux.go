@@ -185,14 +185,19 @@ func (r *replication) pull(ctx context.Context, cfg dhcp6config.Config, current 
 	if next.Snapshot.ClientDUID != r.duid {
 		return checkpoint{}, errors.New("PD peer uses a different DUID")
 	}
-	if next.Epoch < current.Epoch || next.Epoch == current.Epoch && (next.Source != current.Source || next.Revision < current.Revision) {
-		return checkpoint{}, errors.New("stale or conflicting PD owner revision")
-	}
-	if next.Epoch == current.Epoch && next.Revision == current.Revision {
-		if !reflect.DeepEqual(next.Snapshot, current.Snapshot) {
-			return checkpoint{}, errors.New("conflicting PD checkpoint")
+	// Each owner advances its own persisted sequence. Simultaneous startup can
+	// produce equal epochs on different nodes; the elected, authenticated peer
+	// supplies the standby's state, not an ordering between those local counters.
+	if next.Source == current.Source {
+		if next.Epoch < current.Epoch || next.Epoch == current.Epoch && next.Revision < current.Revision {
+			return checkpoint{}, errors.New("stale PD owner revision")
 		}
-		return current, nil // Includes the original mapping, never a new deadline.
+		if next.Epoch == current.Epoch && next.Revision == current.Revision {
+			if !reflect.DeepEqual(next.Snapshot, current.Snapshot) {
+				return checkpoint{}, errors.New("conflicting PD checkpoint")
+			}
+			return current, nil // Keep the original mapping and deadline.
+		}
 	}
 	next.Mapping = &clockMapping{LocalBootID: clock.BootID, LocalNanos: uint64(clock.BoottimeNanoseconds), SourceNanos: reply.ClockNanos}
 	return next, nil
@@ -220,7 +225,7 @@ func runStandby(ctx context.Context, cfg dhcp6config.Config, r *replication, sav
 			sync.ReceivedNanos = status.Sync.ReceivedNanos
 		}
 		if pullErr == nil {
-			if next.Epoch != saved.Epoch || next.Revision != saved.Revision {
+			if next.Source != saved.Source || next.Epoch != saved.Epoch || next.Revision != saved.Revision {
 				if err := writeState(cfg.StatePath, next); err != nil {
 					return err
 				}

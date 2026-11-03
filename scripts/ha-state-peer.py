@@ -37,7 +37,7 @@ def configure_dhcp_scopes(resources, index):
     ]
 
 
-def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns, release_holds, dhcp_scopes):
+def peer(stage, dhcp6_server, pd_dslite, peer_loss, preparation, delegated_dns, release_holds, dhcp_scopes):
     def deadline(*_):
         raise TimeoutError("HA connection-state communication deadline")
     signal.signal(signal.SIGALRM, deadline)
@@ -856,7 +856,7 @@ while True:
         third_address = lease_events(2)[-1].split()[1]
         assert third_address not in (first_address, second_address), "isolated allocator duplicated a live lease"
         assert "UP" not in json.loads(run(["ip", "-j", "link", "show", "sync0"]))[0]["flags"], "sync outage was not maintained"
-        if stale_owner:
+        if peer_loss:
             # A sleeping client cannot answer ARP, but its unsynchronized
             # binding remains valid on the disconnected former owner.
             run(inside("ha-client", ["ip", "address", "flush", "dev", "lease2"]))
@@ -867,10 +867,12 @@ while True:
             wait(lambda: active("a"), timeout=30)
             def lease_status():
                 return api("a", "control.sock", "/v1/services/service.leases")["snapshot"]
-            fourth_client = lease_client(3, third_address, await_lease=False)
-            time.sleep(3)
-            assert not (stage / "lease3.progress").exists(), "stale standby served DHCP without the former owner's lease state"
-            assert not lease_status().get("active"), "stale takeover did not withhold DHCP"
+            wait(lambda: lease_status().get("active"))
+            before_renew = len(lease_events(0))
+            first_client.send_signal(signal.SIGUSR1)
+            wait(lambda: len(lease_events(0)) > before_renew)
+            assert lease_events(0)[-1].split()[1] == first_address
+            print("PASS mirrored lease renewed while the former owner was absent", flush=True)
             start("ha-b", b_command, "b")
             def standby_ready():
                 try:
@@ -884,6 +886,9 @@ while True:
                 return status is not None and status.get("synchronized") and not status.get("error")
             wait(reconciled, timeout=45)
             wait(lambda: lease_status().get("active"), timeout=30)
+            # Unknown allocations during the unsynchronized gap remain a
+            # documented limitation; check new allocation after reconciliation.
+            fourth_client = lease_client(3, third_address)
             wait(lambda: (stage / "lease3.progress").exists(), timeout=30)
             fourth_address = lease_events(3)[-1].split()[1]
             assert fourth_address not in (first_address, second_address, third_address), "reconciled owner duplicated a valid offline lease"
@@ -904,7 +909,7 @@ while True:
             third_client.send_signal(signal.SIGUSR1)
             wait(lambda: len(lease_events(2)) > before, timeout=20)
             assert lease_events(2)[-1].split()[1] == third_address
-            print("PASS stale takeover allocated without duplicating the offline lease, survived restart and preserved both clients after reconciliation", flush=True)
+            print("PASS owner loss preserved known renewal; reconciliation protected the offline lease before a new allocation and worker restart", flush=True)
             return
         if dhcp6_server:
             wait(lambda: bool(pd_observed("a").get("sync", {}).get("error")))
@@ -1119,14 +1124,14 @@ def main():
     parser.add_argument("--dhcp-scopes", action="store_true", help="Use distinct DHCP pools and renew them across both HA directions")
     parser.add_argument("--dhcp6-server", type=Path)
     parser.add_argument("--pd-dslite", action="store_true")
-    parser.add_argument("--stale-owner", action="store_true")
+    parser.add_argument("--peer-loss", action="store_true")
     parser.add_argument("--preparation", action="store_true")
     parser.add_argument("--delegated-dns", action="store_true")
     parser.add_argument("--binary-dir", type=Path, default=Path("dist/bin"))
     parser.add_argument("--release-holds", action="store_true", help="Exercise client RELEASE before sticky recovery; otherwise wait for natural lease expiry")
     args = parser.parse_args()
     if args.inside:
-        peer(args.inside, args.dhcp6_server, args.pd_dslite, args.stale_owner, args.preparation, args.delegated_dns, args.release_holds, args.dhcp_scopes)
+        peer(args.inside, args.dhcp6_server, args.pd_dslite, args.peer_loss, args.preparation, args.delegated_dns, args.release_holds, args.dhcp_scopes)
         return
     os.chdir(Path(__file__).resolve().parent.parent)
     if args.pd_dslite and not args.dhcp6_server:
@@ -1150,8 +1155,8 @@ def main():
             peer_args.append("--dhcp-scopes")
         if args.pd_dslite:
             peer_args.append("--pd-dslite")
-        if args.stale_owner:
-            peer_args.append("--stale-owner")
+        if args.peer_loss:
+            peer_args.append("--peer-loss")
         if args.preparation:
             peer_args.append("--preparation")
         if args.delegated_dns:

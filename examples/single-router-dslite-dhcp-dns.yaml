@@ -72,21 +72,27 @@ resources:
         - {from: lan0, to: dslite0}
   - id: lan-dslite-nat
     nat:
-      - type: masquerade
+      - type: snat
+        address: 198.18.0.1
         match: {family: 4, source: 198.18.0.0/24, in_interface: lan0, out_interface: lan0}
-      - type: masquerade
+      - type: snat
+        address: 192.0.0.2
         match: {family: 4, source: 198.18.0.0/24, out_interface: dslite0}
-      - type: masquerade
+      - type: snat
+        address: 192.0.0.2
         match: {family: 4, source: 100.64.0.0/10, out_interface: dslite0}
       - type: masquerade
         match: {family: 6, source: fd7a:115c:a1e0::/48, out_interface: wan0}
       - type: masquerade
         match: {family: 6, in_interface: lan0, out_interface: tailscale0}
-      - type: masquerade
+      - type: snat
+        address: 192.0.0.2
         match: {family: 4, source: 198.18.0.0/24, out_interface: dslite1}
-      - type: masquerade
+      - type: snat
+        address: 192.0.0.2
         match: {family: 4, source: 198.18.0.0/24, out_interface: dslite2}
-      - type: masquerade
+      - type: snat
+        address: 192.0.0.2
         match: {family: 4, source: 198.18.0.0/24, out_interface: dslite3}
   - id: service/wan4
     depends_on: [interface/wan0]
@@ -131,6 +137,7 @@ resources:
         managed: false
         other_config: true
         router_lifetime_seconds: 1800
+        dns_lifetime_seconds: 1800
         router_preference: high
         mtu: 1500
         from:
