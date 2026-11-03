@@ -12,6 +12,10 @@ WireGuard's peer selection and authenticated source-address checking. It does
 not add routes or authorize forwarding. Those remain separate explicit parts
 of the same transactional configuration.
 
+IPv4/IPv6 CIDRs with host bits are accepted and normalized to network prefixes,
+as with `wg set`. Equivalent IPv6 spellings have the same internal identity.
+Conflicting assignments of the same normalized prefix remain configuration errors.
+
 ## Keys and configuration changes
 
 `private_key_file` and optional peer `preshared_key_file` name regular files

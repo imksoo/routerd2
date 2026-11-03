@@ -149,7 +149,6 @@ func TestWireGuardValidation(t *testing.T) {
 			d.WireGuard[0].Peers = append(d.WireGuard[0].Peers, peer)
 		}},
 		{"same-key", func(d *Desired) { d.WireGuard[0].Peers = append(d.WireGuard[0].Peers, d.WireGuard[0].Peers[0]) }},
-		{"host-bits", func(d *Desired) { d.WireGuard[0].Peers[0].AllowedIPs = []string{"10.99.0.2/24"} }},
 		{"keepalive", func(d *Desired) { d.WireGuard[0].Peers[0].PersistentKeepalive = 65536 }},
 		{"relative-secret", func(d *Desired) { d.WireGuard[0].PrivateKeyFile = "key" }},
 		{"missing-config-on-up", func(d *Desired) { d.WireGuard = nil }},
@@ -168,6 +167,21 @@ func TestWireGuardValidation(t *testing.T) {
 	d.WireGuard[0].Peers = append(d.WireGuard[0].Peers, WireGuardPeer{PublicKey: fixtureWireGuardPublic(83), AllowedIPs: []string{"10.99.0.0/24"}})
 	if err := Validate(d); err != nil {
 		t.Fatal("nested distinct prefixes should be valid:", err)
+	}
+	d.WireGuard[0].Peers[1].AllowedIPs = []string{"10.99.0.2/24", "2001:0db8:0080::20/64"}
+	if err := Validate(d); err != nil {
+		t.Fatal("host bits should normalize as with wg set:", err)
+	}
+	normalized := normalizeWireGuard(d.WireGuard[0])
+	for _, peer := range normalized.Peers {
+		if peer.PublicKey == fixtureWireGuardPublic(83) && !reflect.DeepEqual(peer.AllowedIPs, []string{"10.99.0.0/24", "2001:db8:80::/64"}) {
+			t.Fatal("allowed IP normalization", peer.AllowedIPs)
+		}
+	}
+	d.WireGuard[0].Peers[0].AllowedIPs = []string{"10.99.0.2/24"}
+	d.WireGuard[0].Peers[1].AllowedIPs = []string{"10.99.0.3/24"}
+	if err := Validate(d); err == nil {
+		t.Fatal("equivalent prefixes assigned to distinct peers should conflict")
 	}
 }
 

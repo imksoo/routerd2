@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -78,7 +79,7 @@ func TestDaemonWireGuardDNS(t *testing.T) {
 		Links:      []network.Link{{Name: "wg0", Kind: "wireguard"}},
 		Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"192.0.2.1/24"}}, {Name: "lan0", Addresses: []string{"198.18.0.1/24"}}, {Name: "wg0", Addresses: []string{"198.51.100.10/24"}}},
 		Forwarding: network.Forwarding{IPv4: &forward},
-		WireGuard:  []network.WireGuard{{Interface: "wg0", PrivateKeyFile: keyFile, ListenPort: 51820, Peers: []network.WireGuardPeer{{PublicKey: peerPublic, Endpoint: "WG-Peer.TEST:51821", AllowedIPs: []string{"198.51.100.20/32"}, PersistentKeepalive: 5}}}},
+		WireGuard:  []network.WireGuard{{Interface: "wg0", PrivateKeyFile: keyFile, ListenPort: 51820, Peers: []network.WireGuardPeer{{PublicKey: peerPublic, Endpoint: "WG-Peer.TEST:51821", AllowedIPs: []string{"198.51.100.20/24", "2001:0db8:0080::20/64"}, PersistentKeepalive: 5}}}},
 	}
 	doc := config.Native{Network: desired}
 	dir := t.TempDir()
@@ -97,6 +98,9 @@ func TestDaemonWireGuardDNS(t *testing.T) {
 	}
 	traffic := func() {
 		t.Helper()
+		if allowed := observed().AllowedIPs; !slices.Equal(allowed, []string{"198.51.100.0/24", "2001:db8:80::/64"}) {
+			t.Fatal("kernel allowed IPs", allowed)
+		}
 		for _, protocol := range []string{"tcp4", "udp4"} {
 			port := "18080"
 			if protocol == "udp4" {

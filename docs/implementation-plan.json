@@ -1106,7 +1106,8 @@
           "IPv6 hostname underlay and target physical-device acceptance.",
           "Complete peersFrom/SAM/enrollment identity and key/PSK generation/rotation contracts, including dynamic source expiry and removal.",
           "Remaining NET-08 acceptance gates, full homert intent, signed full-profile appliance boot/update and all34 work packages remain open."
-        ]
+        ],
+        "allowed_ip_normalization": "Baseline f60b3d2 plus this change, normal build f60b3d2789cb: independent wg set and kernel accept host-bit CIDRs. Remove the prototype rejection and normalize before journal/native ownership. Existing real WireGuard daemon gate passed with host-bit IPv4 and expanded IPv6 inputs, canonical kernel readback, roaming/DNS recovery, IPv4 LAN TCP/UDP and whole-daemon restart/removal. Cross-peer conflicts compare masked prefixes. make check and all3 normal static artifacts passed. IPv6 forwarding remains unqualified by this gate."
       }
     },
     {

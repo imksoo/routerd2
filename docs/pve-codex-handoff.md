@@ -12,6 +12,8 @@
 
 `make check`（全Go/Race Detector/vet・Python36件）、通常3実行物のstatic linkが通過。再実行は`make check-wireguard DOCKER='sudo -n docker'`、通常build済みなら`python3 scripts/daemon-tests.py wireguard`。OS resolverはtunnelなしで相手名を解決できるよう設定する。NET-08は着手済みとし、IPv6 underlay、SAM/enrollment由来peer集合、動的key/PSK更新と全体の受入を継続する。全homertの署名appliance起動・更新には独立kernel/時計の許可済み実行機が必要。
 
+基準main `f60b3d2` + CIDR正規化修正、通常build `f60b3d2789cb`で同じWireGuard実通信手順が終了0。独立`wg set`と実kernelがホスト部付きCIDRを受理することを確認し、routerd2の拒否を撤去した。IPv4 `198.51.100.20/24`・IPv6 `2001:0db8:0080::20/64`を入力し、kernelの`198.51.100.0/24`・`2001:db8:80::/64`、移動先復旧・daemon再起動後のLAN TCP/UDPを確認した。正規化後の同じprefixを異なるpeerへ割り当てる競合は検出する。`make check`・通常static3実行物が通過。IPv6の実転送はこの手順の範囲に含めない。
+
 ## homertの固定時刻源を単体・二台構成へ接続
 
 保存中の両homert設定と旧routerdの`pkg/controller/chain/ntp.go`を再読した。autoのNTPClientは学習源と公開2hostnameのfallbackを持ち、staticのNTPServerは私設peerと同じ公開2hostnameを常時設定する。native例には後者が欠けていた。既存の一つのchronydへ二つの時刻源宣言を接続し、core DNSで名前解決する。私設peerは隔離環境の独立chronydへ対応づけた。

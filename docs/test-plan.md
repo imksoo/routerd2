@@ -6,7 +6,7 @@
 
 `make check-wireguard DOCKER='sudo -n docker'`は実supervisor/control/networkとLinux WireGuard、独立wireguard-tools・dnsmasq・LAN端末を専用network/mount namespaceで動かす。試験内の`/etc/resolv.conf`だけを独立DNSへ向け、hostのresolver・経路・時計を保護する。hostnameからの接続とLANの実TCP/UDP、認証済み送信元portのroamingとDNS変更の優先関係、peer停止中の自然な135秒経過、NXDOMAINによる現endpointの保持、DNS復旧と移動先への接続、daemon再起動・peer撤去を確認する。待ち時間はwireguard-tools公式reresolve-dnsの条件を使い、時計・handshake時刻を注入しない。全体上限300秒、captureは既存の有界手順を使い、終了時に鍵・process・namespace・raw出力を撤去する。IPv6 underlay、SAM由来peer集合、全NET-08と物理機器の受入を継続する。
 
-初回とpeer復帰では実handshakeを確認してからLAN TCP/UDPを測定する。peerのlink停止でLinuxが撤去したLANへの戻り経路は、独立peerの起動設定として再適用する。接続準備中の短いTCP期限やpeer設定の欠落を製品の通信結果へ読み替えない。
+AllowedIPsにはホスト部付きIPv4/IPv6 CIDRと展開表記を指定し、実kernelの正規化されたprefixを初回・移動先復旧・daemon再起動後に照合する。初回とpeer復帰では実handshakeを確認してからLAN TCP/UDPを測定する。peerのlink停止でLinuxが撤去したLANへの戻り経路は、独立peerの起動設定として再適用する。接続準備中の短いTCP期限やpeer設定の欠落を製品の通信結果へ読み替えない。
 
 ## 実行原則
 

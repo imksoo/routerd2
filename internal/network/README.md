@@ -231,7 +231,7 @@ causes reconciliation to stop without changing that device.
 | `peers` | Complete desired peer set. An empty set removes all owned peers. |
 | `public_key` | Canonical nonzero base64 key; duplicate and self peers are rejected. |
 | `preshared_key_file` | Optional versioned secret file. Empty clears the PSK. |
-| `allowed_ips` | Canonical IPv4/IPv6 network prefixes. Identical prefixes cannot occur twice; nested distinct prefixes use WireGuard longest-prefix matching. |
+| `allowed_ips` | IPv4/IPv6 prefixes, normalized to network prefixes on input. Identical prefixes cannot occur twice; nested distinct prefixes use WireGuard longest-prefix matching. |
 | `endpoint` | Hostname or unicast IP:port, with an interface zone for IPv6 link-local. Empty enables passive endpoint learning. The network worker resolves hostnames through its OS resolver outside the writer lock. |
 | `persistent_keepalive` | 0–65535 seconds, with zero disabling it. |
 

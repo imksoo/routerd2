@@ -216,10 +216,11 @@ func validateWireGuard(d Desired) error {
 			}
 			for j, raw := range peer.AllowedIPs {
 				prefix, err := netip.ParsePrefix(raw)
-				if err != nil || prefix.Addr().Is4In6() || prefix != prefix.Masked() {
-					add("wireguard %s peer %d allowed IP %d: expected a canonical network prefix", device.Interface, i, j)
+				if err != nil || prefix.Addr().Is4In6() {
+					add("wireguard %s peer %d allowed IP %d: expected an IPv4 or IPv6 prefix", device.Interface, i, j)
 					continue
 				}
+				prefix = prefix.Masked()
 				if prefixes[prefix.String()] {
 					add("wireguard %s: the same allowed IP prefix cannot be assigned twice", device.Interface)
 				}
@@ -248,7 +249,7 @@ func normalizeWireGuard(device WireGuard) WireGuard {
 		}
 		for j, prefix := range peer.AllowedIPs {
 			p, _ := netip.ParsePrefix(prefix)
-			peer.AllowedIPs[j] = p.String()
+			peer.AllowedIPs[j] = p.Masked().String()
 		}
 		sort.Strings(peer.AllowedIPs)
 	}
