@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,12 +73,15 @@ func TestDaemonLocalDNSRedirect(t *testing.T) {
 	doc := config.Native{Network: network.Desired{
 		Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"198.18.0.1/24"}}, {Name: "wan0"}},
 		Firewall: &network.Firewall{
-			AddressSets: []network.AddressSet{{Name: "public-dns", Names: []string{"redirected.test"}, RefreshInterval: "1s", Resolvers: []string{"192.0.2.1:53"}}},
+			// dnsmasq refuses the unavailable name; keep usable membership.
+			AddressSets: []network.AddressSet{{Name: "public-dns", Names: []string{"redirected.test", "unavailable.test"}, RefreshInterval: "1s", Resolvers: []string{"192.0.2.1:53"}}},
+			Forward:     []network.Forward{{From: "lan0", To: "wan0"}},
 			LocalRedirects: []network.LocalRedirect{
 				{Interface: "lan0", DestinationSet: "public-dns", Protocol: "tcp", DestinationPort: 53, Port: 5353},
 				{Interface: "lan0", DestinationSet: "public-dns", Protocol: "udp", DestinationPort: 53, Port: 5353},
 			},
 			Input: &network.FirewallChain{Policy: "drop", Rules: []network.FirewallRule{
+				{Match: network.PacketMatch{Protocol: "icmpv6"}, Action: "accept"},
 				{Match: network.PacketMatch{InInterface: "lan0", Protocol: "tcp", DestinationPorts: []network.PortRange{{Start: 5353}}}, Action: "accept"},
 				{Match: network.PacketMatch{InInterface: "lan0", Protocol: "udp", DestinationPorts: []network.PortRange{{Start: 5353}}}, Action: "accept"},
 			}},
@@ -112,6 +116,13 @@ func TestDaemonLocalDNSRedirect(t *testing.T) {
 		until(t, 10*time.Second, func() bool { return f.control.Do(context.Background(), "GET", "/v1/health", nil, nil) == nil })
 	}
 	ready()
+	var membership network.AddressSetSnapshot
+	if err := f.network.Do(context.Background(), "GET", "/v1/address-sets", nil, &membership); err != nil {
+		t.Fatal(err)
+	}
+	if len(membership.Sets) != 1 || len(membership.Sets[0].Addresses) == 0 || !strings.Contains(membership.Sets[0].Error, "REFUSED") {
+		t.Fatalf("partial DNS membership or independent peer error missing: %+v", membership)
+	}
 	query := func(address, transport string) (netip.Addr, error) {
 		var answer netip.Addr
 		err := fixtureInsideNamespace(lan, func() error {
@@ -160,12 +171,34 @@ func TestDaemonLocalDNSRedirect(t *testing.T) {
 	check("2001:db8:2::21", "203.0.113.7")
 	check("198.51.100.20", "203.0.113.99")
 	check("2001:db8:2::20", "203.0.113.99")
+	doc.Network.Firewall.AddressSets[0].RefreshInterval = "2s"
+	var committed control.State
+	if err := f.control.Do(context.Background(), "POST", "/v1/config/commit", control.CommitRequest{
+		ExpectedRevision: 1, RequestID: "partial-dns-membership", Config: config.FromNative(doc), ConfirmTimeoutSeconds: 30,
+	}, &committed); err != nil {
+		t.Fatal(err)
+	}
+	if committed.Confirmation == nil {
+		t.Fatal("configuration did not require confirmation")
+	}
+	ready()
+	check("198.51.100.21", "203.0.113.7")
+	check("2001:db8:2::21", "203.0.113.7")
+	var confirmed control.State
+	if err := f.control.Do(context.Background(), "POST", "/v1/config/confirm", control.ConfirmRequest{
+		Revision: committed.Revision, RequestID: "partial-dns-membership",
+	}, &confirmed); err != nil {
+		t.Fatal(err)
+	}
+	if confirmed.Confirmation != nil {
+		t.Fatal("partial DNS failure prevented confirmation")
+	}
 	f = f.restart()
 	ready()
 	check("198.51.100.21", "203.0.113.7")
 	check("2001:db8:2::21", "203.0.113.7")
 	doc.Network.Firewall.LocalRedirects = nil
-	if err := f.control.Do(context.Background(), "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: 1, RequestID: "remove-local-redirect", Config: config.FromNative(doc)}, nil); err != nil {
+	if err := f.control.Do(context.Background(), "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: committed.Revision, RequestID: "remove-local-redirect", Config: config.FromNative(doc)}, nil); err != nil {
 		t.Fatal(err)
 	}
 	check("198.51.100.21", "203.0.113.99")

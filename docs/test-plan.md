@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 11:27 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 12:11 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 実行原則
 
@@ -181,3 +181,9 @@ DoH確認は固定provider名ではなく、実configに設定されたHTTPS上�
 事前の無応答を以後の固定SERVFAIL期待にしない。応答が変動するpeerは同時点のpacketと実応答を照合し、安定した相互接続の成功と区別する。新規WAN/NICやhost経路は追加しない。
 
 実行結果: 2026-11-03、基準main `c371753`、通常build `6e0f020bf76c`（製品Go不変）で、保存homertの実private DNS/NextDNS設定を接続した単体39-resource実HGW手順が終了0。実NextDNS/Cloudflareの設定済みDoH上流すべてのHealthyを確認。安定した5転送先について独立LAN端末から両IP・UDP/TCPの20照会を行い、3先のSOA、2先のNXDOMAINとcore履歴の選択sourceを照合した。残る1先は事前UDP/TCP無応答から、試験中UDPのSERVFAILと後続NOERRORへ変化し、WAN captureで指定peer自身のNOERROR/NODATA応答を確認した。この先の固定SERVFAIL期待は試験側の誤りで、安定した4方式の受入には数えない。試験用local zoneは実suffixを隠さない名前へ変更し、DHCP/search/照会側も合わせた。新規WAN・host経路は追加していない。 同じ実行で通常の両IP Internet/DNS、DHCP scopes/sticky、BGP、NTP（host時計変更なし）、Tailscale/管理/運用記録、confirmed rollbackが通過。11巡回/自然PD更新0回、PD SIGKILL2.01秒・通常再起動4.87秒、停止時RA撤去/上流Releaseなし。全daemon再起動、HAでの実private DNS、全110-resource intent・実機資格は未受入。NextDNSは実endpointのprobe疎通で、全LAN照会がNextDNSを選んだという主張ではない。
+
+## LocalServiceRedirectと部分DNS失敗
+
+`make check-local-redirect DOCKER='sudo -n docker'`。独立dnsmasqのhostsと未設定の別名を同じAddressSetへ指定し、正常回答とREFUSEDを受ける。入力拒否policyにはICMPv6/サービスportを明示し、通常WAN転送も許可する。両IP UDP/TCPで、対象のローカル回答・WAN漏出なし、選外のpeer回答、peerのSIGHUP/実DNS更新によるmembership変更、confirmed commit/confirm、daemon再起動、撤去後のpeer回答を確認する。network snapshotにはusable membershipとREFUSEDが併存することを確認する。
+
+2026-11-03、基準main `fa246ed` + 部分DNS失敗の準備判定修正、通常Makefile build `fa246ede2a5e`で実daemon/独立dnsmasqのlocal redirect手順が終了0（外側5.12秒）。旧routerdのresolveIPAddressSetは成功した名前のアドレスを使い、独立した失敗をstatusへ残す。native networkも部分membershipを適用していたが、coordinatorのCheckReadyが一件の解決errorで準備/確認を拒否していた。修正前は正常回答とREFUSEDの混在でhealth準備が10秒後も失敗することを再現。修正後はusable membershipを準備済みとし、REFUSEDをnetwork statusへ残したまま、両IP UDP/TCPのローカル転送、選外宛先のWAN転送、実DNS更新による旧転送先の解除/新転送先の適用、confirmed commit/confirm、daemon再起動、転送設定撤去を確認した。WAN captureで対象DNSの漏出なしも確認した。 これは実Linux kernel/実product processと独立dnsmasqの通信であり、実HGW全profileへ保存homertの2つのIPAddressSetとDNS/NTP LocalServiceRedirectを接続した受入は次の残作業。NTP redirect・HA・物理NIC資格には数えない。元fixtureに欠けていたICMPv6入力許可とLAN→WAN転送を明示し、確認応答は別の空structへdecodeするよう修正した。製品側に暗黙許可・DAD回避・待機延長は追加していない。通常build・3実行物static link、make race vetが通過。

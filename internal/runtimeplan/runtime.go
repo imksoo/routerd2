@@ -215,7 +215,9 @@ func (r *Runtime) CheckReady(ctx context.Context) error {
 			found := false
 			for _, set := range membership.Sets {
 				if set.Name == name {
-					found = !set.ResolvedAt.IsZero() && set.Error == ""
+					// Failed names do not invalidate usable redirect membership.
+					// The network snapshot still reports their resolution errors.
+					found = !set.ResolvedAt.IsZero() && (set.Error == "" || len(set.Addresses) > 0)
 					break
 				}
 			}
