@@ -25,7 +25,11 @@ routerd server: signed admission, SQLite persistence, topology projection and
 revocation. Its sandbox flag disables unrelated kernel writers; the HTTP and
 admission store are real. The fixture uses only loopback and temporary files.
 
-The service runtime's snapshot admission must be integrated separately. Applying
-learned RR/direct peers to IPIP/BGP and implementing the routerd2 RR server are
-not established by these checks. This service does not import the old dynamic
-configuration journal or own network resources.
+The runtime projects admitted RR peers through the configured `sam_transport`
+recipe into IPIP/BGP, optionally over the kernel WireGuard device.
+`make check-sam-transport OLD_ROUTERD=/absolute/path/to/routerd` checks this
+complete product path against an independent routerd RR and FRR. Its four cases
+verify claim-owned /32 advertisement, NAT-less client TCP/UDP, explicit revocation
+and original admission expiry over IPIP and WireGuard. Direct leaf groups,
+multi-leaf ownership movement and provider capture remain separate work.
+The enrollment client publishes observations; network and BGP owners apply them.

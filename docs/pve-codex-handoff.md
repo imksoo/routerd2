@@ -14,6 +14,12 @@
 
 基準main `f60b3d2` + CIDR正規化修正、通常build `f60b3d2789cb`で同じWireGuard実通信手順が終了0。独立`wg set`と実kernelがホスト部付きCIDRを受理することを確認し、routerd2の拒否を撤去した。IPv4 `198.51.100.20/24`・IPv6 `2001:0db8:0080::20/64`を入力し、kernelの`198.51.100.0/24`・`2001:db8:80::/64`、移動先復旧・daemon再起動後のLAN TCP/UDPを確認した。正規化後の同じprefixを異なるpeerへ割り当てる競合は検出する。`make check`・通常static3実行物が通過。IPv6の実転送はこの手順の範囲に含めない。
 
+## 現行buildのSAM登録・WireGuard/BGP・撤去
+
+`2465e6e`相当の製品source・通常build `f60b3d2789cb`で、独立旧routerd `1329ef54f296`・FRR・wireguard-tools・LAN端末の既存4手順が全て終了0。IPIP/WireGuardの各経路で実登録、claim所有/32の広告、NATなしTCP/UDP、明示revokeと元の登録期限経過によるtunnel/FIB/広告撤去を確認した。追加の製品code・試験caseは作っていない。単一RR/claimの範囲を受け入れ、複数leaf移動・provider capture・direct mesh・key/PSK rotationは継続する。手順は[試験計画](test-plan.md)に集約した。
+
+保存homertのDNS上流も読取専用で再照合した。hostから実peerへ10組のsuffix/上流をUDP/TCPで照会し、SOA付きNOERROR14応答、NXDOMAIN4応答、SOAなしNOERROR1応答、無応答1件だった。これは現時点のpeer到達性であり、routerd2の転送受入ではない。実設定・質問名・応答原本を公開/保存していない。
+
 ## homertの固定時刻源を単体・二台構成へ接続
 
 保存中の両homert設定と旧routerdの`pkg/controller/chain/ntp.go`を再読した。autoのNTPClientは学習源と公開2hostnameのfallbackを持ち、staticのNTPServerは私設peerと同じ公開2hostnameを常時設定する。native例には後者が欠けていた。既存の一つのchronydへ二つの時刻源宣言を接続し、core DNSで名前解決する。私設peerは隔離環境の独立chronydへ対応づけた。

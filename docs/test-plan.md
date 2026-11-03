@@ -8,6 +8,10 @@
 
 AllowedIPsにはホスト部付きIPv4/IPv6 CIDRと展開表記を指定し、実kernelの正規化されたprefixを初回・移動先復旧・daemon再起動後に照合する。初回とpeer復帰では実handshakeを確認してからLAN TCP/UDPを測定する。peerのlink停止でLinuxが撤去したLANへの戻り経路は、独立peerの起動設定として再適用する。接続準備中の短いTCP期限やpeer設定の欠落を製品の通信結果へ読み替えない。
 
+## SAM登録から端末通信・撤去まで
+
+通常build後、`python3 scripts/daemon-tests.py sam-transport --old-routerd /absolute/path/to/routerd`を使う。参照版`1329ef54f296`の独立routerd RR、FRR、wireguard-toolsとLAN端末を専用namespaceへ隔離する。IPIPとWireGuard経由それぞれで、実登録・claim所有/32の広告・kernel経路・NATなしTCP/UDP、明示revokeと元の登録期限経過による広告/tunnel/FIB撤去を確認する。既存の4手順を使用し、原本期限・時計・DBを書き換えない。peer停止後の期限を待ち、受信packetと両方向の端末通信を照合する。通常runnerは終了時にbinary copy・秘密・capture・namespaceを撤去する。これは単一RR/claimの受入であり、複数leaf間の移動・provider操作・direct mesh・key/PSK rotationは残る。
+
 ## 実行原則
 
 - 毎回の実通信直前にこの計画全体を読み、対象・peer・実行版・観測点・隔離・復旧を確認する。変更対象の旧routerd実装、caller、運用修正と保存中homert02/03の実設定を参照する。秘密は公開しない。
