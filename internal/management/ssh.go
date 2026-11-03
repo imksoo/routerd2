@@ -74,7 +74,8 @@ func Serve(ctx context.Context, opts runtimeconfig.SSH, runtimeDir, stateDir str
 	if err != nil {
 		return err
 	}
-	l, err := net.Listen("tcp", opts.Listen)
+	lc := sshListenConfig()
+	l, err := lc.Listen(ctx, "tcp", opts.Listen)
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 00:59 UTC。対象は implementation-plan.md と同JSONの34 work package。
+更新: 2026-11-03 01:20 UTC。対象は implementation-plan.md と同JSONの34 work package。
 目的は、独立端末を接続しただけで家庭用ルーターの通信が成立し、障害・再起動・更新から復旧する最初の製品を完成させること。
 
 ## 判定原則
@@ -18,13 +18,25 @@
 
 2026-11-03時点で、work packageは in_progress 22件、planned 12件で、製品全体を完了と判定した項目はない。過去の部分合格を全体完成に読み替えない。
 
-- 実行版の基準mainは `30006ea`。15-resource実HGW gateとrunnerをcommit/push済み。16-resource例へNTP client/serverと実設定のconntrack TCP liberalを追加し、実HGW統合gateを通過した。製品Goコードは変更していない。
-- 現在の作業ツリー（基準HEAD `30006ea`、製品Goコードは`c9d7055`から不変）で `make check` はGo/Python checks、Race Detector、vetを含め終了0。`make build DOCKER='sudo -n docker'`も終了0、`readelf`で3実行物にdynamic dependencyがないことを確認し、nDPI source/license noticesも存在する。
+- 実行版の基準mainは `f64580e`。今回の19-resource例とSSH起動順修正を実HGW統合gateで確認済み。
+- 今回の作業ツリー（基準HEAD `f64580e` + SSH FREEBIND変更）で `make check` はGo/Python checks、Race Detector、vetを含め終了0。`make build DOCKER='sudo -n docker'`も終了0、`readelf`で3実行物にdynamic dependencyがないことを確認し、nDPI source/license noticesも存在する。
 - 実supervisor/control/network/Health worker、独立二WAN/Linux peer、TCP/UDP、packet captureによる make check-health-pbr は障害切替・復旧、worker/supervisor再起動、古い通知・期限切れ、confirmed rollbackを通過済み。実対象回線や二台homertの受入ではない。
 - 通常Alpine/PID 1 applianceの隔離PVE試験では、独立PPPoE AC/ISC DHCPv6/Linux clientを使うDHCPv4、PD/Renew、SLAAC、両IP通信、署名更新、明示・自動rollbackを通過済み。対象ONU/NICではない。
 - 実HGWのmacvlanと独立Linux clientで、過去の短時間試験および7,800秒試験がある。今回のmain由来product build `7c1cb3619acb` による自然PD T1観測は、試験用の生成profileで完了した。自然Renew/ReplyをWAN captureで各1回確認し、Renewはclient UDP/546→server/547、対応ReplyはHGW source port 49153→client/546だった。期限が更新され、初回SolicitとRenewのDUID、IAID=1、委譲prefixは同一。旧routerdの受信実装もsender address/portで制限していない。実LinuxではWAN/LANとも`accept_dad=1`、観測したglobal IPv6 addressはnon-tentative、DAD failureなし。PD worker SIGKILL後1.32秒、graceful restart後3.61秒、全daemon restart後3.99秒で両clientの通信が復旧した。upstream grantをReleaseせずzero-lifetime RAとkernel withdrawalを確認。独立する両clientの自然DHCPv4更新と、IPv4/IPv6 HTTPSおよび学習DNSのUDP/TCPを676観測roundで確認した。raw capture/state/stageは削除済み。生成profileの試験であり、native homert設定・連続TCP・ONU直結・対象物理NICのqualificationではない。
-- 2026-11-03に読み直したhomert02/03設定は各110 resourcesで、kind件数は一致する。両方にIPv6 host-traffic policy route（table 120）がある。`homert02-native.yaml` / `homert03-native.yaml` は各14 resources。`single-router-dslite-dhcp-dns.yaml` はNTP追加後16 resourcesで、いずれも全設定ではない。過去の一時57-resource入力を現行profileや完成証拠に流用しない。第6回native gateは終了0。DHCPv4/PD/RA/DHCPv6/SLAAC、DNS/DoH、DS-Lite IPv4/IPv6通信、WAN遮断復旧、PD workerとdaemon再起動を独立端末で確認した。15-resource profileの合格を110-resource homert受入に読み替えない。
+- 2026-11-03に読み直したhomert02/03設定は各110 resourcesで、kind件数は一致する。両方にIPv6 host-traffic policy route（table 120）がある。`homert02-native.yaml` / `homert03-native.yaml` は各14 resources。`single-router-dslite-dhcp-dns.yaml` は管理/DNS追加後19 resourcesで、いずれも全設定ではない。過去の一時57-resource入力を現行profileや完成証拠に流用しない。第6回native gateは終了0。DHCPv4/PD/RA/DHCPv6/SLAAC、DNS/DoH、DS-Lite IPv4/IPv6通信、WAN遮断復旧、PD workerとdaemon再起動を独立端末で確認した。15-resource profileの合格を110-resource homert受入に読み替えない。
 - ens18/ens20はvirtio NICで、NTT ONU直結と対象物理NICのqualificationは未実施。HGW経由の結果はONU直結の証拠ではない。homert実機、arm64実行、PVE/Kubernetes/Cloud全体も未受入。
+
+## 今回追加する単体受入
+
+基準main `f64580e`の19-resource profileで、管理interface `mgmt0`を隔離vethで接続する。端末側198.19.0.2/24のみ試験setupで設定し、router側198.19.0.1/24は製品が管理する。host管理経路は変更しない。
+
+旧homertのLAN→loopback二段DNSは1 workerへ集約し、loopback/管理/LAN listenerへ同じ解決規則を直接適用する。cacheは10000件、正答minTTL60秒/maxTTL24時間、negativeTTL30秒。二段目1000件cacheは設けない明示的置換であり、private suffix全件の受入とは分ける。query logを有効化する。
+
+独立DNS peerの停止中に取得済みAを両IPで再照会し（`dig +nocookie`で問い合わせごとに変わるCookieを付けない）、未取得名はSERVFAILで別上流へ漏れないことを確認する。loopback/管理DNS、管理端末から一時鍵でSSH `show status`、WebのDNS履歴、LANからWebへの遮断を確認する。全daemon再起動後にも同じ鍵/host identityでSSH、履歴保持、DNS/Web/NTPと両IP Internet通信を確認する。一時鍵・known_hosts・capture・namespaceは試験終了時に削除する。既存のMakefile再実行コマンドを使い、短時間20秒・full restart有効、WAN outageは繰り返さない。
+
+最初の追加gateはcache確認で停止した。digが各実行で異なるEDNS Cookieを生成して別cache keyになっていたため、cache確認のqueryだけ`+nocookie`を明示した。同時に、cold startでSSHが管理address設定前にbindして2回再起動する製品不具合を観測した。Linux SSH listenerを指定addressへのFREEBINDに変更し、初回generation=1/restarts=0と実SSH応答を次回確認する。wildcard待受や設定外のhost address追加は行わない。
+
+19-resource native profile（基準HEAD `f64580e` + SSH修正、実行build ID `f64580e932b2`）の実HGW gateは終了0。loopback/管理/LAN両IP DNS、上流停止中のcache応答、未取得名のfailure isolationと復旧、query log API/Web閲覧、管理端末から鍵認証SSH、LANからWebへの遮断を確認した。SSHはaddress設定前から指定addressへ待受し初回generation=1/restarts=0。全daemon再起動後も同じhost keyでSSH接続でき、保存済みDNS履歴を閲覧できた。WAN学習NTP源stratum 3と両LAN chronyd client応答も通過。DHCP/PD/RA/SLAAC/DS-Lite/IPv6 HTTPS・DNS UDP/TCPを2 round、PD worker SIGKILL/通常再起動後3.10/4.94秒で復旧した。全daemon restartから管理/NTPを含む全確認完了17.63秒はclient測定時間を含む。zero-lifetime RA/kernel withdrawal、upstream Releaseなしを確認。自然T1、連続TCP、全homert/HA、ONU直結・対象NICは今回未受入。stage/capture/一時鍵/namespaceは撤去済み。
 
 ## 実行順と合格条件
 

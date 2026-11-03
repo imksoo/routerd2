@@ -2,12 +2,19 @@
 # 198.18.0.0/24 is reserved for benchmark networks; never use it on a site LAN.
 # NTT HGWs commonly omit the DHCPv6 AFTR option; this AFTR matches homert's
 # explicit routerd configuration. Replace interfaces, LAN values and DNS peers before deployment.
+# SSH is configured separately in the boot file; use the management address,
+# port 2222 and operator authorized_keys to match this profile's input policy.
 schema_version: 2
 resources:
   - id: interface/wan0
     interface: {name: wan0, ipv4_rp_filter: 0}
   - id: interface/lan0
     interface: {name: lan0}
+  - id: interface/mgmt0
+    interface: {name: mgmt0}
+  - id: address/management
+    depends_on: [interface/mgmt0]
+    address: {interface: mgmt0, cidr: 198.19.0.1/24}
   - id: address/lan
     depends_on: [interface/lan0]
     address: {interface: lan0, cidr: 198.18.0.1/24}
@@ -18,6 +25,8 @@ resources:
       input:
         policy: accept
         rules:
+          - {match: {in_interface: mgmt0, source: 198.19.0.0/24, protocol: tcp, destination_ports: [{start: 2222}, {start: 8080}]}, action: accept}
+          - {match: {protocol: tcp, destination_ports: [{start: 2222}, {start: 8080}]}, action: drop}
           - {match: {in_interface: wan0, protocol: udp, destination_ports: [{start: 53}]}, action: drop}
           - {match: {in_interface: wan0, protocol: tcp, destination_ports: [{start: 53}]}, action: drop}
       forward:
@@ -145,13 +154,18 @@ resources:
       bypasses:
         - {service: service.internet, priority: 10100}
   - id: service/dns
-    depends_on: [interface/lan0, address/lan, host-wan]
+    depends_on: [interface/lan0, address/lan, address/management, host-wan]
     service:
       name: dns
       dns:
-        listen_interface: lan0
         spec:
+          cache: {enabled: true, maxEntries: 10000, minTTL: 60s, maxTTL: 24h, negativeTTL: 30s}
+          queryLog: {enabled: true}
           listen:
+            - {name: loopback, addresses: [127.0.0.1], port: 53}
+            - name: management
+              addressFrom: [{resource: Interface/mgmt0, field: ipv4Addresses}]
+              port: 53
             - {name: lan-v4, addresses: [198.18.0.1], port: 53}
             - name: lan-v6
               addressFrom:
@@ -192,3 +206,8 @@ resources:
             servers: [{address: 198.18.0.254}]
         listen: [198.18.0.1]
         allow: [198.18.0.0/24]
+  - id: service/console
+    depends_on: [address/management]
+    service:
+      name: console
+      web_console: {listen: "198.19.0.1:8080", title: routerd2}

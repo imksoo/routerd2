@@ -107,7 +107,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         "dns",
     ]
     if config_path is not None:
-        roles.append("ntp")
+        roles.extend(["ntp", "web_console"])
     boot = dict(
         platform="host",
         config=str(config_path or stage / "config.json"),
@@ -124,6 +124,9 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
     )
     if config_path is not None:
         boot["engines"]["ntp"] = str(stage / "chrony-engine.tar")
+        management_key = stage / "management-key"
+        run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(management_key)])
+        boot["ssh"] = {"listen": "198.19.0.1:2222", "user": "admin", "authorized_keys": [management_key.with_suffix(".pub").read_text().strip()]}
     (stage / "boot.json").write_text(json.dumps(boot))
     if config_path is None:
         nat_rules = [{"type": "masquerade", "match": {"family": 4, "source": "198.18.0.0/24", "out_interface": "dslite0"}}]
@@ -315,6 +318,11 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         run(["ip", "-n", client, "link", "set", "client0", "up"])
         run(["ip", "-n", client, "address", "add", dns_peer_address + "/24", "dev", "client0"])
 
+        if config_path is not None:
+            run(["ip", "link", "add", "mgmt0", "netns", router, "type", "veth", "peer", "name", "mgmt-peer", "netns", client])
+            run(["ip", "-n", client, "address", "add", "198.19.0.2/24", "dev", "mgmt-peer"])
+            run(["ip", "-n", client, "link", "set", "mgmt-peer", "up"])
+
         def start_private_dns():
             return start(
                 client,
@@ -480,6 +488,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
 
         wait(ready, 120)
         if config_path is not None:
+            management = next(m for m in query("supervisor.sock", "/v1/status")["modules"] if m["name"] == "management")
+            assert management["generation"] == 1 and management["restarts"] == 0, "SSH restarted while waiting for its configured address: " + json.dumps(management)
             assert run(inside(router, ["sysctl", "-n", "net.netfilter.nf_conntrack_tcp_be_liberal"])).strip() == "1", "configured conntrack TCP liberal mode was not applied"
             wait(lambda: query("control.sock", "/v1/services/service.wan4").get("snapshot", {}).get("active", False))
             wan4 = query("control.sock", "/v1/services/service.wan4")["snapshot"]
@@ -725,15 +735,39 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             check_tailnet()
             print("PASS actual HGW automatic LAN -> Tailscale peer IPv4/IPv6 (explicit IPv6 NAT), advertised IPv4 LAN <- peer TCP/UDP; IPv4/IPv6 exit HTTPS/UDP DNS", flush=True)
         for server, family in ((lease[3], "-4"), (str(router_dns), "-6")):
-            answer = run(inside(client, ["dig", family, "@" + server, "available.split.test", "A", "+short", "+time=3", "+tries=1"]))
+            answer = run(inside(client, ["dig", family, "@" + server, "available.split.test", "A", "+nocookie", "+short", "+time=3", "+tries=1"]))
             assert answer.strip() == "192.0.2.77", "conditional DNS query reached the wrong upstream: " + answer
         private_dns.terminate()
         private_dns.wait(timeout=3)
+        if config_path is not None:
+            for server, family in ((lease[3], "-4"), (str(router_dns), "-6")):
+                cached = run(inside(client, ["dig", family, "@" + server, "available.split.test", "A", "+nocookie", "+short", "+time=3", "+tries=1"]))
+                assert cached.strip() == "192.0.2.77", "cached answer was lost when its upstream stopped: " + cached
         failed = run(inside(client, ["dig", "@" + lease[3], "offline.split.test", "A", "+time=3", "+tries=1"]))
         assert "status: SERVFAIL" in failed, "unavailable conditional DNS source fell through to the default upstream"
         private_dns = start_private_dns()
         wait(lambda: subprocess.run(inside(client, ["dig", "@" + lease[3], "recovered.split.test", "A", "+short", "+time=2", "+tries=1"]), capture_output=True, text=True).stdout.strip() == "192.0.2.77")
         print("PASS independent conditional DNS source, failure isolation and recovery over LAN IPv4/IPv6", flush=True)
+
+        def check_management():
+            for namespace, server in ((router, "127.0.0.1"), (client, "198.19.0.1")):
+                answer = run(inside(namespace, ["dig", "@" + server, "router.home.arpa", "A", "+short", "+time=3", "+tries=1"]))
+                assert answer.strip() == "198.18.0.1", "loopback/management DNS did not resolve the configured LAN name: " + answer
+            status = json.loads(run(inside(client, [
+                "ssh", "-F", "/dev/null", "-i", str(management_key), "-o", "BatchMode=yes",
+                "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=accept-new",
+                "-o", "UserKnownHostsFile=" + str(stage / "known-hosts"), "-o", "ConnectTimeout=3",
+                "-p", "2222", "admin@198.19.0.1", "show status",
+            ])))
+            assert status["ready"], "SSH reported the router unavailable"
+            history_path = "/v1/services/service.dns/dns-history?name=available.split.test.&limit=20"
+            wait(lambda: any(q["cacheHit"] for q in query("control.sock", history_path)["queries"]))
+            page = run(inside(client, ["curl", "--noproxy", "*", "--fail", "--max-time", "4", "-sS",
+                "http://198.19.0.1:8080/dns-queries?service=service.dns&name=available.split.test.&limit=20"]))
+            assert 'data-query="' in page and "192.0.2.77" in page, "Web console omitted the recorded DNS answer"
+            denied = subprocess.run(inside(client, ["curl", "--interface", "client0", "--noproxy", "*", "--max-time", "2", "-sS", "http://198.19.0.1:8080/"]), capture_output=True)
+            assert denied.returncode != 0, "management console was reachable through the LAN interface"
+            print("PASS loopback/management DNS, cache during upstream outage, persistent query history, SSH host identity and Web access restricted to management interface", flush=True)
 
         def check_time():
             after = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
@@ -751,6 +785,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             print("PASS NTP synchronized and independent LAN chronyd clients received time; host clock adjustment disabled", flush=True)
 
         if config_path is not None:
+            check_management()
             check_time()
 
         start(router, ["ip", "-ts", "monitor", "route"], "router-routes")
@@ -970,6 +1005,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             wait_dns()
             check_traffic()
             if config_path is not None:
+                check_management()
                 check_time()
             print("PASS actual HGW full daemon restart retained identity and restored both clients; seconds", round(time.monotonic() - restart_at, 2), flush=True)
             if tailnet:
