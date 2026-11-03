@@ -62,6 +62,8 @@ WAN/tailnet captureは各最大8MB、PD captureはudp546と実行時間で限定
 
 DHCPの現用権はVRRPが決める。元現用が停止しても、同期済みの保存leaseから配布を再開して実Renew/ACKを返す。同期は旧routerdと同じ非同期のため、未受信の新規割当を失った場合の重複回避までは保証しない。`--peer-loss`の既存namespace手順も、元現用不在中の既知lease更新と、同期復帰後の新規割当を確認する契約へ更新する。
 
+各方向の引継ぎ後、元現用daemonを停止したまま、保存leaseも手動address/routeも持たない新しい独立LAN端末を接続する。同じHA手順内でBusyBoxのDHCPv4・DHCPv6 Information、kernelの通常DAD/SLAAC/default route、配布されたDNS/searchを取得し、新規leaseの重複なし・自身のDHCP名・公開名の両IP UDP/TCP解決・両IP HTTPSを確認する。端末ごとに最大48packetのDHCP/ICMPv6 captureを取り、旧現用の再加入後には新規leaseも同期完了の対象に含める。DHCP名の非同期な公開は実queryで待ち、確認開始から回答までの時間を記録する。
+
 残作業: 今回通過した特別scope・nDPI/履歴・syslog/OTLPに続き、保持期限/archive障害・cold start/再起動後の安定性を同じprofileで受け入れる。複数回、BGP/VRRP effect ACK待ちのtimeoutでworker再起動を観測したため、全機能時の適用/停止順序も次の確認対象とする。
 
 ## 公開DoHの片側停止・復旧

@@ -596,6 +596,7 @@ def owner(stage, uplink, retention_check):
         print("Initial public and fixed-WAN NAT tuples", mappings, flush=True)
         original_pd = pd_identity(elected())
         original_address = lease.read_text().split()[0]
+        new_addresses = set()
         def standby_synced(node):
             if daemons[node].poll() is not None:
                 raise RuntimeError("rejoining product exited: " + node)
@@ -606,9 +607,52 @@ def owner(stage, uplink, retention_check):
                 return False
             sync = pd.get("sync", {})
             leases = stage / node / "state/services/lan-leases/dnsmasq.leases"
-            wanted = {original_address, *(c[3] for c in special_clients)}
+            wanted = {original_address, *(c[3] for c in special_clients), *new_addresses}
             mirrored = leases.exists() and wanted <= {line.split()[2] for line in leases.read_text().splitlines() if len(line.split()) >= 3}
             return pd.get("state") == "standby" and sync.get("epoch", 0) > 0 and not sync.get("error") and dhcp.get("standby") and mirrored
+
+        def check_new_client(node):
+            key = "new-" + node
+            names[key] = prefix + "-" + key
+            run(["ip", "netns", "add", names[key]])
+            namespaces.append(names[key])
+            run(inside(key, ["ip", "link", "set", "lo", "up"]))
+            connect(key, "client0", "lan")
+            start(key, ["tcpdump", "-n", "-l", "-v", "-i", "client0", "-c", "48", "icmp6 or udp port 67 or udp port 68 or udp port 546 or udp port 547"], key + "-wire")
+            lease_file = stage / (key + ".lease")
+            hook = stage / (key + ".sh")
+            hook.write_text('#!/bin/sh\ncase "$1" in deconfig) ip -4 address flush dev "$interface"; ip -4 route flush dev "$interface";; bound|renew) ip address replace "$ip/$subnet" dev "$interface"; ip route replace default via "$router" dev "$interface" src "$ip"; printf "%s %s %s\\n" "$ip" "$router" "$dns" > "' + str(lease_file) + '";; esac\n')
+            hook.chmod(0o500)
+            start(key, ["busybox", "udhcpc", "-f", "-i", "client0", "-s", str(hook), "-p", str(stage / (key + ".pid")), "-x", "hostname:" + key], key + "-dhcp")
+            wait(lease_file.exists)
+            address, gateway, dns = lease_file.read_text().split()
+            assert gateway == dns == "198.18.0.1", (gateway, dns)
+            assert address not in {original_address, *(c[3] for c in special_clients), *new_addresses}, "new client reused an occupied lease"
+            new_addresses.add(address)
+            def ipv6_ready():
+                links = json.loads(run(inside(key, ["ip", "-j", "-6", "address", "show", "dev", "client0", "scope", "global"])))
+                return any(not a.get("tentative") and not a.get("dadfailed") for link in links for a in link.get("addr_info", [])) and bool(json.loads(run(inside(key, ["ip", "-j", "-6", "route", "show", "default"]))))
+            wait(ipv6_ready)
+            info_hook = stage / (key + "-info.sh")
+            info_hook.write_text('#!/bin/sh\ncase "$1" in bound|renew) printf "dns=%s\\nsearch=%s\\n" "$dns" "$search";; esac\n')
+            info_hook.chmod(0o500)
+            information = run(inside(key, ["busybox", "udhcpc6", "-l", "-f", "-n", "-q", "-i", "client0", "-s", str(info_hook), "-t", "3", "-T", "1"]))
+            options = dict(line.split("=", 1) for line in information.splitlines() if line.startswith(("dns=", "search=")))
+            dns6 = options.get("dns", "").split()
+            assert dns6 and "home.arpa" in options.get("search", "").split(), options
+            print("New HA client acquired DHCPv4/SLAAC and DHCPv6 DNS/search via", node, "address", address, flush=True)
+            published_at = time.monotonic()
+            wait(lambda: run(inside(key, ["dig", "@" + dns, key + ".home.arpa", "A", "+short", "+time=3", "+tries=1"])).strip() == address)
+            print("PASS new DHCP name publication after", round(time.monotonic() - published_at, 2), "seconds", flush=True)
+            for server in [dns, *dns6]:
+                for transport in ("+notcp", "+tcp"):
+                    answer = run(inside(key, ["dig", "@" + server, key + ".home.arpa", "A", "+short", "+time=3", "+tries=1", transport])).strip()
+                    assert ipaddress.ip_address(answer) == ipaddress.ip_address(address), (server, answer, address)
+                    assert run(inside(key, ["dig", "@" + server, "example.net", "A", "+short", "+time=3", "+tries=1", transport])).strip()
+            for family, host in (("-4", "1.1.1.1"), ("-6", "[2606:4700:4700::1111]")):
+                run(inside(key, ["curl", family, "--noproxy", "*", "--fail", "--max-time", "8", "--resolve", "one.one.one.one:443:" + host, "-sS", "-I", "https://one.one.one.one/"]))
+            print("PASS newly attached HA client via", node, "real DHCPv4", address, "SLAAC, DHCPv6 DNS/search, both-family UDP/TCP DNS and Internet with the former owner stopped", flush=True)
+
         for _ in range(2):
             previous = elected()
             survivor = "b" if previous == "a" else "a"
@@ -658,6 +702,7 @@ def owner(stage, uplink, retention_check):
                 wait(lambda: lease_file.stat().st_mtime_ns > before)
             check_special_clients(fingerprints=True)
             print("PASS HA special-client Release/reacquisition retained sticky addresses and recorded fingerprints on the new owner", flush=True)
+            check_new_client(survivor)
             if retention_check:
                 print(run(["python3", "-I", str(stage / "retention-check.py"), "--stage", str(stage / survivor),
                     "--router", names[survivor], "--client", names["client"], "--archive-log", str(stage / "syslog.jsonl")], timeout=180), end="", flush=True)

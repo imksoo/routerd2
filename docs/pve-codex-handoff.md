@@ -2,6 +2,18 @@
 
 更新: 2026-11-03。全体ゴールは継続中。
 
+## 引継ぎ後に初めて接続するLAN端末
+
+main `8840131`・通常Makefile build `8840131f706a`、各54-resource二台例で実HGW手順が終了0。各方向の旧現用daemon停止後に新しいLinux端末を接続し、BusyBoxの実DHCPv4割当・重複なし、通常DAD/SLAAC/default route、DHCPv6 InformationのDNS/search、配布DNSへの両IP UDP/TCPの自端末名・公開名照会、両IP HTTPSを確認した。再加入した旧現用には新規leaseも同期され、非preemptを維持した。新規端末のcaptureでDiscover/Offer/Request/ACK、RA、Information-request/Replyを照合した。
+
+最初の手順はDHCP割当直後のDNS公開を仮定して空回答で停止した。割当観測からDNSへの反映は非同期のため、同じ実queryで公開までを測定する手順へ修正し、最終実行ではDNS確認開始から0.71秒/1.40秒で回答を確認した。製品Go・保存homert相当の設定は変更していない。
+
+既存の設定期限切れrollback/confirm、通常・特別端末、DNS/DoH/BGP/NTP/Tailscale/管理、fresh nDPI/履歴/syslog/OTLPも両方向で通過した。公開TCP488応答・最大間隔14.93秒、UDP514応答/15期限超過・最大8.51秒。固定WAN TCP509応答・最大13.92秒、UDP522応答/9期限超過・最大8.01秒。TCPは各SYN1回、同一socket/NAT tupleを維持した。全項目再確認121.61秒/72.56秒にはNTP・sampling・新規端末を含む。
+
+NTPは引継ぎ中に一時的な独立client照会timeoutを観測した。先行実行のtrackingではskew1000000ppm/root dispersion34.33秒から、後続の実上流応答で45.90ppm/0.00127秒へ改善し、client応答も復旧した。長時間の時刻品質と引継ぎ中の継続提供は残作業。全110-resource意図、自然更新、全34 package、対象実機/ONU/NIC/性能の受入も継続する。
+
+再実行は`make check-uplink-ha DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18`。通常build後のrunner修正だけの再実行は`python3 scripts/uplink-ha.py --uplink ens18`。`make race vet`・`make test-tools`36件・Python構文検査・通常3実行物のstatic linkが通過した。終了したprocess/namespace/private stageは撤去済み。
+
 ## 単体全構成の実HGW再確認とBGP受理経路の観測
 
 main `986246c`・通常build `986246cb28dc`の45-resource単体例を実HGWで起動し、独立LAN端末のDHCPv4/SLAAC/Information・両IP Internet/DNS、4 DS-Lite、BGP2 peer、NTP、Tailscale、管理、native nDPI/履歴・syslog/OTLP、設定rollbackと全daemon再起動が終了0。PD SIGKILL1.97秒/通常再起動6.09秒、全daemon後の全項目再確認111.63秒。111.63秒は転送断時間ではない。2巡回/自然PD更新0回。WAN遮断・追加PBR調査は行っていない。

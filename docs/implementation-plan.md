@@ -1,5 +1,7 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
+main `8840131`・通常build `8840131f706a`の各54-resource二台例で、旧現用停止中に初めて接続する端末のDHCPv4/SLAAC/DHCPv6 Information、両IP DNS/Internet、旧現用再加入時の新規lease同期を両方向で受け入れた。既存socket/NAT tuple、設定rollback/confirmと全機能再確認も通過。引継ぎ中のNTP品質・長時間安定性と全体の残作業を継続する。条件・測定値は[引き継ぎ](pve-codex-handoff.md)に記載する。
+
 main `986246c`・通常build `986246cb28dc`の45-resource単体例を実HGWで起動し、独立LAN端末のDHCPv4/SLAAC/Information・両IP Internet/DNS、4 DS-Lite、BGP2 peer、NTP、Tailscale、管理、native nDPI/履歴・syslog/OTLP、設定rollbackと全daemon再起動が終了0。PD SIGKILL1.97秒/通常再起動6.09秒、全daemon後の全項目再確認111.63秒。111.63秒は転送断時間ではない。2巡回/自然PD更新0回。WAN遮断・追加PBR調査は行っていない。
 
 BGPの受信数・global import policy後の受理数を状態APIへ接続し、`BGPRouter.status.acceptedPrefixes`を追加した。受信/受理/選択FIBを区別し、既存のpeer観測と全local-RIB walkを使う。独立FRRで許可/未許可の広告、撤去/復帰、参照値のassert解除/再assert、daemon再起動と実TCP/UDPを確認した。実行版・条件・残作業は[試験計画](test-plan.md)と[引き継ぎ](pve-codex-handoff.md)へ集約する。単体の残る意図を埋め、HA・配布・実機の受入へ進む。全34 packageのゴールは継続中。
@@ -22,7 +24,7 @@ mainを取得し、直近の変更を統合した。34 work packageの状態は�
 | 1 | 単体DNSのcache・query log、loopback/管理listener、SSH/Web管理 | 独立端末から解決・履歴閲覧・鍵認証、上流停止中のcache、管理interface制限、daemon再起動後の復旧 | 実HGWで合格、main反映済み |
 | 2 | 複数DNS suffix/upstream、4本のDS-Liteとbackup回線、BGP、Tailscaleの単体設定 | 現行homertの各通信経路を独立peer/端末から通す。既存engineへ接続し、不足箇所だけ実装 | DNS/4 DS-Liteの優先選択とLAN静的gateway/BGP 2 peers/Tailscaleの単体経路は合格。他は未接続部分あり |
 | 3 | 単体全体のcold start、自然更新、MTU/通信継続、更新・復旧 | 同一profileで端末の通常利用を維持し、変更後に戻る | 部分試験のみ |
-| 4 | 二台HAのVIP/lease/PD/conntrackと既存TCP/UDP | 両方向の停止・復帰、新規端末と既存通信を同時に確認 | 同期済み端末と既存通信は両方向通過。新規端末・全機能は残作業 |
+| 4 | 二台HAのVIP/lease/PD/conntrackと既存TCP/UDP | 両方向の停止・復帰、新規端末と既存通信を同時に確認 | 同期済み端末・新規端末・既存通信と全機能再確認は両方向通過。引継ぎ中のNTP品質・長時間動作・障害条件の残差を継続 |
 | 5 | 残る34 work packageの機能・配布先ごとの残差 | 対応peer/配布先で受入。利用できない対象と最小追加setupを明記 | 未完了 |
 
 一回の変更単位は「設定から利用者の結果まで」とする。失敗時はpacket・socket・経路・workerのうち原因を決める観測だけを追加し、原因が分からないまま同じ試験を繰り返さない。自然T1の待ち時間には独立する実装を進める。試験を増やすことや報告書を作ることを進捗の代用にしない。合格した単位をcommit/pushしてから次へ移る。全体完成の見積りは、単体の全通信経路とHAの未解決原因が把握できた時点で更新する。
