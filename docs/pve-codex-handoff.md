@@ -2,6 +2,12 @@
 
 更新: 2026-11-03。全体ゴールは継続中。
 
+## 現行単体構成の自然PD更新・再起動
+
+main `f60b3d2`・通常build `f60b3d2789cb`の45-resource単体構成で、実HGWとの自然PD Renew/Reply 1組・期限更新と652巡回の両IP Internet/DNS・Tailscale通信が終了0。109回の周期観測で29 workerの世代は同一、全てReady=trueを維持した。PD SIGKILL3.25秒・通常再起動5.20秒、全daemon後の全項目再確認111.86秒も通過した。 111.86秒には抑制・sampling等を含み、転送断時間を表さない。実行は2026-11-03 19時台〜21:58 UTC。初期の設定rollback後から自然更新後まで同じ世代を保った。実captureのRenew/Replyと再起動時のRebind/Reply、DUID/IAID/prefix保持、正常停止のzero-lifetime RA・kernel撤去・上流Releaseなしをrunnerが照合した。
+
+独立BusyBox/dhcpcd端末、FRR2台・chronyd・Headscale/Tailscale・syslog/公式Collectorを使い、DHCP各scope、両IP DNS/Internet、二段DNS/cache/履歴/条件付き転送/両DoH、4 DS-Lite、静的経路/NAT、BGP/NTP/管理・nDPI/運用経路を全daemon再起動後にも確認した。手順は`make check-uplink DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18 UPLINK_WAN_MAC=02:72:6f:75:74:03 UPLINK_CONFIG=examples/single-router-dslite-dhcp-dns.yaml UPLINK_SECONDS=0 UPLINK_FULL_RESTART=1 UPLINK_TAILNET=1`。新規接続の周期確認であり、同一TCP socket継続、自然DHCPv4 T1、全private DNS、直接ONU/NIC・物理実機と全34 packageの資格は別に残る。WAN遮断・追加PBR調査は実行していない。owner/process/namespace/stageは撤去済み。
+
 ## WireGuard hostname endpointの接続と復旧
 
 旧routerdの`pkg/wireguard/wireguard.go`とcontroller/caller、公式wireguard-toolsの[reresolve-dns](https://git.zx2c4.com/wireguard-tools/tree/contrib/reresolve-dns/reresolve-dns.sh)を参照した。`endpoint`にhostnameを受け入れ、network workerがOS resolverで再解決する。認証済みhandshakeから135秒以内はroamingを優先し、30秒巡回で古い接続を再解決する。DNS待ちはwriter lockの外へ置き、待った後に現在の宣言・link/peer所有権・handshakeを再確認する。kernelのUPDATE_ONLYでendpointだけを変更し、宣言・観測・秘密鍵の所有を維持する。

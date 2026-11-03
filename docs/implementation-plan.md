@@ -1,5 +1,7 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
+main `f60b3d2`・通常build `f60b3d2789cb`の45-resource単体構成で、実HGWとの自然PD Renew/Reply 1組・期限更新と652巡回の両IP Internet/DNS・Tailscale通信が終了0。109回の周期観測で29 workerの世代は同一、全てReady=trueを維持した。PD SIGKILL3.25秒・通常再起動5.20秒、全daemon後の全項目再確認111.86秒も通過した。 111.86秒は全項目の確認時間。既存TCP socket継続、全private DNS、全110-resource意図、対象ONU/NIC・配布先と全34 packageの残作業を継続する。詳細と手順は[引き継ぎ](pve-codex-handoff.md)・[試験計画](test-plan.md)へ集約する。
+
 NET-08のhostname endpointを既存network ownerへ接続し、独立wireguard-tools/dnsmasq/LAN端末でbootstrap・roaming・DNS失敗/復旧・移動先でのTCP/UDP・daemon再起動・撤去を受け入れた。標準のhandshake期限と実kernelを使う。SAM由来peer集合・動的identityと全体の残作業は継続する。実行版と再実行手順は[引き継ぎ](pve-codex-handoff.md)に記載する。
 
 保存設定で常時使うNTP固定3時刻源を、既存の学習時刻源と同じengineへ接続した。通常build `3555b25e2e91`で単体45-resourceの全daemon再起動と、二台各54-resourceの両方向引継ぎ・新規端末確認が終了0。今回の引継ぎ前後の独立NTP照会timeoutは0回。時刻源の同時使用・実通信・品質の観測と残作業は[引き継ぎ](pve-codex-handoff.md)に記載する。
@@ -37,7 +39,7 @@ mainを取得し、直近の変更を統合した。34 work packageの状態は�
 
 DNSの複数上流/suffix/learnedDNS/両DoHを単体gateで接続した。次は実設定のprivate peer全体の確認、受入済みの4 DS-Lite選択policy/LAN静的gatewayに続いて、残るLAN/運用機能の単体経路を埋め、同じprofileで自然更新と継続通信を確認する。追加のPBR調査・PVE/QEMUは行わない。
 
-上流選択の優先作業を修正する。実homertはPD由来DS-Lite群（weight120）→別DS-Lite候補（80）→既存LAN上の静的gateway（60）。ユーザーが示すDS-Lite/PPPoE/静的経路などの順序に、既存の候補と終端を沿わせる。別のens20 WANと試験host用IPを必要とした前提・依頼は撤回する。既存`EgressPolicy`のgroup/weight/Health/ownerをnative設定へ接続し、優先順位と両端末の通信を受入済み。運用ログ・通信履歴も今回接続済み。LAN配布設定も受入済み。次は同一profileの自然更新と通信継続を確認する。直接bindによる4 tunnel疎通は上流選択の完成ではない。
+上流選択の優先作業を修正する。実homertはPD由来DS-Lite群（weight120）→別DS-Lite候補（80）→既存LAN上の静的gateway（60）。ユーザーが示すDS-Lite/PPPoE/静的経路などの順序に、既存の候補と終端を沿わせる。別のens20 WANと試験host用IPを必要とした前提・依頼は撤回する。既存`EgressPolicy`のgroup/weight/Health/ownerをnative設定へ接続し、優先順位と両端末の通信を受入済み。運用ログ・通信履歴も今回接続済み。LAN配布設定も受入済み。次は自然更新済みprofileの残る意図と既存socketの通信継続を確認する。直接bindによる4 tunnel疎通は上流選択の完成ではない。
 
 2026-11-03、製品code `df49035`・通常build `df490351c3ff`で `make check-doh-outage` が終了0。実Cloudflare/GoogleへTLS通信し、片側ずつTCP443を遮断して各16packetのdropとDown、解除後の両Healthyを確認した。cache無効の独立dig端末は全段階でUDP/TCPのNOERROR/A回答を取得。Cloudflare停止直後の初回回答1.043秒、以後の確認回答0.025〜0.063秒。新DNS node/client/process/stageは撤去済み。元の38-resource自然PD試験への障害注入は行っていない。公開DoH IPv4 transportの独立受入であり、DS-Lite/HA全体の障害受入には転用しない。 手順は`make check-doh-outage`。自然PD T1は09:42:40 UTC予定で継続中。
 
