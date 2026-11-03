@@ -32,7 +32,7 @@ def owner(stage, uplink):
     run(["mount", "-t", "tmpfs", "-o", "mode=755", "tmpfs", "/var/lib/dhcpcd"])
     namespaces, children = [], []
     prefix = "r2fh-" + str(os.getpid())
-    names = {key: prefix + "-" + key for key in ("wire", "a", "b", "client", "gateway", "tail", "bgp0", "bgp1")}
+    names = {key: prefix + "-" + key for key in ("wire", "a", "b", "client", "admin", "gateway", "tail", "bgp0", "bgp1")}
     def inside(key, command):
         return ["ip", "netns", "exec", names[key]] + command
     def start(key, command, name):
@@ -62,7 +62,7 @@ def owner(stage, uplink):
             run(["ip", "netns", "add", names[key]])
             namespaces.append(names[key])
             run(inside(key, ["ip", "link", "set", "lo", "up"]))
-        for bridge in ("lan", "wan", "mgmt", "bgp", "sync", "tail"):
+        for bridge in ("lan", "wan", "mgmt", "sync", "tail"):
             run(inside("wire", ["ip", "link", "add", bridge, "type", "bridge"]))
             run(inside("wire", ["ip", "link", "set", bridge, "up"]))
         # Receive the shared WAN MAC once at the physical attachment. The
@@ -72,15 +72,16 @@ def owner(stage, uplink):
         run(inside("wire", ["ip", "link", "set", "uplink", "address", "02:00:5e:00:01:43", "master", "wan", "up"]))
         run(inside("wire", ["bridge", "fdb", "del", "02:00:5e:00:01:43", "dev", "uplink", "master"]))
         for node in ("a", "b"):
-            for device, bridge in (("lan0", "lan"), ("wan0", "wan"), ("mgmt0", "mgmt"), ("bgp0", "bgp"), ("sync0", "sync"), ("peer0", "tail")):
+            for device, bridge in (("lan0", "lan"), ("wan0", "wan"), ("mgmt0", "mgmt"), ("sync0", "sync"), ("peer0", "tail")):
                 connect(node, device, bridge)
         connect("client", "client0", "lan", "02:00:00:00:00:03")
         start("client", ["tcpdump", "-n", "-l", "-v", "-e", "-i", "client0", "-c", "80", "icmp6 and (ip6[40] == 134 or ip6[40] == 136)"], "client-ra")
-        connect("client", "mgmt0", "mgmt")
+        connect("admin", "mgmt0", "mgmt")
         run(inside("client", ["ip", "address", "add", "198.18.0.254/32", "dev", "lo"]))
-        run(inside("client", ["ip", "address", "add", "198.19.0.254/24", "dev", "mgmt0"]))
+        run(inside("admin", ["ip", "address", "add", "10.255.255.254/24", "dev", "mgmt0"]))
         connect("gateway", "lan0", "lan")
-        run(inside("gateway", ["ip", "address", "add", "198.18.0.253/24", "dev", "lan0"]))
+        run(inside("gateway", ["ip", "address", "add", "198.19.0.253/16", "dev", "lan0"]))
+        run(inside("gateway", ["ip", "route", "add", "198.18.0.0/16", "via", "198.18.0.1", "dev", "lan0", "onlink"]))
         run(["ip", "link", "add", "link", uplink, "name", "wan0", "netns", names["gateway"], "type", "macvlan", "mode", "bridge"])
         run(inside("gateway", ["ip", "link", "set", "wan0", "address", "02:72:6f:75:74:06", "up"]))
         hook = stage / "gateway.sh"
@@ -90,29 +91,44 @@ def owner(stage, uplink):
         wait(lambda: bool(json.loads(run(inside("gateway", ["ip", "-j", "route", "show", "default"])))))
         run(inside("gateway", ["sysctl", "-qw", "net.ipv4.ip_forward=1"]))
         nat = stage / "gateway.nft"
-        nat.write_text('table ip gateway {\n chain nat {\n type nat hook postrouting priority srcnat;\n ip saddr 198.18.0.0/24 oifname "wan0" masquerade\n }\n}\n')
+        nat.write_text('table ip gateway {\n chain nat {\n type nat hook postrouting priority srcnat;\n ip saddr { 198.18.0.0/16, 198.19.0.0/16 } oifname "wan0" masquerade\n }\n}\n')
         run(inside("gateway", ["nft", "-f", str(nat)]))
-        for key, address, port, answer in (("gateway", "198.18.0.253", 53, None), ("client", "198.18.0.254", 5353, "192.0.2.77"), ("client", "198.18.0.254", 5354, "192.0.2.78")):
+        for key, address, port, answer in (("gateway", "198.19.0.253", 53, None), ("client", "198.18.0.254", 5353, "192.0.2.77"), ("client", "198.18.0.254", 5354, "192.0.2.78")):
             command = ["dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null", "--no-hosts", "--no-resolv", "--bind-interfaces", "--listen-address=" + address, "--port=" + str(port)]
             command += ["--address=/#/" + answer] if answer else ["--server=1.1.1.1"]
             start(key, command, "dns-" + str(port))
         start("gateway", ["tcpdump", "-n", "-l", "-e", "-i", "lan0", "-c", "100", "arp or udp port 53"], "gateway-wire")
         echo = runpy.run_path(str(stage / "peer-fixture.py"))
+        addresses = json.loads(run(inside("gateway", ["ip", "-j", "-4", "address", "show", "dev", "wan0"])))
+        wan_device = next(a["local"] for link in addresses for a in link["addr_info"] if a["family"] == "inet")
+        for address in ("192.168.100.1", "172.20.1.1"):
+            run(inside("gateway", ["ip", "address", "add", address + "/32", "dev", "lo"]))
+        for key, address in (("admin", "10.255.255.254"), ("gateway", "198.19.0.253"),
+                ("gateway", wan_device), ("gateway", "192.168.100.1"), ("gateway", "172.20.1.1")):
+            name = "local-echo-" + address
+            start(key, ["python3", "-u", "-c", echo["ECHO_SERVER"], address], name)
+            wait(lambda name=name: "READY" in (stage / (name + ".log")).read_text())
+        bgp_networks = (("10.42.0.0/24", "10.42.0.1"), ("10.64.0.0/12", "10.64.0.1"),
+            ("10.128.0.0/16", "10.128.0.1"), ("192.168.64.0/24", "192.168.64.1"))
         for index in range(2):
             key = "bgp" + str(index)
             address = "192.0.2." + str(index+2)
-            connect(key, "eth0", "bgp")
+            connect(key, "eth0", "wan")
             run(inside(key, ["ip", "address", "add", address + "/24", "dev", "eth0"]))
-            run(inside(key, ["ip", "address", "add", "203.0.113.1/24", "dev", "lo"]))
+            for network, host in bgp_networks:
+                run(inside(key, ["ip", "address", "add", host + "/" + network.split("/")[1], "dev", "lo"]))
             root = Path("/run/routerd-bgp-peer" + str(index))
             root.mkdir(mode=0o755)
             run(["chown", "frr:frr", str(root)])
             (root / "zebra.conf").write_text("hostname independent\nlog stdout\n")
-            (root / "bgpd.conf").write_text("hostname independent\nlog stdout\nrouter bgp 64512\n bgp router-id " + address + "\n no bgp ebgp-requires-policy\n neighbor 192.0.2.10 remote-as 64500\n neighbor 192.0.2.11 remote-as 64500\n address-family ipv4 unicast\n  network 203.0.113.0/24\n  neighbor 192.0.2.10 activate\n  neighbor 192.0.2.11 activate\n exit-address-family\n")
+            (root / "bgpd.conf").write_text("hostname independent\nlog stdout\nrouter bgp 64512\n bgp router-id " + address + "\n no bgp ebgp-requires-policy\n neighbor 192.0.2.10 remote-as 64500\n neighbor 192.0.2.11 remote-as 64500\n address-family ipv4 unicast\n" + "".join("  network " + network + "\n" for network, _ in bgp_networks) + "  neighbor 192.0.2.10 activate\n  neighbor 192.0.2.11 activate\n exit-address-family\n")
             start(key, ["/usr/lib/frr/zebra", "-u", "frr", "-g", "frr", "-z", str(root / "zserv.api"), "--vty_socket", str(root), "-i", str(root / "zebra.pid"), "-f", str(root / "zebra.conf")], key + "-zebra")
             wait(lambda: (root / "zserv.api").exists())
             start(key, ["/usr/lib/frr/bgpd", "-S", "-z", str(root / "zserv.api"), "--vty_socket", str(root), "-i", str(root / "bgpd.pid"), "-f", str(root / "bgpd.conf")], key + "-bgpd")
-            start(key, ["python3", "-u", "-c", echo["ECHO_SERVER"], "203.0.113.1"], key + "-echo")
+            for _, host in bgp_networks:
+                name = key + "-echo-" + host
+                start(key, ["python3", "-u", "-c", echo["ECHO_SERVER"], host], name)
+                wait(lambda name=name: "READY" in (stage / (name + ".log")).read_text())
         # The existing UDP syslog fixture binds 192.0.2.2.
         start("bgp0", ["python3", "-I", str(stage / "syslog-peer.py"), "--mode", "receive", "--port", "5514", "--output", str(stage / "syslog.jsonl")], "syslog-peer")
         collector = stage / "collector.json"
@@ -125,7 +141,7 @@ def owner(stage, uplink):
         loader = next((ntp / "lib").glob("ld-musl-*.so.1"))
         chrony = [str(loader), "--library-path", str(ntp / "lib") + ":" + str(ntp / "usr/lib"), str(ntp / "usr/sbin/chronyd")]
         conf = stage / "chrony.conf"
-        conf.write_text(f"local stratum 8\nbindaddress 198.18.0.254\nallow 198.18.0.0/24\ncmdport 0\nbindcmdaddress {stage}/ntp.sock\npidfile {stage}/ntp.pid\ndriftfile {stage}/ntp.drift\n")
+        conf.write_text(f"local stratum 8\nbindaddress 198.18.0.254\nallow 198.18.0.0/16\ncmdport 0\nbindcmdaddress {stage}/ntp.sock\npidfile {stage}/ntp.pid\ndriftfile {stage}/ntp.drift\n")
         start("client", chrony + ["-d", "-x", "-u", "root", "-f", str(conf)], "ntp-peer")
         ntp_client = stage / "ntp-client.conf"
         ntp_client.write_text(f"server 198.18.0.1 iburst maxsamples 1\nport 0\ncmdport 0\npidfile {stage}/ntp-client.pid\n")
@@ -142,7 +158,7 @@ def owner(stage, uplink):
         trusted.write_bytes(roots.read_bytes() + cert.read_bytes())
         run(["mount", "--bind", str(trusted), str(roots)])
         policy = stage / "tail-policy.json"
-        policy.write_text(json.dumps({"grants": [{"src": ["*"], "dst": ["*"], "ip": ["*"]}], "autoApprovers": {"routes": {"198.18.0.0/24": ["fixture@"]}, "exitNode": ["fixture@"]}}))
+        policy.write_text(json.dumps({"grants": [{"src": ["*"], "dst": ["*"], "ip": ["*"]}], "autoApprovers": {"routes": {"198.18.0.0/16": ["fixture@"]}, "exitNode": ["fixture@"]}}))
         hs = stage / "headscale.json"
         hs.write_text(json.dumps({"server_url": "https://198.51.100.1:8443", "listen_addr": "198.51.100.1:8443", "noise": {"private_key_path": str(stage / "noise.key")}, "prefixes": {"v4": "100.64.0.0/10", "v6": "fd7a:115c:a1e0::/48"}, "database": {"type": "sqlite", "sqlite": {"path": str(stage / "control.db")}}, "derp": {"urls": [], "paths": [], "auto_update_enabled": False, "server": {"enabled": True, "region_id": 999, "region_code": "fixture", "region_name": "isolated DERP", "stun_listen_addr": "0.0.0.0:3478", "private_key_path": str(stage / "derp.key"), "automatically_add_embedded_derp_region": True, "ipv4": "198.51.100.1"}}, "dns": {"override_local_dns": False, "magic_dns": True, "base_domain": "test.invalid"}, "unix_socket": str(stage / "headscale.sock"), "tls_cert_path": str(cert), "tls_key_path": str(key), "policy": {"mode": "file", "path": str(policy)}, "disable_check_updates": True, "log": {"level": "warn"}}))
         head = [str(stage / "headscale"), "-c", str(hs)]
@@ -179,7 +195,7 @@ def owner(stage, uplink):
         for index,node in enumerate(("a", "b")):
             directory = stage / node
             directory.mkdir()
-            boot = {"platform": "host", "config": str(stage / ("node-" + node + ".yaml")), "runtime_dir": str(directory / "run"), "state_dir": str(directory / "state"), "ssh": {"listen": f"198.19.0.{index+2}:2222", "user": "admin"}, "workers": {r: str(stage / ("routerd-logging" if r=="logging" else "routerd-modules")) for r in roles}, "engines": {r: str(stage / image) for r,image in (("dhcp_server", "dnsmasq-engine.tar"), ("vrrp", "conntrack-engine.tar"), ("ntp", "chrony-engine.tar"), ("tailscale", "tailscale-engine.tar"))}}
+            boot = {"platform": "host", "config": str(stage / ("node-" + node + ".yaml")), "runtime_dir": str(directory / "run"), "state_dir": str(directory / "state"), "ssh": {"listen": f"10.255.255.{index+2}:2222", "user": "admin"}, "workers": {r: str(stage / ("routerd-logging" if r=="logging" else "routerd-modules")) for r in roles}, "engines": {r: str(stage / image) for r,image in (("dhcp_server", "dnsmasq-engine.tar"), ("vrrp", "conntrack-engine.tar"), ("ntp", "chrony-engine.tar"), ("tailscale", "tailscale-engine.tar"))}}
             path = directory / "boot.json"
             boot["ssh"]["authorized_keys"] = [management_public_key]
             path.write_text(json.dumps(boot))
@@ -214,6 +230,8 @@ def owner(stage, uplink):
         def traffic():
             address,gateway,dns = lease.read_text().split()
             assert gateway==dns=="198.18.0.1", (gateway,dns)
+            assigned = json.loads(run(inside("client", ["ip", "-j", "-4", "address", "show", "dev", "client0"])))
+            assert any(a["local"] == address and a["prefixlen"] == 16 for link in assigned for a in link["addr_info"]), assigned
             print("HA client lease", address, "gateway/DNS", gateway, flush=True)
             for family,host in (("-4","1.1.1.1"),("-6","[2606:4700:4700::1111]")):
                 code = run(inside("client", ["curl", family, "--noproxy", "*", "--max-time", "8", "--resolve", "one.one.one.one:443:"+host, "-sS", "-I", "-o", "/dev/null", "-w", "%{http_code}", "https://one.one.one.one/"]))
@@ -246,13 +264,35 @@ def owner(stage, uplink):
             wait(bgp_ready)
             for index in range(2):
                 root = Path("/run/routerd-bgp-peer"+str(index))
-                view = json.loads(run(inside("bgp"+str(index), ["vtysh", "--vty_socket", str(root), "-d", "bgpd", "-c", "show bgp ipv4 unicast 198.18.0.0/24 json"])))
+                view = json.loads(run(inside("bgp"+str(index), ["vtysh", "--vty_socket", str(root), "-d", "bgpd", "-c", "show bgp ipv4 unicast 198.18.0.0/16 json"])))
                 assert view.get("paths"), "independent FRR did not receive the LAN advertisement"
-                routes = json.loads(run(inside("bgp"+str(index), ["ip", "-j", "route", "show", "198.18.0.0/24"])))
+                routes = json.loads(run(inside("bgp"+str(index), ["ip", "-j", "route", "show", "198.18.0.0/16"])))
                 expected_hop = "192.0.2.10" if node == "a" else "192.0.2.11"
                 hops = [hop.get("gateway") for route in routes for hop in route.get("nexthops", [route])]
                 assert hops and set(hops) == {expected_hop}, ("FRR return path bypasses the serving owner", hops)
-            run(inside("client", ["python3", "-c", echo["ECHO_CLIENT"], "203.0.113.1", address, address]))
+            kernel_routes = json.loads(run(inside(node, ["ip", "-j", "-4", "route", "show"])))
+            for network, host in bgp_networks:
+                assert any(r.get("dst") == network and r.get("dev") == "wan0" and r.get("gateway") in ("192.0.2.2", "192.0.2.3") for r in kernel_routes), (network, kernel_routes)
+                run(inside("client", ["python3", "-c", echo["ECHO_CLIENT"], host, address, address]))
+            wan_source = api(node, "control.sock", "/v1/services/service.wan4")["snapshot"]["currentAddress"]
+            management = "10.255.255.2" if node == "a" else "10.255.255.3"
+            for destination, expected in (("10.255.255.254", management), (wan_device, wan_source),
+                    ("198.19.0.253", address), ("192.168.100.1", address), ("172.20.1.1", address)):
+                run(inside("client", ["python3", "-c", echo["ECHO_CLIENT"], destination, expected, address]))
+            membership = {r["name"]: r for r in api(node, "network.sock", "/v1/address-sets")["sets"]}
+            dns_members = [ipaddress.ip_address(a) for a in membership["public-dns"]["addresses"]]
+            for family in (4, 6):
+                destination = str(next(a for a in dns_members if a.version == family))
+                for transport in ("+notcp", "+tcp"):
+                    assert run(inside("client", ["dig", "@"+destination, "router.home.arpa", "A", "+short", "+time=3", "+tries=1", transport])).strip() == "198.18.0.1"
+            ntp_destination = next(a for a in membership["public-ntp"]["addresses"] if ipaddress.ip_address(a).version == 4)
+            redirected_ntp = stage / "redirected-ntp.conf"
+            redirected_ntp.write_text("server " + ntp_destination + " iburst maxsamples 1\nport 0\ncmdport 0\n")
+            run(inside("client", chrony + ["-Q", "-t", "8", "-u", "root", "-f", str(redirected_ntp)]), 12)
+            source = json.loads(run(inside("client", ["ip", "-j", "route", "get", ntp_destination])))[0]["prefsrc"]
+            translated = run(inside(node, ["conntrack", "-L", "-f", "ipv4", "-p", "udp", "--orig-src", source, "--orig-dst", ntp_destination, "--dport", "123"]))
+            assert re.search(r"\bsrc=198\.18\.0\.1\b", translated), translated
+            print("PASS HA private routing without NAT, management/WAN source NAT and public DNS/NTP local redirects via", node, flush=True)
             print("PASS HA conditional DNS/nested suffix, both DoH peers, FRR advertisements and client TCP/UDP without NAT via", node, flush=True)
             print("PASS HA client lease and IPv4/IPv6 HTTPS, UDP/TCP DNS via", elected(), flush=True)
         def client_ipv6_ready():
@@ -291,25 +331,25 @@ def owner(stage, uplink):
                 source = client_address if family == 4 else router6
                 run(inside("client", ["python3", "-c", echo["ECHO_CLIENT"], peer_ips[family], source]))
             status = json.loads(run(inside("tail", peer_cli + ["status", "--json"])))
-            selected = [p for p in status.get("Peer", {}).values() if "198.18.0.0/24" in p.get("PrimaryRoutes", [])]
+            selected = [p for p in status.get("Peer", {}).values() if "198.18.0.0/16" in p.get("PrimaryRoutes", [])]
             assert len(selected) == 1, "independent peer has no selected LAN subnet route"
             source = {"hgw-router-a": "198.18.0.2", "hgw-router-b": "198.18.0.3"}[selected[0]["HostName"]]
             run(inside("tail", ["python3", "-c", echo["ECHO_CLIENT"], client_address, source]))
             print("PASS HA tailnet LAN-to-peer IPv4/IPv6 and peer-to-LAN IPv4 TCP/UDP; automatic subnet selection", selected[0]["HostName"], flush=True)
-        wait(lambda: any("198.18.0.0/24" in p.get("PrimaryRoutes", []) for p in json.loads(run(inside("tail", peer_cli + ["status", "--json"]))).get("Peer", {}).values()))
+        wait(lambda: any("198.18.0.0/16" in p.get("PrimaryRoutes", []) for p in json.loads(run(inside("tail", peer_cli + ["status", "--json"]))).get("Peer", {}).values()))
         check_tailnet()
         def check_management():
             for node in daemons:
-                address = "198.19.0.2" if node == "a" else "198.19.0.3"
-                status = json.loads(run(inside("client", ["ssh", "-i", str(management_key), "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile="+str(stage / "known-hosts"), "-o", "ConnectTimeout=3", "-p", "2222", "admin@"+address, "show status"])))
+                address = "10.255.255.2" if node == "a" else "10.255.255.3"
+                status = json.loads(run(inside("admin", ["ssh", "-i", str(management_key), "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile="+str(stage / "known-hosts"), "-o", "ConnectTimeout=3", "-p", "2222", "admin@"+address, "show status"])))
                 assert status["ready"], "management SSH reported a router unavailable"
             node = elected()
-            address = "198.19.0.2" if node == "a" else "198.19.0.3"
-            for target, server in ((node, "127.0.0.1"), ("client", address)):
+            address = "10.255.255.2" if node == "a" else "10.255.255.3"
+            for target, server in ((node, "127.0.0.1"), ("admin", address)):
                 assert run(inside(target, ["dig", "@"+server, "router.home.arpa", "A", "+short", "+time=3", "+tries=1"])).strip() == "198.18.0.1"
             history = api(node, "control.sock", "/v1/services/service.dns-core/dns-history?name=available.split.test.&limit=20")
             assert history.get("queries"), "actual DNS queries were not retained"
-            page = run(inside("client", ["curl", "--noproxy", "*", "--fail", "--max-time", "4", "-sS", "http://"+address+":8080/dns-queries?service=service.dns-core&name=available.split.test.&limit=20"]))
+            page = run(inside("admin", ["curl", "--noproxy", "*", "--fail", "--max-time", "4", "-sS", "http://"+address+":8080/dns-queries?service=service.dns-core&name=available.split.test.&limit=20"]))
             assert 'data-query="' in page and any(answer in page for answer in ("192.0.2.77", "192.0.2.78")), "Web console omitted the real DNS answer"
             denied = subprocess.run(inside("client", ["curl", "--interface", "client0", "--noproxy", "*", "--max-time", "2", "-sS", "http://"+address+":8080/"]), capture_output=True)
             assert denied.returncode != 0, "management Web was reachable from the LAN"
@@ -327,7 +367,7 @@ def owner(stage, uplink):
                 rows = [r for r in rows if fresh(r["tsStarted"])]
                 return any(r.get("engine") == "ndpi" and r.get("source") == "libndpi" and r.get("accounting") and r.get("bytesOut", 0) > 0 and r.get("bytesIn", 0) > 0 for r in rows) and any(r.get("tlsSNI") == "one.one.one.one" for r in rows)
             wait(classified)
-            management = "198.19.0.2" if node == "a" else "198.19.0.3"
+            management = "10.255.255.2" if node == "a" else "10.255.255.3"
             denied = subprocess.run(inside("client", ["curl", "--interface", "client0", "--noproxy", "*", "--max-time", "2", "-sS", "http://"+management+":8080/"]), capture_output=True)
             assert denied.returncode != 0
             def recorded_drop():
@@ -383,8 +423,10 @@ def owner(stage, uplink):
             for key, process, lease_file, original, mac in special_clients:
                 assert process.poll() is None, "independent DHCP client exited"
                 address, gateway, dns = lease_file.read_text().split()
-                assert address == original and gateway == dns == "198.18.0.253", (key, address, gateway, dns)
-                assert ipaddress.IPv4Address("198.18.0.32") <= ipaddress.IPv4Address(address) <= ipaddress.IPv4Address("198.18.0.63"), address
+                assert address == original and gateway == dns == "198.19.0.253", (key, address, gateway, dns)
+                assert ipaddress.IPv4Address("198.19.1.100") <= ipaddress.IPv4Address(address) <= ipaddress.IPv4Address("198.19.1.199"), address
+                assigned = json.loads(run(inside(key, ["ip", "-j", "-4", "address", "show", "dev", "special0"])))
+                assert any(a["local"] == address and a["prefixlen"] == 16 for link in assigned for a in link["addr_info"]), assigned
                 assert run(inside(key, ["dig", "@"+dns, "example.net", "A", "+short", "+time=3", "+tries=1"])).strip()
                 run(inside(key, ["curl", "-4", "--noproxy", "*", "--fail", "--max-time", "8", "--resolve", "one.one.one.one:443:1.1.1.1", "-sS", "-I", "-o", "/dev/null", "https://one.one.one.one/"]))
                 if fingerprints:
@@ -399,6 +441,8 @@ def owner(stage, uplink):
             flows = firewall.get("flow_routes", [])
             return bool(flows) and all(flow.get("buckets") and set(flow["buckets"]) <= {272, 273, 274} for flow in flows)
         wait(primary_upstream_selected)
+        membership = api(elected(), "network.sock", "/v1/address-sets")["sets"]
+        assert all("9.9.9.10" not in row.get("addresses", []) for row in membership), "WAN UDP peer is selected for local interception"
         flow_processes = {}
         capture = start("client", ["tcpdump", "-n", "-Z", "root", "-U", "-i", "client0", "-c", "256", "-w", str(stage / "flow.pcap"), "host 1.1.1.1 and tcp and tcp[tcpflags] & (tcp-syn | tcp-fin | tcp-rst) != 0"], "flow-capture")
         for mode in ("tcp", "udp"):
@@ -412,7 +456,7 @@ def owner(stage, uplink):
         initial_flows = {mode: progress(mode) for mode in flow_processes}
         def nat_mapping(node, mode):
             address, port = initial_flows[mode]["endpoint"]
-            output = run(inside(node, ["conntrack", "-L", "-p", mode, "--orig-src", address, "--orig-dst", "1.1.1.1", "--sport", str(port), "--dport", "443" if mode == "tcp" else "53"]))
+            output = run(inside(node, ["conntrack", "-L", "-p", mode, "--orig-src", address, "--orig-dst", "1.1.1.1" if mode == "tcp" else "9.9.9.10", "--sport", str(port), "--dport", "443" if mode == "tcp" else "53"]))
             tuples = re.findall(r"src=(\S+) dst=(\S+) sport=(\d+) dport=(\d+)", output)
             mark = re.search(r"\bmark=(\d+)", output)
             assert len(tuples) == 2 and mark, output

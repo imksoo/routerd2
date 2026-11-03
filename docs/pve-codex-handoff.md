@@ -1,6 +1,14 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03 14:06 UTC。全体ゴールは継続中。
+更新: 2026-11-03 14:32 UTC。全体ゴールは継続中。
+
+## 二つのLAN・経路・転送機能の二台HA受入
+
+2026-11-03、基準main `adbd41f` + 設定/確認側変更、通常build `adbd41ffa4be`（製品Go不変）で、各52-resourceの実HGW二台手順が終了0。単体で受け入れた二つのLAN /16とDHCP profile、RFC1918 NAT除外、管理/WAN内SNAT、個別静的経路、WAN共有BGPの4私設prefix、公開DNS/NTP転送を二台例へ接続した。両方向のdaemon停止/再加入後にも実TCP/UDP、peer観測source、DHCP mask/gateway/DNS・Renew/Release/再取得・sticky/fingerprint、PD identity、DNS/DoH/NTP、管理/Tailscale/運用記録が通過した。既存captureでも両nodeのwan0で私設アプリ通信のIn/Outを確認した。
+
+同一TCPはSYN1回・229応答・最大応答間隔15.13秒。転送集合外の公開DNSへの同一UDP socketは255応答・15期限超過・最大応答間隔8.51秒（返信予算1秒）。NAT tuple/markと共有DUID/IAID/prefixを保持し、再加入は非preempt。全項目63.12/72.55秒はsampling/再取得を含み、転送断時間ではない。初回はWANへ移したBGP経路のforward許可漏れを修正。別の実行は、継続UDPの旧宛先がローカル転送対象であると判明して中止し、集合外9.9.9.10へ変更した最終実行だけを上流UDP継続の受入とした。
+
+上流選択は保存設定のDS-Lite主群120→別DS-Lite80→LAN静的gateway60と既存hysteresisを維持し、追加WAN/PPPoE/専用BGP NICは導入していない。`make test-tools race vet`、通常build、3実行物static link、両設定検証が通過。再実行は[試験計画](test-plan.md)末尾。これは実HGW接続下の隔離Linux二台であり、実homert二台、物理ONU/NIC、全private DNS、HA中の設定更新/保持障害、全34 packageの完成は残る。旧LAN gateway宛ての既存session継続は今回測定していない。
 
 ## BGPを既存WANへ接続
 

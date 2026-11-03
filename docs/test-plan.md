@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 14:06 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 14:32 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 実行原則
 
@@ -33,7 +33,7 @@ make check-uplink DOCKER='sudo -n docker' \
 
 必要setup: 許可済み実HGW uplink、sudo/root、iproute2、BusyBox、dhcpcd、dnsmasq、curl/dig/tcpdump、OpenSSL/SSH、FRR8.4.4/Zebra/vtysh、公式otelcol-contrib0.151.0（`/usr/local/bin/otelcol-contrib`）。Makefileが通常buildとchecksum-pinned Headscale/Tailscale1.104.2 peerを準備する。Makefile build済み実行物でrunnerだけを再実行する場合は同じ引数を`python3 scripts/uplink-smoke.py`へ渡し、実行build IDを記録する。
 
-専用macvlan MACとnamespaceを使い、hostの管理address/default route/時計/trust storeを変更しない。LAN198.18.0.0/24、管理198.19.0.0/24、BGP192.0.2.0/24、tailnet underlay198.51.100.0/24へ隔離する。router側のlink/address/forward/NAT/serviceはnative設定が所有する。保存設定のens20（homert02）/eth2（homert03）は管理interfaceであり、追加WANではない。上流は設定された候補の優先順位と疎通状態で選び、NIC追加を条件にしない。低優先候補は既存LAN上のgatewayであり、別WANのDHCPではない。保存設定の実際の順序はDS-Lite 3本（weight120）→別DS-Lite（80）→LAN静的gateway（60）で、PPPoE候補はない。
+専用macvlan MACとnamespaceを使い、hostの管理address/default route/時計/trust storeを変更しない。通常LAN198.18.0.0/16・機器用LAN198.19.0.0/16、管理10.255.255.0/24、WAN共有BGP192.0.2.0/24、tailnet underlay198.51.100.0/24へ隔離する。router側のlink/address/forward/NAT/serviceはnative設定が所有する。保存設定のens20（homert02）/eth2（homert03）は管理interfaceであり、追加WANではない。上流は設定された候補の優先順位と疎通状態で選び、NIC追加を条件にしない。低優先候補は既存LAN上のgatewayであり、別WANのDHCPではない。保存設定の実際の順序はDS-Lite 3本（weight120）→別DS-Lite（80）→LAN静的gateway（60）で、PPPoE候補はない。
 
 WAN/tailnet captureは各最大8MB、PD captureはudp546と実行時間で限定する。ownerは全peer/process/namespaceを撤去する。長時間用syslog受信は直近8MB、公式Collector file exporterは8MB×現行/backup1へ制限する（公式`validate`通過）。受信資料はraw archiveとして残さない。
 
@@ -231,3 +231,11 @@ blackholeは実clientからTCP/UDPを送り、timeout、kernel blackhole route�
 既存のbounded captureを、live ownerのmount/network namespaceでtcpdumpのstdinへ読み、wan0 In/OutのBGP179と私設TCP18080/UDP18081を照合する。単に広いon-link routeで届いたことを合格にせず、具体的なBGP next hopも確認する。
 
 2026-11-03: 通常build `ac0b1a0980ed`、43-resourceの上記手順は終了0。peer停止後0.88/1.13秒で全prefix通信を再確認し、全daemon再起動後も通過した。111.26秒の全項目再確認は転送断時間ではない。詳細・未受入範囲は[引き継ぎ](pve-codex-handoff.md)を参照する。
+
+## 二台構成への単体受入機能の接続
+
+`make check-uplink-ha DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18`を使う。各52-resourceの二台例には、通常/機器用LANの二つの/16、保存NAT除外、管理/WAN内SNAT、個別静的経路、WAN共有BGP、公開DNS/NTP転送を接続する。専用BGP NICや追加WANは使わない。上流の既存順位120→80→60と60秒hysteresisは変更しない。
+独立FRR2台の4私設prefixをwan0の具体的なnext hopで転送し、peer観測sourceとTCP/UDPを照合する。管理peerはLAN clientと別namespaceへ置き、製品を迂回した自己通信でNATを判定しない。公開DNS/NTPは実membershipの宛先でローカル回答を確認する。
+現用daemon停止/再加入を両方向に行い、上記通信、両LANのDHCP mask/gateway/DNS・Renew/Release/再取得、共有PD identity、管理/Tailscale/運用記録を確認する。継続TCPは1.1.1.1:443、UDPは転送集合外の9.9.9.10:53を用い、同一socketとNAT tuple/mark、TCP SYN、応答間隔を照合する。UDP宛先が実membership外であることを確認し、ローカルDNS転送を上流UDP継続と数えない。build済み同一版で確認側を修正した場合は`python3 scripts/uplink-ha.py --uplink ens18`で再実行できる。
+
+2026-11-03: 通常build `adbd41ffa4be`、各52-resourceの上記手順は終了0。両方向の通信・同一TCP/UDP・DHCP/PD identityと再加入を確認した。結果・応答間隔・未受入範囲は[引き継ぎ](pve-codex-handoff.md)を参照する。

@@ -1,6 +1,7 @@
-# Isolated full-feature HA node b; configure its peer with the paired file.
+# Isolated full-feature HA node; configure its peer with the paired file.
 # Benchmark addresses and explicit NTT AFTRs are test intent, not site configuration.
 # Provision credentials under /run/routerd-ha; see docs/test-plan.md.
+# Named destination sets use the shared DNS VIP on both active and standby nodes.
 schema_version: 2
 retention:
   max_age_seconds: 604800
@@ -18,14 +19,11 @@ resources:
 - id: interface/mgmt0
   interface:
     name: mgmt0
-- id: interface/bgp0
-  interface:
-    name: bgp0
 - id: address/bgp
   depends_on:
-  - interface/bgp0
+  - interface/wan0
   address:
-    interface: bgp0
+    interface: wan0
     cidr: 192.0.2.11/24
 - id: interface/peer0
   interface:
@@ -41,13 +39,19 @@ resources:
   - interface/mgmt0
   address:
     interface: mgmt0
-    cidr: 198.19.0.3/24
+    cidr: 10.255.255.3/24
 - id: address/lan
   depends_on:
   - interface/lan0
   address:
     interface: lan0
-    cidr: 198.18.0.3/24
+    cidr: 198.18.0.3/16
+- id: address/legacy-lan
+  depends_on:
+  - interface/lan0
+  address:
+    interface: lan0
+    cidr: 198.19.0.3/16
 - id: forwarding
   forwarding:
     ipv4: true
@@ -62,7 +66,7 @@ resources:
       rules:
       - match:
           in_interface: mgmt0
-          source: 198.19.0.0/24
+          source: 10.255.255.0/24
           protocol: tcp
           destination_ports:
           - start: 2222
@@ -104,14 +108,6 @@ resources:
     - from: lan6-ha
       to: tailscale0
     - from: lan0
-      to: bgp0
-    - from: vip0
-      to: bgp0
-    - from: lan6-ha
-      to: bgp0
-    - from: bgp0
-      to: lan0
-    - from: lan0
       to: lan0
     - from: vip0
       to: lan0
@@ -147,6 +143,16 @@ resources:
       to: wan-ha
     - from: lan6-ha
       to: wan-ha
+    - from: lan0
+      to: wan0
+    - from: vip0
+      to: wan0
+    - from: lan6-ha
+      to: wan0
+    - from: lan0
+      to: mgmt0
+    - from: vip0
+      to: mgmt0
     mss_clamp:
     - from: lan0
       to: dslite1
@@ -253,21 +259,95 @@ resources:
       to: dslite0
     - from: lan6-ha
       to: dslite0
+    address_sets:
+    - name: public-dns
+      names:
+      - dns.google
+      - one.one.one.one
+      - dns.quad9.net
+      - resolver1.opendns.com
+      - resolver2.opendns.com
+      refresh_interval: 10m
+      resolvers:
+      - 198.18.0.1:53
+    - name: public-ntp
+      names:
+      - ntp.nict.jp
+      - ntp.jst.mfeed.ad.jp
+      - time.google.com
+      - time.cloudflare.com
+      - pool.ntp.org
+      - time.apple.com
+      - time.windows.com
+      refresh_interval: 10m
+      resolvers:
+      - 198.18.0.1:53
+    local_redirects:
+    - interface: vip0
+      destination_set: public-dns
+      protocol: tcp
+      destination_port: 53
+      port: 53
+    - interface: lan6-ha
+      destination_set: public-dns
+      protocol: tcp
+      destination_port: 53
+      port: 53
+    - interface: vip0
+      destination_set: public-dns
+      protocol: udp
+      destination_port: 53
+      port: 53
+    - interface: lan6-ha
+      destination_set: public-dns
+      protocol: udp
+      destination_port: 53
+      port: 53
+    - interface: vip0
+      destination_set: public-ntp
+      protocol: udp
+      destination_port: 123
+      port: 123
 - id: lan-dslite-nat
   nat:
   - type: snat
-    address: 198.18.0.1
+    address: 10.255.255.3
     match:
       family: 4
-      source: 198.18.0.0/24
+      source: 198.18.0.0/16
+      destination: 10.255.255.0/24
+      out_interface: mgmt0
+  - type: masquerade
+    match:
+      family: 4
+      source: 198.18.0.0/16
+      destination: 192.168.1.0/24
+      out_interface: wan-ha
+  - type: snat
+    address: 198.19.0.3
+    match:
+      family: 4
+      source: 198.18.0.0/16
       in_interface: vip0
       out_interface: lan0
+      exclude_destinations:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 198.18.0.0/16
+      - 198.19.0.0/16
   - type: snat
     address: 192.0.0.2
     match:
       family: 4
-      source: 198.18.0.0/24
+      source: 198.18.0.0/16
       out_interface: dslite0
+      exclude_destinations:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 198.18.0.0/16
+      - 198.19.0.0/16
   - type: snat
     address: 192.0.0.2
     match:
@@ -282,25 +362,44 @@ resources:
   - type: masquerade
     match:
       family: 6
+      in_interface: lan6-ha
       out_interface: tailscale0
   - type: snat
     address: 192.0.0.2
     match:
       family: 4
-      source: 198.18.0.0/24
+      source: 198.18.0.0/16
       out_interface: dslite1
+      exclude_destinations:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 198.18.0.0/16
+      - 198.19.0.0/16
   - type: snat
     address: 192.0.0.2
     match:
       family: 4
-      source: 198.18.0.0/24
+      source: 198.18.0.0/16
       out_interface: dslite2
+      exclude_destinations:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 198.18.0.0/16
+      - 198.19.0.0/16
   - type: snat
     address: 192.0.0.2
     match:
       family: 4
-      source: 198.18.0.0/24
+      source: 198.18.0.0/16
       out_interface: dslite3
+      exclude_destinations:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 198.18.0.0/16
+      - 198.19.0.0/16
 - id: service/wan4
   depends_on:
   - interface/wan0
@@ -409,15 +508,16 @@ resources:
   depends_on:
   - interface/lan0
   - address/lan
+  - address/legacy-lan
   service:
     name: lan-leases
     dhcp_server:
       interface: vip0
       server_address: 198.18.0.1
       primary:
-        prefix: 198.18.0.0/24
-        start: 198.18.0.64
-        end: 198.18.0.191
+        prefix: 198.18.0.0/16
+        start: 198.18.1.64
+        end: 198.18.1.191
         lease_seconds: 43200
         router: 198.18.0.1
         dns_servers:
@@ -450,13 +550,13 @@ resources:
           - 02:77:01:00:00:08
           - 02:77:01:00:00:09
           - 02:77:01:00:00:0a
-        prefix: 198.18.0.0/24
-        start: 198.18.0.32
-        end: 198.18.0.63
+        prefix: 198.19.0.0/16
+        start: 198.19.1.100
+        end: 198.19.1.199
         lease_seconds: 43200
-        router: 198.18.0.253
+        router: 198.19.0.253
         dns_servers:
-        - 198.18.0.253
+        - 198.19.0.253
       reservations:
       - mac_address: 02:00:00:00:00:01
         hostname: printer
@@ -654,14 +754,14 @@ resources:
       listen:
       - 0.0.0.0
       allow:
-      - 198.18.0.0/24
+      - 198.18.0.0/16
 - id: service/console
   depends_on:
   - address/management
   service:
     name: console
     web_console:
-      listen: 198.19.0.3:8080
+      listen: 10.255.255.3:8080
       title: routerd2
 - id: service/routing
   # Keep routed replies on the owner that holds the client conntrack state.
@@ -685,7 +785,10 @@ resources:
           - ipv4-unicast
           importPolicy:
             allowedPrefixes:
-            - 203.0.113.0/24
+            - 10.42.0.0/24
+            - 10.64.0.0/12
+            - 10.128.0.0/16
+            - 192.168.64.0/24
             nextHopRewrite: peer-address
           gracefulRestart:
             enabled: true
@@ -697,28 +800,34 @@ resources:
             asn: 64512
             importPolicy:
               allowedPrefixes:
-              - 203.0.113.0/24
+              - 10.42.0.0/24
+              - 10.64.0.0/12
+              - 10.128.0.0/16
+              - 192.168.64.0/24
               nextHopRewrite: peer-address
             exportPolicyName: lan
             exportPolicy:
               allowedPrefixes:
-              - 198.18.0.0/24
+              - 198.18.0.0/16
           192.0.2.3:
             address: 192.0.2.3
             asn: 64512
             importPolicy:
               allowedPrefixes:
-              - 203.0.113.0/24
+              - 10.42.0.0/24
+              - 10.64.0.0/12
+              - 10.128.0.0/16
+              - 192.168.64.0/24
               nextHopRewrite: peer-address
             exportPolicyName: lan
             exportPolicy:
               allowedPrefixes:
-              - 198.18.0.0/24
+              - 198.18.0.0/16
         paths:
         - source: routerd-static
-          prefix: 198.18.0.0/24
-      bind_interface: bgp0
-      fib_interface: bgp0
+          prefix: 198.18.0.0/16
+      bind_interface: wan0
+      fib_interface: wan0
 - id: service/tailnet
   when:
     fact: service.lan-ha.elected
@@ -733,7 +842,7 @@ resources:
       hostname: hgw-router-b
       auth_key_file: /run/routerd-ha/tailscale-b.key
       advertise_routes:
-      - 198.18.0.0/24
+      - 198.18.0.0/16
       advertise_exit_node: true
 - id: service/internet1
   depends_on:
@@ -798,16 +907,19 @@ resources:
 - id: upstream-selection
   depends_on:
   - address/lan
+  - address/legacy-lan
   egress_policy:
     in_interface: vip0
     hysteresis_millis: 60000
     sources:
-    - 198.18.0.0/24
+    - 198.18.0.0/16
     exclude_destinations:
-    - 198.18.0.0/24
-    - 198.19.0.0/24
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 198.18.0.0/16
+    - 198.19.0.0/16
     - 192.0.2.0/24
-    - 203.0.113.0/24
     - 100.64.0.0/10
     groups:
     - name: dslite-pd-balanced
@@ -857,7 +969,7 @@ resources:
       targets:
       - name: lan-gateway
         interface: lan0
-        gateway: 198.18.0.253
+        gateway: 198.19.0.253
         table: 114
         priority: 1104
         mark: 276
@@ -1027,7 +1139,7 @@ resources:
       accept_mode: true
       advert_interval_centiseconds: 100
       addresses:
-      - 198.18.0.1/24
+      - 198.18.0.1/16
       graceful_activation:
         timeout: 45s
         ready_when:
@@ -1071,3 +1183,31 @@ resources:
   address:
     interface: lan6-ha
     cidr: fe80::5eff:fe00:144/64
+- id: route/ntp-device
+  depends_on:
+  - address/legacy-lan
+  route:
+    destination: 192.168.100.1/32
+    interface: lan0
+    gateway: 198.19.0.253
+    metric: 10
+- id: route/wan-private
+  depends_on:
+  - interface/wan-ha
+  route:
+    destination: 192.168.0.0/16
+    interface: wan-ha
+    metric: 20
+- id: route/private-172
+  depends_on:
+  - address/legacy-lan
+  route:
+    destination: 172.16.0.0/12
+    interface: lan0
+    gateway: 198.19.0.253
+    metric: 20
+- id: route/private-10
+  route:
+    destination: 10.0.0.0/8
+    blackhole: true
+    metric: 20

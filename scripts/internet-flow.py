@@ -26,7 +26,7 @@ def main():
     family = socket.SOCK_STREAM if args.mode == "tcp" else socket.SOCK_DGRAM
     with socket.socket(socket.AF_INET, family) as wire:
         wire.settimeout(60 if args.mode == "tcp" else 1)
-        wire.connect(("1.1.1.1", 443 if args.mode == "tcp" else 53))
+        wire.connect(("1.1.1.1", 443) if args.mode == "tcp" else ("9.9.9.10", 53))
         endpoint = wire.getsockname()
         connection = None
         if args.mode == "tcp":

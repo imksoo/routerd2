@@ -1,6 +1,6 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
-BGPを保存設定と同じ既存WANへ接続し、専用bgp0を削除した43-resourceの実通信が終了0。独立FRRの4つの私設prefix、両clientのNATなしTCP/UDP、各peer停止/再加入と全daemon再起動後を確認。次は単体で受け入れた構成を二台profileへ接続し、残る保存WAN intentを照合する。詳細は[引き継ぎ](pve-codex-handoff.md)を参照する。
+単体で受け入れた二つのLAN /16、NAT条件、個別経路、WAN共有BGP、公開DNS/NTP転送を各52-resourceの二台例へ接続した。通常build `adbd41ffa4be`で両方向のdaemon停止/再加入と実通信が終了0。同一TCP（SYN1回）/UDPのNAT tuple・PD identity・DHCP更新/再取得を保持した。既存の上流順位とhysteresisを使い、WANを追加しない。次は保存intentの残り、二台での設定更新・保持障害を進める。詳細・限界は[引き継ぎ](pve-codex-handoff.md)を参照する。
 
 保存設定の二つのLAN /16とDHCP profileを単体44-resourceへ接続し、実netmask/割当/通信と全daemon再起動後が通過した。保存NAT除外も反映し、私設/機器用宛ての元sourceとInternet/管理/WAN内のSNATを実peerで確認。次は残る保存intentと実接続topologyを照合し、単体で受け入れた構成を二台profileへ接続する。詳細は[引き継ぎ](pve-codex-handoff.md)を参照する。
 
@@ -30,7 +30,7 @@ HA基盤の並行確認: 基準main `9fb64f4`の通常実行物、build ID `9fb6
 
 ## 現在の棚卸し
 
-- 現行の単体例は39 resources。DHCP/PD/RA、DNS/cache/history/DoH、DS-Lite/IPv6 Internet、管理、NTP、BGP 2 peers、Tailscale subnet/exitを同じ実daemonで接続し、独立peer/clientとの通信と全daemon restartを通過した。最新条件・結果・再実行手順は[試験計画](test-plan.md)に集約する。
+- 現行の単体例は43 resources、二台例は各52 resources。DHCP/PD/RA、DNS/cache/history/DoH、DS-Lite/IPv6 Internet、管理、NTP、BGP 2 peers、Tailscale subnet/exitを同じ実daemonで接続し、独立peer/clientとの通信と全daemon restartを通過した。最新条件・結果・再実行手順は[試験計画](test-plan.md)に集約する。
 - `make check`（Race Detector・vet）、通常static build、設定検証を通過。補助検査の成功を製品全体の完成とは扱わない。
 - 別checkpointで生成profileの自然PD T1、nativeのWAN遮断復旧、二WAN Health→PBR、Alpine/PID1の通信/署名更新/rollbackを確認済み。現在の全profileや実機資格への流用はせず、追加PVE/QEMU・PBR調査は行わない。
 - 保存中のhomert02/03設定は各110 resources、kind件数一致、DNSForwarder11件。両方のIPv6 host route table120、WAN /128 DS-Lite source、BGP広告、Tailscaleの運用を参照済み。実設定値・秘密は公開しない。
