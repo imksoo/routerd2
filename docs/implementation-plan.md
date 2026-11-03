@@ -154,8 +154,7 @@ boot 側は network resource の意味を解釈せず、startup-config の参照
 追加 engine の採用によって、systemd / journald / sshd を製品の必須条件へ戻さない。
 
 現在のプロセス分離には equal-UID の信頼モデルがある。
-UID/GID/capability の分離は、UDS の role 認可・peer credential・state 所有権と同じ変更で実装する。
-network writer、時計調整、release 操作、reboot を別の権限にする。
+2026-11-03のユーザー指示により、UID/GID/capabilityとstate所有者によるworker権限分離は完成条件から除外する。機能実装と実通信を先行する。
 コンテナから host の時計・watchdog・reboot を操作しない。
 参照: [logging の現在の信頼モデル](https://github.com/imksoo/routerd2/blob/8dfbf615b01e9da57a06196b4069b9d8713f9ab5/internal/logging/README.md)。
 
@@ -175,7 +174,7 @@ network writer、時計調整、release 操作、reboot を別の権限にする
 | M2 単一ノードの WAN/LAN・経路切替 | SYS-01, SYS-02, NET-01, NET-02, NET-03, NET-04, NET-05, NET-06, OPS-01 | Health→PBR/FIB→実packet、DS-Lite+第二経路/PPPoE、MSS、PD/LAN/DNS、基本resource APIを受入する。 |
 | M3 二台 HA と routing resource | NET-07, NET-08, HA-01, HA-02, HA-03 | VRRP readiness、DHCP/PD継続、既存TCP/UDP NAT session維持、BGP/BFD/WG resource契約を別々に合格させて統合する。 |
 | M4 SAM・federation・cloud mobility | CORE-05, CLOUD-01, CLOUD-02, CLOUD-03, CLOUD-04 | RR/leaf複数nodeとproviderごとの実captureで、所有権移動、/32、NATなし通信、revoke/drain/復旧を確認する。 |
-| M5 全運用surface と追加engine | SYS-03, OPS-02, OPS-03, EXT-01, EXT-02 | 旧API/CLI/Web/観測、選定engineの必要機能、権限分離をprofile別に受入する。 |
+| M5 全運用surface と追加engine | SYS-03, OPS-02, OPS-03, EXT-01, EXT-02 | 旧API/CLI/Web/観測、選定engineの必要機能、worker障害分離をprofile別に受入する。 |
 | M6 更新・OSイメージ・配備先 | DIST-01, DIST-02, DIST-03, DIST-04 | SSHからの安全な更新、state付きfallback、kernel/rootfs A/B、物理機/arm64/cloud/K8sを個別にqualificationする。 |
 | M7 互換性台帳と製品受入の確定 | QUAL-01 | 未対応・明示変更を隠さず、承認した契約集合の全ケースと性能・移行・戻し手順を証跡付きで閉じる。 |
 
@@ -236,8 +235,8 @@ CORE-06 の engine PoC も最初の五つと並行する。
 
 ### 依存を過剰に広げない境界
 
-SYS-03 は runtime 権限 gate と appliance watchdog gate に分ける。
-SSH 更新と Kubernetes は権限 gate を必要とし、実機 watchdog の検証完了は待たない。
+SYS-03 は worker障害分離とappliance watchdogを扱う。
+SSH更新とKubernetesは各機能の実通信・更新契約に従い受け入れる。
 DIST-02 も image / boot / state の共通契約と物理機別 qualification を分ける。
 cloud image は前者と対象 provider の boot/update 方式を必要とし、別の mini-PC / arm64 機の受入は待たない。
 
@@ -1120,7 +1119,7 @@ PPP世代1を残したまま202となることを確認した。中間DHCP停止
 新しいpassで処理するよう修正した。局所再現は修正前に失敗し、修正後は親WANの停止まで待つ。
 最終`wan-retirement`の同じ永続applianceでPPP世代/interface交代、captureの撤去順序とTCP/UDP・DNS復旧を
 確認した。MTU/revision変更・実reboot後の二回目起動、DUID/固定SSH鍵保持と通信復旧、poweroffも通った。
-全運用API・権限分離・更新trial/実機の受入は未完了。
+全運用API・更新trial/実機の受入は未完了。
 
 範囲: 旧 routerd 互換 / track: operations / risk: high。
 前提: CORE-03, CORE-04。 設計判断: D-09。
@@ -1534,27 +1533,23 @@ HA-02/EXT-02も未完了であり、今回の接続継続だけでhomert置換�
 
 ### M5 — 全運用surface と追加engine
 
-#### SYS-03 — worker 権限分離と watchdog
+#### SYS-03 — worker 障害分離と watchdog
 
 範囲: 新しい製品・配備要件 / track: platform / risk: high。
 前提: CORE-03, CORE-06。 設計判断: D-03。
 
 **成果物**
 
-- UID/GID/capability、writable directory、resource limitsとUDSのrole/peer credential認可を同時に実装する。
-- network変更、clock調整、release操作、rebootを別権限にし、旧generationからのprivileged requestを拒否する。
+- worker停止・disk full・遅いexporter・OOMからforwardingと他workerの動作を分離する。
 - appliance専用の明示watchdogをboot attemptと接続する。containerではruntime/orchestratorの再起動契約を使う。
-- bootstrap、runtime supervisor、stager、workerが持つ権限と書込先を分離する。binaryの分割だけを権限分離の完了と扱わない。
 
 **受入条件**
 
-- logging/DNS/telemetry workerからnetwork/release操作ができず、再起動後の古いcredentialも無効になる。
 - disk full／遅いexporter／worker OOMがforwardingを停止させない。
 - PID1 hang→watchdog reset→未確認trialのfallbackをVM/実機で確認し、containerからhost reset/clock変更ができない。
 
 **部分成果物の境界**
 
-- `runtime-authority`: role/peer credential、UID/GID/capabilityとstate ownershipを同時導入する。 network/clock/release/rebootの権限とgeneration fencingを分離する。 containerからhost clock/watchdog/rebootを操作できない。
 - `appliance-watchdog`: 対象VM/実機でPID1 hangからwatchdog resetとtrial fallbackを確認する。
 
 再利用・比較元: [pkg/lifecycle](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/lifecycle), [pkg/manageddaemon](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/manageddaemon)。

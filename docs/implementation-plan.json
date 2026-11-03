@@ -545,7 +545,7 @@
     },
     {
       "id": "SYS-03",
-      "title": "worker 権限分離と watchdog",
+      "title": "worker 障害分離と watchdog",
       "milestone": "M5",
       "track": "platform",
       "status": "planned",
@@ -559,13 +559,10 @@
         "D-03"
       ],
       "deliverables": [
-        "UID/GID/capability、writable directory、resource limitsとUDSのrole/peer credential認可を同時に実装する。",
-        "network変更、clock調整、release操作、rebootを別権限にし、旧generationからのprivileged requestを拒否する。",
         "appliance専用の明示watchdogをboot attemptと接続する。containerではruntime/orchestratorの再起動契約を使う。",
-        "bootstrap、runtime supervisor、stager、workerが持つ権限と書込先を分離する。binaryの分割だけを権限分離の完了と扱わない。"
+        "worker停止・disk full・遅いexporter・OOMからforwardingと他workerの動作を分離する。"
       ],
       "acceptance_gates": [
-        "logging/DNS/telemetry workerからnetwork/release操作ができず、再起動後の古いcredentialも無効になる。",
         "disk full／遅いexporter／worker OOMがforwardingを停止させない。",
         "PID1 hang→watchdog reset→未確認trialのfallbackをVM/実機で確認し、containerからhost reset/clock変更ができない。"
       ],
@@ -583,14 +580,6 @@
       ],
       "component_gates": [
         {
-          "id": "runtime-authority",
-          "criteria": [
-            "role/peer credential、UID/GID/capabilityとstate ownershipを同時導入する。",
-            "network/clock/release/rebootの権限とgeneration fencingを分離する。",
-            "containerからhost clock/watchdog/rebootを操作できない。"
-          ]
-        },
-        {
           "id": "appliance-watchdog",
           "criteria": [
             "対象VM/実機でPID1 hangからwatchdog resetとtrial fallbackを確認する。"
@@ -598,8 +587,13 @@
         }
       ],
       "implementation_notes": {
-        "stopping_worker_observation": "2026-11-03 baseline85259c1 plus current patch: actual fork/exec sibling workers reproduced a frozen worker (SIGSTOP) causing supervisor ExpiresNanos=ObservedNanos after heartbeat timeout despite a healthy ready sibling. Exclude already-stopping workers from the shared heartbeat deadline; their Ready=false and overall readiness=false remain unchanged, and healthy workers retain their original deadlines. Same actual-process regression and existing heartbeat detection passed after change; Race/vet/Python36 and normal static3-binary build passed. No extra state/timer/retry. This fixes one cross-worker invalidation; observed BGP/VRRP effect timeouts and full-profile startup/long-run stability remain open. Temporary timing instrumentation removed. Normal Makefile build85259c1a892c plus current patch also passed the actual HGW paired47-resource both-handoff gate: one TCP SYN,228 replies,maxgap11.50s; UDP246 replies,17 one-second misses,maxgap9.52s; all ordinary/special DHCP,DNS/DoH,BGP,NTP,Tailscale,management,fresh operations checks passed. Full checks60.75/73.57s include sampling/reacquisition. Cold-start AFTR409/WAN/BGP/VRRP restarts were still observed, not stable-startup qualification."
-      }
+        "stopping_worker_observation": "2026-11-03 baseline85259c1 plus current patch: actual fork/exec sibling workers reproduced a frozen worker (SIGSTOP) causing supervisor ExpiresNanos=ObservedNanos after heartbeat timeout despite a healthy ready sibling. Exclude already-stopping workers from the shared heartbeat deadline; their Ready=false and overall readiness=false remain unchanged, and healthy workers retain their original deadlines. Same actual-process regression and existing heartbeat detection passed after change; Race/vet/Python36 and normal static3-binary build passed. No extra state/timer/retry. This fixes one cross-worker invalidation; observed BGP/VRRP effect timeouts and full-profile startup/long-run stability remain open. Temporary timing instrumentation removed. Normal Makefile build85259c1a892c plus current patch also passed the actual HGW paired47-resource both-handoff gate: one TCP SYN,228 replies,maxgap11.50s; UDP246 replies,17 one-second misses,maxgap9.52s; all ordinary/special DHCP,DNS/DoH,BGP,NTP,Tailscale,management,fresh operations checks passed. Full checks60.75/73.57s include sampling/reacquisition. Cold-start AFTR409/WAN/BGP/VRRP restarts were still observed, not stable-startup qualification.",
+        "user_scope_20261103": "User explicitly excluded privilege separation from the completion requirements. Functional implementation and real communication take priority. No privilege-separation production code was introduced."
+      },
+      "excluded_scope": [
+        "UID/GID/capabilityとstateディレクトリ所有者によるworker権限分離",
+        "権限分離を前提とするruntime-authority gate"
+      ]
     },
     {
       "id": "NET-01",
