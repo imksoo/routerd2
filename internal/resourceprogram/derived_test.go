@@ -37,7 +37,7 @@ func TestDerivedEventValidatesTypedReferencesBeforeProjection(t *testing.T) {
 }
 
 func TestDerivedBGPRouterReferenceUsesAllDeclaredProviders(t *testing.T) {
-	for _, field := range []string{"phase", "establishedPeers", "backend", "observedAt"} {
+	for _, field := range []string{"phase", "establishedPeers", "acceptedPrefixes", "backend", "observedAt"} {
 		spec := api.DerivedEventSpec{Topic: "routerd.bgp", Inputs: []api.ReadyWhenSpec{{Field: "${BGPRouter/service/router.status." + field + "}", NotEmpty: true}}}
 		source := Program{SchemaVersion: SchemaVersion, Resources: []Resource{{ID: "service/router", When: &FactCondition{Fact: "service.gate.ready"}, Service: &serviceconfig.Service{Name: "router", BGP: &serviceconfig.BGP{Runtime: bgpconfig.AppliedConfig{Global: bgpconfig.AppliedGlobal{ASN: 65001, RouterID: "192.0.2.1", ListenPort: -1}, Peers: map[string]bgpconfig.AppliedPeer{"192.0.2.2": {Address: "192.0.2.2", ASN: 65002}}}}}}, {ID: "derived", DerivedEvent: &spec}}}
 		plan, err := Compile(source)
@@ -48,7 +48,7 @@ func TestDerivedBGPRouterReferenceUsesAllDeclaredProviders(t *testing.T) {
 		if err != nil || len(projected.Services) != 0 || len(projected.DerivedEvents) != 1 {
 			t.Fatal("inactive declaration lost typed reference", field, err)
 		}
-		for _, bad := range []string{"${BGP/service/router.status.phase}", "${BGPPeer/service/router.status.phase}", "${BGPRouter/missing.status.phase}", "${HealthCheck/service/router.status.phase}", "${BGPRouter/service/router.status.acceptedPrefixes}", "${BGPRouter/service/router.status.peers.state}"} {
+		for _, bad := range []string{"${BGP/service/router.status.phase}", "${BGPPeer/service/router.status.phase}", "${BGPRouter/missing.status.phase}", "${HealthCheck/service/router.status.phase}", "${BGPRouter/service/router.status.peers.state}"} {
 			spec.Inputs[0].Field = bad
 			if _, err := Compile(source); err == nil {
 				t.Fatal("wrong kind or unobserved field accepted", bad)

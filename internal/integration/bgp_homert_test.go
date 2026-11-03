@@ -15,9 +15,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd/pkg/bgpdaemon"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
+	"github.com/imksoo/routerd2/internal/derivedcontroller"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/webconsoleconfig"
@@ -70,7 +72,7 @@ func TestDaemonBGPTwoFRRPeers(t *testing.T) {
 		prefixes := []string{imports[i], learned[i]}
 		addresses := []string{strings.TrimSuffix(prefixes[0], "0/24") + "50", strings.TrimSuffix(prefixes[1], "0/24") + "50"}
 		setupBGPAddresses(t, namespace, []string{"address", "add", remote + "/24", "dev", "peer0"}, []string{"address", "add", addresses[0] + "/32", "dev", "lo"}, []string{"address", "add", addresses[1] + "/32", "dev", "lo"})
-		vty, stop, start := startIndependentFRR(t, namespace, local, remote, prefixes)
+		vty, stop, start := startIndependentFRR(t, namespace, local, remote, append(append([]string(nil), prefixes...), fmt.Sprintf("100.64.%d.0/24", i+1)))
 		peers = append(peers, peer{namespace, local, remote, prefixes, addresses, vty, stop, start, healthPBRCapture(t, iface)})
 		document.Resources = append(document.Resources,
 			resourceprogram.Resource{ID: iface, Interface: &network.Interface{Name: iface}},
@@ -97,7 +99,13 @@ threading.Event().wait()`, addresses[0], addresses[1])
 	}
 	document.Resources = append(document.Resources, resourceprogram.Resource{ID: "bgp", Service: &serviceconfig.Service{Name: "edge", BGP: &intent}})
 	document.Resources = append(document.Resources, resourceprogram.Resource{ID: "console", Service: &serviceconfig.Service{Name: "console", WebConsole: &webconsoleconfig.Config{Listen: netip.MustParseAddrPort("198.18.0.1:8080"), BasePath: "/ops/"}}})
+	acceptedSpec := api.DerivedEventSpec{Topic: "routerd.fixture.accepted", EmitInitial: true, Inputs: []api.ReadyWhenSpec{{Field: "${BGPRouter/bgp.status.acceptedPrefixes}", Equals: "4"}}}
+	document.Resources = append(document.Resources, resourceprogram.Resource{ID: "accepted-routes", DerivedEvent: &acceptedSpec})
 	fixture := startFixtureDaemon(t, document)
+	acceptedStatus := func(want bool) bool {
+		var observed derivedcontroller.Observation
+		return fixture.control.Do(t.Context(), "GET", "/v1/derived/accepted-routes", nil, &observed) == nil && observed.State.Asserted != nil && *observed.State.Asserted == want
+	}
 	console := func(expected ...string) bool {
 		var body []byte
 		err := fixtureInsideNamespace(client, func() error {
@@ -121,6 +129,41 @@ threading.Event().wait()`, addresses[0], addresses[1])
 		return true
 	}
 
+	var observedPeers []bgpconfig.Peer
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("actual BGP peer counts: %+v", observedPeers)
+		}
+	})
+	counts := func(accepted uint64) bool {
+		var instance runtimeplan.InstanceStatus
+		if err := fixture.control.Do(t.Context(), "GET", "/v1/services/service.edge", nil, &instance); err != nil {
+			return false
+		}
+		var snapshot bgpconfig.Snapshot
+		if err := json.Unmarshal(instance.Snapshot, &snapshot); err != nil || len(snapshot.Peers) != len(peers) {
+			return false
+		}
+		observedPeers = snapshot.Peers
+		for _, observed := range snapshot.Peers {
+			for _, peer := range peers {
+				if peer.remote != observed.Address {
+					continue
+				}
+				var advertised struct {
+					Routes map[string]json.RawMessage `json:"advertisedRoutes"`
+				}
+				out, err := peer.vty("show bgp ipv4 unicast neighbors " + peer.local + " advertised-routes json")
+				if err != nil || json.Unmarshal(out, &advertised) != nil {
+					return false
+				}
+				if observed.ReceivedPrefixes != uint64(len(advertised.Routes)) || observed.AcceptedPrefixes != accepted {
+					return false
+				}
+			}
+		}
+		return true
+	}
 	advertised := func(p peer, present bool) bool {
 		var view struct {
 			Paths []json.RawMessage `json:"paths"`
@@ -183,7 +226,8 @@ for addr in sys.argv[1:]:
 	until(t, 5*time.Second, func() bool {
 		return console(`data-bgp-current="true"`, `data-bgp-peer="192.0.2.2"`, `data-bgp-peer="192.0.3.2"`, "接続確立", `data-bgp-prefix="10.64.1.0/24"`, `data-bgp-prefix="10.128.1.0/24"`)
 	})
-	t.Log("both peers established and forwarding; GR negotiated; independent LAN HTTP client read both BGP peers and selected routes")
+	until(t, 5*time.Second, func() bool { return counts(2) && acceptedStatus(true) })
+	t.Log("both peers established and forwarding; actual advertised/received routes and accepted2 per peer, GR negotiated; independent LAN HTTP client read both BGP peers and selected routes")
 	first := peers[0]
 	for _, prefix := range first.prefixes {
 		if out, err := first.vty("configure terminal", "router bgp 64521", "address-family ipv4 unicast", "no network "+prefix); err != nil {
@@ -191,6 +235,23 @@ for addr in sys.argv[1:]:
 		}
 	}
 	until(t, 10*time.Second, func() bool { return installed(first, false) })
+	until(t, 5*time.Second, func() bool {
+		var instance runtimeplan.InstanceStatus
+		if err := fixture.control.Do(t.Context(), "GET", "/v1/services/service.edge", nil, &instance); err != nil {
+			return false
+		}
+		var snapshot bgpconfig.Snapshot
+		if json.Unmarshal(instance.Snapshot, &snapshot) != nil {
+			return false
+		}
+		for _, peer := range snapshot.Peers {
+			if peer.Address == first.remote {
+				return peer.AcceptedPrefixes == 0
+			}
+		}
+		return false
+	})
+	until(t, 5*time.Second, func() bool { return acceptedStatus(false) })
 	if err := forward(first); err == nil {
 		t.Fatal("withdrawn peer routes still forward")
 	}
@@ -258,6 +319,7 @@ for addr in sys.argv[1:]:
 			}
 		}
 	}
+	until(t, 5*time.Second, func() bool { return counts(2) && acceptedStatus(true) })
 	until(t, 5*time.Second, func() bool {
 		return console(`data-bgp-current="true"`, `data-bgp-prefix="10.64.1.0/24"`, `data-bgp-prefix="10.128.1.0/24"`)
 	})

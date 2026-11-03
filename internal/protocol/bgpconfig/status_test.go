@@ -11,14 +11,14 @@ import (
 func statusFixture() (Config, Snapshot, bfd.Clock) {
 	c := Config{Resource: "edge", Runtime: AppliedConfig{Peers: map[string]AppliedPeer{"192.0.2.2": {Address: "192.0.2.2", ASN: 65002}, "192.0.2.3": {Address: "192.0.2.3", ASN: 65003}}}}
 	clock := bfd.Clock{BootID: "11111111-2222-4333-8444-555555555555", BoottimeNanoseconds: int64(10 * time.Second), WallTime: time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC)}
-	s := Snapshot{Resource: c.Resource, Epoch: strings.Repeat("a", 32), Sequence: 1, Active: true, Peers: []Peer{{Address: "192.0.2.2", ASN: 65002, State: "SESSION_STATE_ESTABLISHED", AdminState: "ADMIN_STATE_UP"}, {Address: "192.0.2.3", ASN: 65003, State: "SESSION_STATE_IDLE", AdminState: "ADMIN_STATE_UP"}}}
+	s := Snapshot{Resource: c.Resource, Epoch: strings.Repeat("a", 32), Sequence: 1, Active: true, Peers: []Peer{{Address: "192.0.2.2", ASN: 65002, ReceivedPrefixes: 3, AcceptedPrefixes: 2, State: "SESSION_STATE_ESTABLISHED", AdminState: "ADMIN_STATE_UP"}, {Address: "192.0.2.3", ASN: 65003, State: "SESSION_STATE_IDLE", AdminState: "ADMIN_STATE_UP"}}}
 	StampObservation(&s, clock)
 	return c, s, clock
 }
 
 func TestCurrentBGPRouterScalarsUseCompletePeersAndFIBObservation(t *testing.T) {
 	cfg, s, clock := statusFixture()
-	for field, text := range map[string]string{"phase": "Degraded", "establishedPeers": "1", "backend": "gobgp", "observedAt": clock.WallTime.Format(time.RFC3339Nano)} {
+	for field, text := range map[string]string{"phase": "Degraded", "establishedPeers": "1", "backend": "gobgp", "acceptedPrefixes": "2", "observedAt": clock.WallTime.Format(time.RFC3339Nano)} {
 		got, known := CurrentStatus(cfg, s, field, clock, 0)
 		if !known || got.Text != text || got.ObservedNanos != uint64(clock.BoottimeNanoseconds) || got.ExpiresNanos != uint64(clock.BoottimeNanoseconds)+uint64(ObservationLifetime) {
 			t.Fatal(field, got, known)
@@ -44,7 +44,7 @@ func TestCurrentBGPRouterScalarsUseCompletePeersAndFIBObservation(t *testing.T) 
 	if got, known := CurrentStatus(cfg, s, "phase", clock, 0); !known || got.Text != "Pending" {
 		t.Fatal(got, known)
 	}
-	for _, field := range []string{"acceptedPrefixes", "fibRoutes", "prefixes", "peers.state", "unknown"} {
+	for _, field := range []string{"fibRoutes", "prefixes", "peers.state", "unknown"} {
 		if StatusFieldSupported(field) {
 			t.Fatal("unobserved status contract was fabricated", field)
 		}

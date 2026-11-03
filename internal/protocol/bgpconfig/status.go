@@ -74,7 +74,7 @@ func ValidatePeers(cfg Config, s Snapshot) error {
 
 func StatusFieldSupported(field string) bool {
 	switch field {
-	case "phase", "backend", "establishedPeers", "observedAt":
+	case "phase", "backend", "establishedPeers", "acceptedPrefixes", "observedAt":
 		return true
 	}
 	return false
@@ -106,6 +106,12 @@ func CurrentStatus(cfg Config, s Snapshot, field string, clock bfd.Clock, unreso
 		}
 	case "establishedPeers":
 		text = strconv.Itoa(established)
+	case "acceptedPrefixes":
+		var accepted uint64
+		for _, peer := range s.Peers {
+			accepted += peer.AcceptedPrefixes
+		}
+		text = strconv.FormatUint(accepted, 10)
 	case "backend":
 		text = "gobgp"
 	case "observedAt":

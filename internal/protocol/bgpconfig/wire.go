@@ -19,12 +19,14 @@ type Route struct {
 }
 
 type Peer struct {
-	Address      string `json:"address"`
-	ASN          uint32 `json:"asn"`
-	State        string `json:"state"`
-	AdminState   string `json:"admin_state"`
-	LocalAddress string `json:"local_address,omitempty"`
-	RemotePort   uint32 `json:"remote_port,omitempty"`
+	Address          string `json:"address"`
+	ASN              uint32 `json:"asn"`
+	State            string `json:"state"`
+	AdminState       string `json:"admin_state"`
+	LocalAddress     string `json:"local_address,omitempty"`
+	RemotePort       uint32 `json:"remote_port,omitempty"`
+	ReceivedPrefixes uint64 `json:"received_prefixes"`
+	AcceptedPrefixes uint64 `json:"accepted_prefixes"`
 }
 
 // Snapshot is a complete replacement, not a route delta. Sequence advances

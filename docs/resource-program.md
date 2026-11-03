@@ -329,11 +329,14 @@ BFD `observedAt` の値変更はworkerで通知集約の前に数える。`equal
 厳しい値比較側を選ぶため、集約truthが変わらなくても保守的にholdをやり直すことがある。
 時刻変更counterの飽和では `observedAt` はunknownになり、独立したphaseの有限証拠は保持する。
 
-BGPRouterはnative BGP serviceの `phase`、`establishedPeers`、`backend`、`observedAt` を読む。
+BGPRouterはnative BGP serviceの `phase`、`establishedPeers`、`acceptedPrefixes`、`backend`、`observedAt` を読む。
 例は `${BGPRouter/service/edge-bgp.status.phase}` に `equals: Established` を指定する。
 宣言した全peerの観測が必要で、全Establishedなら `Established`、一部なら `Degraded`、
 全非Establishedなら `Down`、peer宣言なしなら `Pending`。全Establishedでも未解決FIBは `Degraded` となる。
-`backend` は `gobgp`、`establishedPeers` は数の文字列、`observedAt` はUTC RFC3339Nanoである。
+`backend` は `gobgp`、`establishedPeers` と `acceptedPrefixes` は数の文字列、`observedAt` はUTC RFC3339Nanoである。
+`acceptedPrefixes` はglobal import policy後のlocal RIBにある、peer別の受理経路数の合計。
+非best経路とGR保持経路を含み、同じprefixを複数peerから受理した場合は各peerで数える。
+ローカル生成経路は含めない。受信したAdj-RIB-Inの件数と、kernelへ選択したFIB件数とは区別する。
 
 元のBGP経路/BFD依存内容と同じ投影のnetwork ACKが必要で、変更した経路の適用待ちはunknownになる。
 経路内容が同じheartbeatはACKを再利用し、holdを毎回取り消さない。

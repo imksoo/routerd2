@@ -2,6 +2,18 @@
 
 更新: 2026-11-03。全体ゴールは継続中。
 
+## 単体全構成の実HGW再確認とBGP受理経路の観測
+
+main `986246c`・通常build `986246cb28dc`の45-resource単体例を実HGWで起動し、独立LAN端末のDHCPv4/SLAAC/Information・両IP Internet/DNS、4 DS-Lite、BGP2 peer、NTP、Tailscale、管理、native nDPI/履歴・syslog/OTLP、設定rollbackと全daemon再起動が終了0。PD SIGKILL1.97秒/通常再起動6.09秒、全daemon後の全項目再確認111.63秒。111.63秒は転送断時間ではない。2巡回/自然PD更新0回。WAN遮断・追加PBR調査は行っていない。
+
+旧routerdの`pkg/controller/bgp/controller.go`のstatePeer/観測を比較した。受信数は既存ListPeerのAdj-RIB-In値を利用し、受理数は既に取得しているglobal import policy後の全local-RIB経路からpeer別に数える。ListPeerのAccepted値はglobal policy前の段階なので、未許可経路を含む実広告で違いを確認した。FIB選択、追加RIB query、別counter cache、独立pollerは増やしていない。最初の試験側の固定受信数は、FRRの実広告一覧を使う比較へ変更した。
+
+基準main `986246c` + BGP観測変更、通常build `986246cb28dc`で独立FRR二peerの手順が終了0。各peerの受信数をFRRの実advertised-routesと照合し、global import policy後の受理数は各2件。許可経路のwithdrawで対象peerの受理数が0となり、未許可の広告は残る。BGPRouterのacceptedPrefixes参照（合計4との比較）は撤去で解除、再取得とdaemon再起動後に再assert。既存のTCP/UDP・LAN広告・GR保持/再加入・設定撤去も通過した。
+
+関連Race/vet・make fmt-check/test-tools・通常3実行物のstatic linkが通過。再実行は`python3 scripts/daemon-tests.py bgp-frr --test TestDaemonBGPTwoFRRPeers`、実HGWは[試験計画](test-plan.md)の単体手順（WAN_OUTAGE=0）。
+
+実HGWの単体例と独立FRRの部分受入であり、全110-resource意図、長時間/同一TCP継続、GR全期限、全BGPPeer操作、HA/実機・ONU/NICと全34 packageの完成は継続中。全構成の実HGW確認はBGP観測変更前の986246cであり、観測変更後の受入は独立FRR手順。
+
 ## PDからアドレス配布・DNS・上流通信までの接続
 
 実通信で二つの原因を修正した。IPv6 `::`がIPv4 socketも開いて明示IPv4 listenerと衝突していたため、既存のtyped addressからudp4/tcp4とudp6/tcp6を選ぶ。もう一つは、DNS待受の短い確認期限で割当観測まで失効し、実割当と元のPDが有効でもAAAAが欠ける循環だった。Inputの`Authority`は元のresource/PD権限を保持し、`DNSReadyUntil`は両server経路の配布可否に使う。lease観測の期限は前者へ制約し、DNS待受確認の短い窓を割当所有権へ流用しない。producer/consumerを同じ現在契約へ更新し、互換readerや期限延長・retryは加えていない。旧routerdのDNS listener、dnsmasq stateful/both constructorとcallerも照合した。

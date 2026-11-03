@@ -81,6 +81,7 @@ func readSnapshot(ctx context.Context, server *gobgpserver.BgpServer, cfg Config
 		return snapshot, errors.New("BGP global instance is stopped")
 	}
 	seen := make(map[Route]bool)
+	accepted := make(map[string]uint64)
 	for _, family := range cfg.Runtime.Global.Families {
 		rf := gobgp.RF_IPv4_UC
 		if family == "ipv6-unicast" {
@@ -96,6 +97,12 @@ func readSnapshot(ctx context.Context, server *gobgpserver.BgpServer, cfg Config
 				return
 			}
 			for _, path := range paths {
+				// Count every imported path, including non-best/GR paths, in
+				// the local RIB already being read. Adj-RIB-In counters precede
+				// this instance's global import policy; FIB selection follows it.
+				if path != nil && !path.Withdrawal && !path.Filtered && path.PeerAddress.IsValid() && !path.PeerAddress.IsUnspecified() {
+					accepted[path.PeerAddress.String()]++
+				}
 				route, ok := selectedRoute(cfg, prefix.String(), path)
 				if !ok {
 					if path != nil && path.Best && path.PeerAddress.IsValid() && !path.PeerAddress.IsUnspecified() {
@@ -132,11 +139,17 @@ func readSnapshot(ctx context.Context, server *gobgpserver.BgpServer, cfg Config
 		return a.PeerAddress < b.PeerAddress
 	})
 	err = server.ListPeer(ctx, &gobgpapi.ListPeerRequest{}, func(p *gobgpapi.Peer) {
-		snapshot.Peers = append(snapshot.Peers, Peer{
+		peer := Peer{
 			Address: p.GetConf().GetNeighborAddress(), ASN: p.GetConf().GetPeerAsn(),
 			State: p.GetState().GetSessionState().String(), AdminState: p.GetState().GetAdminState().String(),
 			LocalAddress: p.GetTransport().GetLocalAddress(), RemotePort: p.GetTransport().GetRemotePort(),
-		})
+		}
+		for _, family := range p.GetAfiSafis() {
+			peer.ReceivedPrefixes += family.GetState().GetReceived()
+
+		}
+		peer.AcceptedPrefixes = accepted[peer.Address]
+		snapshot.Peers = append(snapshot.Peers, peer)
 	})
 	if err != nil {
 		return snapshot, err

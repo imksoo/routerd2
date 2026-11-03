@@ -1,8 +1,8 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
-DHCPv6の配布には旧routerdと同じbundled dnsmasqを使い、PDからLAN /64・RA・DHCPv4/v6・DNS・上流peer通信まで接続した。DNSのIPv4/IPv6待受衝突と、短いDNS待受確認期限が有効な割当をDNSから消す所有権の混同を実通信で修正した。PD/元のresource権限とDNS待受確認を別の期限として保ち、元の期限を延長しない。
+main `986246c`・通常build `986246cb28dc`の45-resource単体例を実HGWで起動し、独立LAN端末のDHCPv4/SLAAC/Information・両IP Internet/DNS、4 DS-Lite、BGP2 peer、NTP、Tailscale、管理、native nDPI/履歴・syslog/OTLP、設定rollbackと全daemon再起動が終了0。PD SIGKILL1.97秒/通常再起動6.09秒、全daemon後の全項目再確認111.63秒。111.63秒は転送断時間ではない。2巡回/自然PD更新0回。WAN遮断・追加PBR調査は行っていない。
 
-独立ISC/dhcpcdによるPD自然更新・上流prefix変更・LAN lease失効・上流PD失効/再取得、worker/daemon再起動、名前更新、両IP UDP/TCPのA/AAAA/PTRと上流peerへのIPv6 TCP/UDPが通過した。stateless PD・make check・通常static3実行物も通過。実行版・条件・再実行は[試験計画](test-plan.md)と[引き継ぎ](pve-codex-handoff.md)に集約する。保存homertのstateless構成を維持し、残る単体の機能・運用意図を埋めた後、stateful lease同期を含むHA・実機・配布の残作業へ進む。NET-06と全34 packageのゴールは継続中。
+BGPの受信数・global import policy後の受理数を状態APIへ接続し、`BGPRouter.status.acceptedPrefixes`を追加した。受信/受理/選択FIBを区別し、既存のpeer観測と全local-RIB walkを使う。独立FRRで許可/未許可の広告、撤去/復帰、参照値のassert解除/再assert、daemon再起動と実TCP/UDPを確認した。実行版・条件・残作業は[試験計画](test-plan.md)と[引き継ぎ](pve-codex-handoff.md)へ集約する。単体の残る意図を埋め、HA・配布・実機の受入へ進む。全34 packageのゴールは継続中。
 
 ## 現在の棚卸し
 

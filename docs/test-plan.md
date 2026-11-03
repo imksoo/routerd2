@@ -228,3 +228,10 @@ DNSの待受は明示IPv4とIPv6 `::`を併記する。割当観測は元のreso
 対象だけの再実行は`python3 scripts/daemon-tests.py dhcp6-server --test TestDaemonDHCP6StatefulIndependentClient`。必要setupはISC DHCP 4.4.3-P1・dhcpcd・BusyBox・dig・通常build/engine・sudo/root。終了時にpeer/process/state/captureを撤去する。保存homertのstateless構成にはpoolを追加しない。例は[dhcp6-pd-stateful.yaml](../examples/dhcp6-pd-stateful.yaml)。
 
 最新結果と実行版は[引き継ぎ](pve-codex-handoff.md)へ集約する。今回の上流は独立ISCのrouted IPv6 peerであり、実homert全構成のInternetやONU/NIC資格とは範囲を分ける。
+
+
+## BGP受信数・受理数とresource参照
+
+`python3 scripts/daemon-tests.py bgp-frr --test TestDaemonBGPTwoFRRPeers`を通常build後に実行する。独立FRR/Zebra二peerが許可経路と未許可prefixを広告し、実advertised-routes一覧の件数を製品の受信数と照合する。global import policy後の全local RIBにある受理経路数、peerごとのwithdraw/復旧、`BGPRouter.status.acceptedPrefixes`の参照値によるassert解除/復帰、daemon再起動後の同じ観測とTCP/UDPを確認する。非best/GR保持とローカル生成をFIB件数へ置き換えない。peerによる再広告を考慮し、受信数を設定したnetworkの数に固定しない。
+
+この独立手順は専用namespaceの二つのpeer subnetを使う。実HGW単体例の同一WAN上BGPは別の上記全構成手順で確認する。新規host WAN、PVE/QEMUや追加PBR調査は不要。実行版・結果・未受入範囲は[引き継ぎ](pve-codex-handoff.md)を参照する。

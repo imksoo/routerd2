@@ -26,7 +26,10 @@ The suite includes two same-AS FRR peers and the homert policy shape, with
 public lab addresses replacing private configuration. It checks all four
 imported routes (including more-specific routes within /12 and /16 allowlists),
 peer-address next-hop rewriting, LAN advertisement, and client TCP/UDP. A
-withdrawal on one peer leaves the other usable. With the configured 120/360
+withdrawal on one peer leaves the other usable. Each peer also advertises a
+prefix outside the import allowlist. Actual advertised routes are compared
+with received counts, while only the two allowed paths count as accepted. The
+`acceptedPrefixes` resource reference changes through withdrawal and recovery. With the configured 120/360
 second Graceful Restart timers, an abruptly stopped peer's routes are observed
 as stale and still forward before the peer rejoins. Product restart and complete
 configuration withdrawal are also checked. The fixture uses separate peer
@@ -62,12 +65,19 @@ even when its accepted cache is empty, and fences inner producer sequence,
 epoch, clock rewind and the final inactive observation.
 
 ResourceProgram's `BGPRouter` provider reads `phase`, `establishedPeers`,
-`backend` and `observedAt` from complete committed-peer observations. It also
+`acceptedPrefixes`, `backend` and `observedAt` from complete committed-peer observations. It also
 requires the matching successfully applied route/BFD-dependency projection;
 an unresolved FIB makes an otherwise Established router Degraded. Heartbeat
-changes alone do not invalidate the applied projection. Accepted RIB/prefix
-counts and the complete legacy peer/status resource contract remain separate
-work; selected FIB candidates are not relabeled as accepted prefixes.
+changes alone do not invalidate the applied projection. Peer snapshots expose
+`received_prefixes` from GoBGP's Adj-RIB-In and `accepted_prefixes` from every
+learned, unfiltered local-RIB path after global import policy. The existing RIB
+walk supplies these counts, including non-best and retained GR paths, without
+another table query or mutable counter store. Locally originated paths do not
+contribute. `acceptedPrefixes` sums the peer counts; the same prefix received
+from two peers contributes once for each peer. This is distinct from selected
+FIB entries. GoBGP's per-family Accepted counter precedes global import policy
+and is not used for this post-policy value. The complete peer/status resource
+contract remains separate work.
 
 An instance uses one worker process in the intended network namespace. GoBGP
 has process-global route selection options; a second simultaneous `Run` in the
