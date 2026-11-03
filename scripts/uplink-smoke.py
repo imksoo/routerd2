@@ -5,7 +5,8 @@ The actual product owns RA, DHCPv4, DHCPv6 PD, LAN RA, DNS and DS-Lite. The host
 management addresses/routes/clock are not changed. Requires an explicit uplink
 and either a native ResourceProgram or an AFTR for the generated fixture, plus
 root/sudo, iproute2, BusyBox, dhcpcd, dnsmasq, curl, dig and tcpdump. Native-profile
-checks also use independent bundled chronyd peers and clients with clock adjustment disabled. A bounded
+checks also use independent bundled chronyd peers/clients with clock adjustment disabled,
+and installed FRR/Zebra/vtysh as an independent routing peer. A bounded
 owner removes its namespaces on completion. An optional private state directory
 retains the test router's identity and WAN leases. This is not NIC qualification.
 """
@@ -107,7 +108,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         "dns",
     ]
     if config_path is not None:
-        roles.extend(["ntp", "web_console"])
+        roles.extend(["ntp", "web_console", "bgp"])
     boot = dict(
         platform="host",
         config=str(config_path or stage / "config.json"),
@@ -340,6 +341,36 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                 ],
                 "private-dns",
             )
+
+        if config_path is not None:
+            bgp_peer = "r2bgp-" + str(os.getpid())
+            run(["ip", "netns", "add", bgp_peer])
+            namespaces.append(bgp_peer)
+            run(["ip", "-n", bgp_peer, "link", "set", "lo", "up"])
+            run(["ip", "link", "add", "bgp0", "netns", router, "type", "veth", "peer", "name", "underlay0", "netns", bgp_peer])
+            run(["ip", "-n", bgp_peer, "address", "add", "192.0.2.2/24", "dev", "underlay0"])
+            run(["ip", "-n", bgp_peer, "link", "set", "underlay0", "up"])
+            run(["ip", "-n", bgp_peer, "address", "add", "203.0.113.1/24", "dev", "lo"])
+            # /run is this owner's private mount. FRR drops to its installed
+            # user; keep its ordinary public test config outside the key stage.
+            frr_root = Path("/run/routerd-bgp-peer")
+            frr_root.mkdir(mode=0o755)
+            run(["chown", "frr:frr", str(frr_root)])
+            (frr_root / "zebra.conf").write_text("hostname independent\nlog stdout\n")
+            (frr_root / "bgpd.conf").write_text(
+                "hostname independent\nlog stdout\nrouter bgp 64512\n bgp router-id 192.0.2.2\n"
+                " no bgp ebgp-requires-policy\n neighbor 192.0.2.1 remote-as 64500\n"
+                " address-family ipv4 unicast\n  network 203.0.113.0/24\n  neighbor 192.0.2.1 activate\n exit-address-family\n"
+            )
+            zebra_socket = str(frr_root / "zserv.api")
+            start(bgp_peer, ["/usr/lib/frr/zebra", "-u", "frr", "-g", "frr", "-z", zebra_socket,
+                "--vty_socket", str(frr_root), "-i", str(frr_root / "zebra.pid"), "-f", str(frr_root / "zebra.conf"), "--log", "stdout"], "bgp-zebra")
+            wait(lambda: (frr_root / "zserv.api").exists())
+            start(bgp_peer, ["/usr/lib/frr/bgpd", "-S", "-z", zebra_socket, "--vty_socket", str(frr_root),
+                "-i", str(frr_root / "bgpd.pid"), "-f", str(frr_root / "bgpd.conf"), "--log", "stdout"], "bgp-peer")
+            echo = runpy.run_path(str(stage / "peer-fixture.py"))
+            start(bgp_peer, ["python3", "-u", "-c", echo["ECHO_SERVER"], "203.0.113.1"], "bgp-echo")
+            wait(lambda: "READY" in (stage / "bgp-echo.log").read_text())
 
         private_dns = start_private_dns()
         if config_path is not None:
@@ -749,6 +780,21 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         wait(lambda: subprocess.run(inside(client, ["dig", "@" + lease[3], "recovered.split.test", "A", "+short", "+time=2", "+tries=1"]), capture_output=True, text=True).stdout.strip() == "192.0.2.77")
         print("PASS independent conditional DNS source, failure isolation and recovery over LAN IPv4/IPv6", flush=True)
 
+        def check_bgp():
+            def paths_ready():
+                inbound = json.loads(run(["ip", "-n", router, "-j", "route", "show", "203.0.113.0/24"]))
+                outbound = json.loads(run(["ip", "-n", bgp_peer, "-j", "route", "show", "198.18.0.0/24"]))
+                return any(r.get("gateway") == "192.0.2.2" and r.get("dev") == "bgp0" for r in inbound) and any(r.get("gateway") == "192.0.2.1" for r in outbound)
+
+            wait(paths_ready)
+            peer_view = json.loads(run(inside(bgp_peer, ["vtysh", "--vty_socket", str(frr_root), "-d", "bgpd", "-c", "show bgp ipv4 unicast 198.18.0.0/24 json"])))
+            assert peer_view.get("paths"), "independent FRR did not receive the LAN advertisement"
+            for namespace, interface in ((client, "client0"), (automatic, "client1")):
+                addresses = json.loads(run(["ip", "-n", namespace, "-j", "-4", "address", "show", "dev", interface]))
+                source = next(a["local"] for link in addresses for a in link["addr_info"] if a["local"] != dns_peer_address)
+                run(inside(namespace, ["python3", "-c", echo["ECHO_CLIENT"], "203.0.113.1", source, source]))
+            print("PASS native BGP exchanged routes with independent FRR/Zebra; both kernels installed peer next hops and both LAN clients completed TCP/UDP without NAT", flush=True)
+
         def check_management():
             for namespace, server in ((router, "127.0.0.1"), (client, "198.19.0.1")):
                 answer = run(inside(namespace, ["dig", "@" + server, "router.home.arpa", "A", "+short", "+time=3", "+tries=1"]))
@@ -786,6 +832,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
 
         if config_path is not None:
             check_management()
+            check_bgp()
             check_time()
 
         start(router, ["ip", "-ts", "monitor", "route"], "router-routes")
@@ -1006,6 +1053,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             check_traffic()
             if config_path is not None:
                 check_management()
+                check_bgp()
                 check_time()
             print("PASS actual HGW full daemon restart retained identity and restored both clients; seconds", round(time.monotonic() - restart_at, 2), flush=True)
             if tailnet:
@@ -1097,7 +1145,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         )
     except Exception:
         try:
-            for name in ("automatic-client-events", "automatic-resolv.conf", "router-routes.log"):
+            for name in ("automatic-client-events", "automatic-resolv.conf", "router-routes.log", "bgp-peer.log", "bgp-zebra.log"):
                 path = stage / name
                 if path.exists():
                     print("Failed uplink", name, "\n".join(path.read_text(errors="replace").splitlines()[-25:]), flush=True)
@@ -1214,7 +1262,7 @@ def main():
             profile = stage / "resource-program.yaml"
             run(root + ["install", "-m", "600", str(args.config.resolve()), str(profile)])
             run(root + ["install", "-m", "500", str(Path("dist/chrony-engine.tar").resolve()), str(stage / "chrony-engine.tar")])
-        for source, name in [(Path(__file__), "owner.py"), (Path("dist/dnsmasq-engine.tar"), "dnsmasq-engine.tar")] + [
+        for source, name in ([(Path("scripts/tailscale-peer.py"), "peer-fixture.py")] if args.config else []) + [(Path(__file__), "owner.py"), (Path("dist/dnsmasq-engine.tar"), "dnsmasq-engine.tar")] + [
             (args.binary_dir / n, n)
             for n in ["routerd", "routerd-modules", "routerd-logging"]
         ]:

@@ -1,6 +1,6 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
-更新: 2026-11-03 01:20 UTC。main `f64580e`を基にDNS・管理を含む19-resource native profileとSSH起動順修正を実装し、実HGW/独立client統合gateが終了0。`make check`（Race Detector・vet込み）、static build、設定検証も通過。110-resource homert全体の受入は継続中。
+更新: 2026-11-03 01:27 UTC。main `646ee1c`由来buildでBGPを加えた22-resource native profileの実HGW/独立FRR・client統合gateが終了0。製品Goコードは不変。今回のPython checks、通常static build、設定検証も通過。全homertとHA/対象環境の受入は継続中。
 
 全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で9日13時間51分が経過し、2026-10-29 16:56:38 UTCの期限から4日8時間23分遅れている。34 work packageは`in_progress`22件、`planned`12件。部分合格を製品全体の完了に数えない。
 
@@ -22,7 +22,7 @@ main `f64580e`を取得して差分なしを確認した。34 work packageの状
 | 順序 | 実装・接続するもの | 実通信で閉じる条件 | 現在 |
 | --- | --- | --- | --- |
 | 1 | 単体DNSのcache・query log、loopback/管理listener、SSH/Web管理 | 独立端末から解決・履歴閲覧・鍵認証、上流停止中のcache、管理interface制限、daemon再起動後の復旧 | 実HGWで合格、今回commit |
-| 2 | 複数DNS suffix/upstream、4本のDS-Liteとbackup回線、BGP、Tailscaleの単体設定 | 現行homertの各通信経路を独立peer/端末から通す。既存engineへ接続し、不足箇所だけ実装 | 未接続部分あり |
+| 2 | 複数DNS suffix/upstream、4本のDS-Liteとbackup回線、BGP、Tailscaleの単体設定 | 現行homertの各通信経路を独立peer/端末から通す。既存engineへ接続し、不足箇所だけ実装 | BGP 1 peerの単体経路は実HGWで合格。他は未接続部分あり |
 | 3 | 単体全体のcold start、自然更新、MTU/通信継続、更新・復旧 | 同一profileで端末の通常利用を維持し、変更後に戻る | 部分試験のみ |
 | 4 | 二台HAのVIP/lease/PD/conntrackと既存TCP/UDP | 両方向の停止・復帰、新規端末と既存通信を同時に確認 | 未受入 |
 | 5 | 残る34 work packageの機能・配布先ごとの残差 | 対応peer/配布先で受入。利用できない対象と最小追加setupを明記 | 未完了 |
@@ -30,6 +30,10 @@ main `f64580e`を取得して差分なしを確認した。34 work packageの状
 一回の変更単位は「設定から利用者の結果まで」とする。失敗時はpacket・socket・経路・workerのうち原因を決める観測だけを追加し、原因が分からないまま同じ試験を繰り返さない。自然T1の待ち時間には独立する実装を進める。試験を増やすことや報告書を作ることを進捗の代用にしない。合格した単位をcommit/pushしてから次へ移る。全体完成の見積りは、単体の全通信経路とHAの未解決原因が把握できた時点で更新する。
 
 19-resource native profile（基準HEAD `f64580e` + SSH修正、実行build ID `f64580e932b2`）の実HGW gateは終了0。loopback/管理/LAN両IP DNS、上流停止中のcache応答、未取得名のfailure isolationと復旧、query log API/Web閲覧、管理端末から鍵認証SSH、LANからWebへの遮断を確認した。SSHはaddress設定前から指定addressへ待受し初回generation=1/restarts=0。全daemon再起動後も同じhost keyでSSH接続でき、保存済みDNS履歴を閲覧できた。WAN学習NTP源stratum 3と両LAN chronyd client応答も通過。DHCP/PD/RA/SLAAC/DS-Lite/IPv6 HTTPS・DNS UDP/TCPを2 round、PD worker SIGKILL/通常再起動後3.10/4.94秒で復旧した。全daemon restartから管理/NTPを含む全確認完了17.63秒はclient測定時間を含む。zero-lifetime RA/kernel withdrawal、upstream Releaseなしを確認。自然T1、連続TCP、全homert/HA、ONU直結・対象NICは今回未受入。stage/capture/一時鍵/namespaceは撤去済み。
+
+22-resource native profile、main由来build `646ee1c19db9`で実HGW統合gateが終了0。独立FRR 8.4.4/ZebraとのBGPで、peerの203.0.113.0/24とLAN198.18.0.0/24を相互広告し、両kernelのpeer next hopとFRRの受信RIBを確認した。両LAN clientが取得したsource IPv4のままTCP/UDPを往復し、既存captureでもBGP交換とNATなしの転送を確認した。全daemon restart後に同じ経路・両client通信が復旧。管理DNS/SSH/Web履歴・NTP（WAN学習源stratum 3）と両IP Internet通信も維持した。PD worker SIGKILL/通常再起動後の端末復旧2.81/4.97秒、full restartから全確認完了17.91秒（NTP client測定込み）。2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。自然T1・連続TCP・二BGP peers全体・長時間GR・HA・全homert・ONU直結/対象NICは今回未受入。stage/capture/FRR runtime/namespaceは撤去済み。
+
+次はTailscaleのnative単体設定を旧routerdの実運用へ合わせる。旧実装は通常のOS trust/DNSを使うが、現在のnative engineは専用root内で動くため、public control serverで必要なCAとbootstrap DNSの扱いも確認する。追加のPBR調査・PVE/QEMUは行わない。
 
 ## 仕切り直した実行順
 

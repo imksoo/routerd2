@@ -12,6 +12,11 @@ resources:
     interface: {name: lan0}
   - id: interface/mgmt0
     interface: {name: mgmt0}
+  - id: interface/bgp0
+    interface: {name: bgp0}
+  - id: address/bgp
+    depends_on: [interface/bgp0]
+    address: {interface: bgp0, cidr: 192.0.2.1/24}
   - id: address/management
     depends_on: [interface/mgmt0]
     address: {interface: mgmt0, cidr: 198.19.0.1/24}
@@ -30,6 +35,8 @@ resources:
           - {match: {in_interface: wan0, protocol: udp, destination_ports: [{start: 53}]}, action: drop}
           - {match: {in_interface: wan0, protocol: tcp, destination_ports: [{start: 53}]}, action: drop}
       forward:
+        - {from: lan0, to: bgp0}
+        - {from: bgp0, to: lan0}
         - {from: lan0, to: dslite0}
         - {from: lan0, to: wan0}
       mss_clamp:
@@ -211,3 +218,29 @@ resources:
     service:
       name: console
       web_console: {listen: "198.19.0.1:8080", title: routerd2}
+  - id: service/routing
+    depends_on: [address/bgp, address/lan]
+    service:
+      name: routing
+      bgp:
+        runtime:
+          version: 1
+          global:
+            asn: 64500
+            routerID: 192.0.2.1
+            listenAddresses: [192.0.2.1]
+            listenPort: 179
+            families: [ipv4-unicast]
+            importPolicy: {allowedPrefixes: [203.0.113.0/24], nextHopRewrite: peer-address}
+            gracefulRestart: {enabled: true, restartTime: 120, staleRoutesTime: 360}
+          peers:
+            192.0.2.2:
+              address: 192.0.2.2
+              asn: 64512
+              importPolicy: {allowedPrefixes: [203.0.113.0/24], nextHopRewrite: peer-address}
+              exportPolicyName: lan
+              exportPolicy: {allowedPrefixes: [198.18.0.0/24]}
+          paths:
+            - {source: routerd-static, prefix: 198.18.0.0/24}
+        bind_interface: bgp0
+        fib_interface: bgp0
