@@ -1,6 +1,14 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03 12:11 UTC。全体ゴールは継続中。
+更新: 2026-11-03 12:28 UTC。全体ゴールは継続中。
+
+## 保存homertのDNS/NTP転送を単体構成へ接続
+
+2026-11-03、基準main `efe9845` + native設定/fixture変更、通常build `efe984588553`（製品Go不変）で、保存homertの公開DNS/NTPの名前集合とLocalServiceRedirectを組み込んだ単体39-resource実HGW手順が終了0。両LAN端末から、実membershipの公開DNSアドレスを直接指定しても両IP UDP/TCPでローカルzoneの回答を得た。独立chronydの公開NTP宛て照会とconntrackのローカル転送も、保存設定と同じIPv4 allow範囲で確認。両方を全daemon再起動後にも再確認した。
+
+同じ実行で通常の両IP Internet/DNS、DHCP scopes/sticky、BGP、NTP、Tailscale/管理/運用記録を確認。confirmed rollbackは期限切れ30.50秒/control再起動5.78秒、PD SIGKILL2.05秒/通常再起動7.01秒、全daemon後の全項目再確認111.77秒。各時間は定義した再確認までの時間で転送断時間ではない。DUID/IAIDと両端末/Tailscale通信、停止時のRA撤去/上流Releaseなしも通過。20秒の2巡回・自然PD更新0回。通常build・3実行物static link、make test-tools race vet・py_compileが通過。
+
+最初の停止は、NTP clientの送信元をDHCPアドレスだとした照合側の誤り。端末の実routeが別の保有アドレスを選ぶことを観測し、そのprefsrcを使って再実行した。WAN用UDP/DNSは実転送集合外の宛先を使い、ローカルDNS処理をWAN疎通と混同しない。二台用設定への転送機能の統合、IPv6 NTP提供、全homert intent・物理NIC/ONU資格は未受入。PVE/QEMUと新規PBR調査は行っていない。 再実行は[試験計画](test-plan.md)の同名項目。
 
 ## 部分DNS失敗でlocal redirectの設定確定を止めない
 

@@ -746,6 +746,21 @@
         "partial_dns_redirect_readiness": {
           "result": "2026-11-03、基準main `fa246ed` + 部分DNS失敗の準備判定修正、通常Makefile build `fa246ede2a5e`で実daemon/独立dnsmasqのlocal redirect手順が終了0（外側5.12秒）。旧routerdのresolveIPAddressSetは成功した名前のアドレスを使い、独立した失敗をstatusへ残す。native networkも部分membershipを適用していたが、coordinatorのCheckReadyが一件の解決errorで準備/確認を拒否していた。修正前は正常回答とREFUSEDの混在でhealth準備が10秒後も失敗することを再現。修正後はusable membershipを準備済みとし、REFUSEDをnetwork statusへ残したまま、両IP UDP/TCPのローカル転送、選外宛先のWAN転送、実DNS更新による旧転送先の解除/新転送先の適用、confirmed commit/confirm、daemon再起動、転送設定撤去を確認した。WAN captureで対象DNSの漏出なしも確認した。",
           "limit": "これは実Linux kernel/実product processと独立dnsmasqの通信であり、実HGW全profileへ保存homertの2つのIPAddressSetとDNS/NTP LocalServiceRedirectを接続した受入は次の残作業。NTP redirect・HA・物理NIC資格には数えない。元fixtureに欠けていたICMPv6入力許可とLAN→WAN転送を明示し、確認応答は別の空structへdecodeするよう修正した。製品側に暗黙許可・DAD回避・待機延長は追加していない。通常build・3実行物static link、make race vetが通過。"
+        },
+        "single_profile_local_redirect": {
+          "source": "efe9845; normal build efe984588553; Go unchanged",
+          "result": "基準main `efe9845` + native設定/fixture変更、通常build `efe984588553`（製品Go不変）で、保存homertの公開DNS/NTPの名前集合とLocalServiceRedirectを組み込んだ単体39-resource実HGW手順が終了0。両LAN端末から、実membershipの公開DNSアドレスを直接指定しても両IP UDP/TCPでローカルzoneの回答を得た。独立chronydの公開NTP宛て照会とconntrackのローカル転送も、保存設定と同じIPv4 allow範囲で確認。両方を全daemon再起動後にも再確認した。",
+          "recovery": {
+            "confirmed_timeout_seconds": 30.5,
+            "confirmed_control_restart_seconds": 5.78,
+            "pd_sigkill_seconds": 2.05,
+            "pd_graceful_seconds": 7.01,
+            "whole_daemon_full_checks_seconds": 111.77,
+            "whole_daemon_time_is_not_forwarding_outage": true,
+            "periodic_rounds": 2,
+            "natural_pd_renewals": 0
+          },
+          "limit": "最初の停止は、NTP clientの送信元をDHCPアドレスだとした照合側の誤り。端末の実routeが別の保有アドレスを選ぶことを観測し、そのprefsrcを使って再実行した。WAN用UDP/DNSは実転送集合外の宛先を使い、ローカルDNS処理をWAN疎通と混同しない。二台用設定への転送機能の統合、IPv6 NTP提供、全homert intent・物理NIC/ONU資格は未受入。PVE/QEMUと新規PBR調査は行っていない。"
         }
       }
     },
@@ -11206,7 +11221,7 @@
     "physical_target_profile": "homert02/03 are identified PVE guests with4vCPU/4GiB, three VirtIO NICs and VirtIO/SCSI disks. Matching isolated PVE product boot/recovery was exercised; actual WAN/LAN attachment, clean installation from a preconverted native configuration, measured load and any additional hardware/architecture qualification remain open.",
     "validation_reporting": "Use docs/test-plan.md for the concise current gate state. Detailed historical checkpoint ledgers are not acceptance authority; keep only current result, limits and repeatable procedure. Never claim unrun gates or partial homert profiles complete.",
     "current_acceptance": {
-      "as_of_utc": "2026-11-03T09:54:58Z",
+      "as_of_utc": "2026-11-03T12:28:00Z",
       "homert_source": "User-provided read-only working copies at chatty.lain.local:~/homert02; the current homert02 and homert03 files each contain 110 resources with matching kind counts. Do not publish configuration values or secrets.",
       "completed_gates": [
         "Go runtime checkpoint842c47e passed make check and final runtimeplan Race. This unchanged Go code plus the bundle producer passed normal build, test-tools/race/vet and actual publisher/receiver operations.",
@@ -11223,7 +11238,7 @@
         "Kubernetes",
         "SAM/federation full path"
       ],
-      "tested_source_head": "842c47e plus normal-build runtime bundle producer and source-closure changes; Go runtime unchanged",
+      "tested_source_head": "efe9845 plus single-profile public DNS/NTP redirect configuration and actual-client checks; runtime Go unchanged",
       "native_examples": {
         "examples/single-router-dslite-dhcp-dns.yaml": 39,
         "examples/homert02-native.yaml": 48,
@@ -11231,9 +11246,10 @@
         "full_homert_profile": "not present; the examples do not represent the complete current 110-resource intent"
       },
       "latest_native_profile_gate": {
-        "status": "39-resource actual-HGW integrated confirmed-rollback gate passed (exit0)",
-        "observed": "基準main `1fa7cf0` + 候補設定の観測保持修正、通常build `1fa7cf099ae0`で単体39-resourceの実HGW手順が終了0。30秒のconfirmed commitでcoreのAレコードとLAN cache設定を変更し、両IP/UDP/TCPの候補回答と公開通信、無確認期限切れとcontrol SIGKILL後の元intent全体・回答・公開通信への復帰を確認した。候補疎通確認後から元の疎通を再確認するまで33.42秒/9.30秒で、転送断時間ではない。DNS編集と期限切れrollbackではWAN DHCPv4/RA/PDのPIDを維持した。PD SIGKILL3.21秒/通常再起動6.72秒、全daemon後の全項目再確認103.04秒も通過した。",
-        "limit": "2 periodic communication rounds,0 natural PD renewals. Final full check103.04s includes suppression/sampling; not forwarding outage."
+        "status": "39-resource actual-HGW local redirect integration and whole-daemon restart passed (exit0)",
+        "source": "efe9845; normal build efe984588553; Go unchanged",
+        "observed": "基準main `efe9845` + native設定/fixture変更、通常build `efe984588553`（製品Go不変）で、保存homertの公開DNS/NTPの名前集合とLocalServiceRedirectを組み込んだ単体39-resource実HGW手順が終了0。両LAN端末から、実membershipの公開DNSアドレスを直接指定しても両IP UDP/TCPでローカルzoneの回答を得た。独立chronydの公開NTP宛て照会とconntrackのローカル転送も、保存設定と同じIPv4 allow範囲で確認。両方を全daemon再起動後にも再確認した。",
+        "limit": "20-second observation/2 rounds/0 natural PD renewals. Full checks111.77s is not forwarding outage. Full homert, paired local redirects and physical qualification remain incomplete."
       },
       "upstream_selection_correction": "Existing LAN static gateway, not ens20. Implemented and verified group weights 120 -> 80 -> 60 -> 120 with 60s hysteresis, actual Health workers, both LAN clients TCP/UDP, conntrack marks and kernel next hops. No new WAN NIC or site IP allocation prerequisite.",
       "latest_ha_foundation_gate": {
@@ -11356,7 +11372,7 @@
     {
       "stage": 1,
       "profile": "homert-single-implementation",
-      "next": "Connect saved homert public DNS/NTP address sets and local service redirects into the complete native single-router profile; verify actual LAN interception and unrelated WAN forwarding with current independent clients. Partial-DNS readiness/confirmed-commit gate passed; no new WAN, PVE/QEMU or additional PBR campaign. Then continue other missing single-router functions and all remaining work packages.",
+      "next": "Continue saved homert single-router intent: connect and verify LAN-to-management and WAN-local SNAT/forwarding and remaining saved routes with independent peers, retaining management recovery. Public DNS/NTP local redirects now passed cold start and whole-daemon restart. Do not rerun unrelated suites or add WAN NICs, PVE/QEMU or PBR investigations. Keep paired integration and all34 work packages in scope.",
       "acceptance": "Cold-start the complete single-router profile with an independent WAN peer and Linux client. Verify WAN/LAN DHCPv4 scopes and reservations, DHCPv6-PD/Information identity and natural renew, RA/DAD/SLAAC, local/conditional/DoH DNS, all DS-Lite paths and IPv6, Health/PBR, NAT/MTU/MSS, BGP/NTP/Tailscale/management where configured, and worker/daemon restart and recovery from actual packets, client results, kernel routes and firewall state. Keep ONU/physical-NIC qualification separate."
     },
     {

@@ -33,6 +33,19 @@ resources:
     forwarding: {ipv4: true, ipv6: true, ipv4_rp_filter: 0, conntrack_tcp_liberal: true}
   - id: firewall
     firewall:
+      address_sets:
+        - name: public-dns
+          names: [dns.google, one.one.one.one, dns.quad9.net, resolver1.opendns.com, resolver2.opendns.com]
+          refresh_interval: 10m
+          resolvers: ["127.0.0.1:53"]
+        - name: public-ntp
+          names: [ntp.nict.jp, ntp.jst.mfeed.ad.jp, time.google.com, time.cloudflare.com, pool.ntp.org, time.apple.com, time.windows.com]
+          refresh_interval: 10m
+          resolvers: ["127.0.0.1:53"]
+      local_redirects:
+        - {interface: lan0, destination_set: public-dns, protocol: tcp, destination_port: 53, port: 53}
+        - {interface: lan0, destination_set: public-dns, protocol: udp, destination_port: 53, port: 53}
+        - {interface: lan0, destination_set: public-ntp, protocol: udp, destination_port: 123, port: 123}
       flow_observation_group: 2
       input:
         policy: accept

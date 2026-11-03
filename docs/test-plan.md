@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 12:11 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 12:28 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 実行原則
 
@@ -187,3 +187,12 @@ DoH確認は固定provider名ではなく、実configに設定されたHTTPS上�
 `make check-local-redirect DOCKER='sudo -n docker'`。独立dnsmasqのhostsと未設定の別名を同じAddressSetへ指定し、正常回答とREFUSEDを受ける。入力拒否policyにはICMPv6/サービスportを明示し、通常WAN転送も許可する。両IP UDP/TCPで、対象のローカル回答・WAN漏出なし、選外のpeer回答、peerのSIGHUP/実DNS更新によるmembership変更、confirmed commit/confirm、daemon再起動、撤去後のpeer回答を確認する。network snapshotにはusable membershipとREFUSEDが併存することを確認する。
 
 2026-11-03、基準main `fa246ed` + 部分DNS失敗の準備判定修正、通常Makefile build `fa246ede2a5e`で実daemon/独立dnsmasqのlocal redirect手順が終了0（外側5.12秒）。旧routerdのresolveIPAddressSetは成功した名前のアドレスを使い、独立した失敗をstatusへ残す。native networkも部分membershipを適用していたが、coordinatorのCheckReadyが一件の解決errorで準備/確認を拒否していた。修正前は正常回答とREFUSEDの混在でhealth準備が10秒後も失敗することを再現。修正後はusable membershipを準備済みとし、REFUSEDをnetwork statusへ残したまま、両IP UDP/TCPのローカル転送、選外宛先のWAN転送、実DNS更新による旧転送先の解除/新転送先の適用、confirmed commit/confirm、daemon再起動、転送設定撤去を確認した。WAN captureで対象DNSの漏出なしも確認した。 これは実Linux kernel/実product processと独立dnsmasqの通信であり、実HGW全profileへ保存homertの2つのIPAddressSetとDNS/NTP LocalServiceRedirectを接続した受入は次の残作業。NTP redirect・HA・物理NIC資格には数えない。元fixtureに欠けていたICMPv6入力許可とLAN→WAN転送を明示し、確認応答は別の空structへdecodeするよう修正した。製品側に暗黙許可・DAD回避・待機延長は追加していない。通常build・3実行物static link、make race vetが通過。
+
+## 保存homertのDNS/NTP転送を単体構成へ接続
+
+`examples/single-router-dslite-dhcp-dns.yaml`のfirewallは、保存homertの公開DNS/NTPの名前一覧をcore DNSで解決し、LANからのTCP/UDP53とUDP123をローカルへ転送する。
+`make check-uplink DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18 UPLINK_WAN_MAC=02:72:6f:75:74:03 UPLINK_CONFIG=examples/single-router-dslite-dhcp-dns.yaml UPLINK_SECONDS=20 UPLINK_FULL_RESTART=1 UPLINK_TAILNET=1`で実HGW・独立LAN端末・FRR/chronyd/Headscaleの通常通信と一緒に確認する。
+両LAN端末が実membershipの公開DNSアドレスを直接指定しても、IPv4/IPv6・UDP/TCPで設定済みローカルzoneの回答を得ることを確認する。NTPは保存homertのIPv4 allow範囲に合わせ、独立chronydの照会成功とconntrackのローカル転送を照合する。送信元は端末の実経路から読み、DHCPのアドレスと決めつけない。WAN確認用UDP/DNSは転送集合外の宛先を使い、実membershipに含まれないことも確認する。
+同じ転送確認をdaemon再起動後にも行う。短時間の巡回は自然PD/DHCPv4更新や物理NIC・ONU資格に数えず、HA用設定への統合は別に受け入れる。
+
+2026-11-03の実行結果: 基準main `efe9845` + native設定/fixture変更、通常build `efe984588553`（製品Go不変）で、保存homertの公開DNS/NTPの名前集合とLocalServiceRedirectを組み込んだ単体39-resource実HGW手順が終了0。両LAN端末から、実membershipの公開DNSアドレスを直接指定しても両IP UDP/TCPでローカルzoneの回答を得た。独立chronydの公開NTP宛て照会とconntrackのローカル転送も、保存設定と同じIPv4 allow範囲で確認。両方を全daemon再起動後にも再確認した。 全daemon後の全項目再確認111.77秒は転送断時間ではない。20秒の2巡回・自然PD更新0回。詳細と未受入範囲は[引き継ぎ](pve-codex-handoff.md)を参照する。

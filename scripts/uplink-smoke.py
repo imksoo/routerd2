@@ -882,6 +882,9 @@ s.close()
                 print("PASS actual TCP/HTTPS and UDP/DNS on", interface, flush=True)
 
         def check_selected_upstream(marks):
+            for membership in query("network.sock", "/v1/address-sets")["sets"]:
+                if membership["name"] == "public-dns":
+                    assert "9.9.9.10" not in membership.get("addresses", []), "WAN DNS probe is selected for local interception"
             def selection_applied():
                 rules = run(inside(router, ["nft", "list", "chain", "inet", "routerd2", "flow_routes"]))
                 if len(marks) > 1:
@@ -889,22 +892,23 @@ s.close()
                 assigned = {int(value, 0) for value in re.findall(r"meta mark set (0x[0-9a-f]+|[0-9]+)", rules)}
                 return assigned == marks
             wait(selection_applied)
+            # Use a DNS endpoint outside the configured local redirect sets.
             # Observe the mark on a new real UDP exchange; do not reproduce
             # the product's rendezvous algorithm in the test.
             for namespace in (client, automatic):
                 address, port = run(inside(namespace, ["python3", "-c", """import socket,struct
 s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(4)
-s.connect(('1.1.1.1',53));s.send(bytes.fromhex('4d2101000001000000000000076578616d706c65036e65740000010001'))
+s.connect(('9.9.9.10',53));s.send(bytes.fromhex('4d2101000001000000000000076578616d706c65036e65740000010001'))
 r=s.recv(4096);ident,flags,questions,answers,_,_=struct.unpack('!6H',r[:12])
 assert ident==0x4d21 and flags&0x800f==0x8000 and answers>0,r.hex()
 print(*s.getsockname())
 """])).split()
                 connection = run(inside(router, ["conntrack", "-L", "-f", "ipv4", "-p", "udp", "--orig-src", address,
-                    "--orig-dst", "1.1.1.1", "--sport", port, "--dport", "53"]))
+                    "--orig-dst", "9.9.9.10", "--sport", port, "--dport", "53"]))
                 selected = re.search(r"\bmark=(\d+)", connection)
                 assert selected and int(selected[1]) in marks, (marks, connection)
                 mark = int(selected[1])
-                route = json.loads(run(["ip", "-n", router, "-j", "route", "get", "1.1.1.1", "from", address, "iif", "lan0", "mark", str(mark)]))[0]
+                route = json.loads(run(["ip", "-n", router, "-j", "route", "get", "9.9.9.10", "from", address, "iif", "lan0", "mark", str(mark)]))[0]
                 expected = "lan0" if mark == 276 else "dslite" + str(mark - 272)
                 assert route["dev"] == expected, route
                 if mark == 276:
@@ -1159,6 +1163,31 @@ print(*s.getsockname())
                 run(inside(namespace, chrony + ["-Q", "-t", "8", "-u", "root", "-f", str(ntp_client)]), timeout=12)
             print("PASS NTP synchronized and independent LAN chronyd clients received time; host clock adjustment disabled", flush=True)
 
+        def check_local_redirects():
+            configured = query("control.sock", "/v1/config")["config"]
+            if not any(r.get("firewall", {}).get("local_redirects") for r in configured["resources"]):
+                return
+            sets = {row["name"]: row for row in query("network.sock", "/v1/address-sets")["sets"]}
+            dns_addresses = [ipaddress.ip_address(value) for value in sets["public-dns"]["addresses"]]
+            for family in (4, 6):
+                destination = next(value for value in dns_addresses if value.version == family)
+                for namespace in (client, automatic):
+                    for transport in ("+notcp", "+tcp"):
+                        answer = run(inside(namespace, ["dig", "@" + str(destination), "router." + lan_domain,
+                            "A", "+short", "+time=3", "+tries=1", transport]))
+                        assert answer.strip() == "198.18.0.1", (family, transport, answer)
+            destination = next(value for value in sets["public-ntp"]["addresses"] if ipaddress.ip_address(value).version == 4)
+            redirected_ntp = stage / "ntp-redirect-client.conf"
+            redirected_ntp.write_text("server " + destination + " iburst\ncmdport 0\n")
+            for namespace in (client, automatic):
+                route = json.loads(run(["ip", "-n", namespace, "-j", "route", "get", destination]))[0]
+                address = route["prefsrc"]
+                run(inside(namespace, chrony + ["-Q", "-t", "8", "-u", "root", "-f", str(redirected_ntp)]), timeout=12)
+                connection = run(inside(router, ["conntrack", "-L", "-f", "ipv4", "-p", "udp",
+                    "--orig-src", address, "--orig-dst", destination, "--dport", "123"]))
+                assert re.search(r"\bsrc=198\.18\.0\.1\b", connection), (address, destination, connection)
+            print("PASS both LAN clients' public DNS IPv4/IPv6 UDP/TCP reached the local zone; public NTP reached the local server with conntrack destination translation", flush=True)
+
         if config_path is not None:
             check_dns_sources()
             check_lan_distribution()
@@ -1167,6 +1196,7 @@ print(*s.getsockname())
             check_bgp_peer_recovery()
             check_operations()
             check_time()
+            check_local_redirects()
 
         start(router, ["ip", "-ts", "monitor", "route"], "router-routes")
 
@@ -1463,6 +1493,7 @@ print(*s.getsockname())
                     wait(lambda: len(events.read_text().splitlines()) > count)
                 check_special_clients()
                 check_time()
+            check_local_redirects()
             print("PASS actual HGW full daemon restart retained identity and restored both clients; seconds", round(time.monotonic() - restart_at, 2), flush=True)
             if tailnet:
                 wait(lambda: tailnet_observation().get("backend_state") == "Running")
