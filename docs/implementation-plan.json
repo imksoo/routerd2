@@ -11262,32 +11262,35 @@
         "open_observation": "One initial bring-up had BGP/VRRP effect acknowledgement timeout and worker restart; review full-profile coordinator/application and shutdown ordering."
       },
       "latest_full_profile_ha_continuity_gate": {
-        "as_of_utc": "2026-11-03T05:13:00Z",
+        "as_of_utc": "2026-11-03T05:46:00Z",
         "status": "passed_exit_0",
-        "build_identity": "6ca951d3082a plus current patch",
+        "build_identity": "1ec748fbb2d8 plus current patch",
         "resources_per_node": 47,
         "command": "make check-uplink-ha DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18",
         "recovery_seconds": [
-          16.65,
-          9.1
+          62.72,
+          34.0
         ],
         "tcp": {
-          "responses": 27,
+          "responses": 69,
           "syn_count": 1,
-          "maximum_reply_gap_seconds": 7.9567
+          "maximum_reply_gap_seconds": 57.37519805319607
         },
         "udp": {
-          "responses": 31,
-          "missed": 13,
+          "responses": 122,
+          "missed": 38,
           "reply_budget_seconds": 1,
-          "maximum_reply_gap_seconds": 7.5137
+          "maximum_reply_gap_seconds": 33.72179761622101
         },
-        "observed": "Both graceful owner stops, same public TCP/UDP socket and NAT tuple/mark, real DHCP renewal, same PD DUID/IAID/prefix, member rejoin/sync without preemption; IPv4/IPv6 HTTPS, UDP/TCP and advertised IPv6 DNS, VIP NTP recovered.",
+        "observed": "Both owner stops/rejoins with same TCP/UDP/NAT tuple/mark, real DHCP renewal and PD identity. IPv4/IPv6 HTTPS, UDP/TCP and advertised IPv6 DNS, conditional/nested suffix DNS, both public DoH upstreams, VIP NTP, two independent FRR route advertisements/current-owner return paths and non-NAT client TCP/UDP passed.",
         "fixes": [
           "Source-scoped PD checkpoint ordering",
           "ARP identity on IPv6-only macvlan siblings",
           "Remove DHCP peer-availability startup fence",
-          "RA DNS lifetime and fixed B4/shared-VIP SNAT limited to forwarded clients"
+          "RA DNS lifetime and fixed B4/shared-VIP SNAT limited to forwarded clients",
+          "Serving-owner BGP advertisement for symmetric client traffic",
+          "Acknowledge an already unpublished standby/preparing VIP without waiting for unrelated preparation",
+          "Remove route dump sorting from kernel reconciliation"
         ],
         "not_qualified": [
           "Uninterrupted/lossless traffic",
@@ -11295,7 +11298,26 @@
           "All two-node DNS/DoH/BGP/Tailscale/scopes/history/telemetry paths and stability",
           "Physical ONU/NIC qualification"
         ],
-        "open_observation": "Older natural-renewal build remains live; BGP and DS-Lite workers restarted during that observation. Effect acknowledgement timeout cause unresolved."
+        "open_observation": "Long takeover outages remain (TCP max gap57.38s). Old single natural-renewal build reached BGP generation17. Full paired scopes, Tailscale, history/telemetry and long-term stability remain open.",
+        "failed_probe_rounds": [
+          2,
+          1
+        ]
+      },
+      "full_profile_natural_renewal_gate": {
+        "status": "passed_exit_0_with_known_bgp_restarts",
+        "build_identity": "b03debf15982",
+        "profile_and_runner": "5861b7e plus LAN options",
+        "seconds_requested": 7800,
+        "communication_rounds": 678,
+        "natural_renew_reply_count": 1,
+        "renew_reply_observed_utc": "2026-11-03T05:24:16Z",
+        "pd_sigkill_recovery_seconds": 2.22,
+        "pd_graceful_recovery_seconds": 7.05,
+        "whole_daemon_recovery_seconds": 112.21,
+        "peers": "Actual HGW port49153, BusyBox/dhcpcd LAN clients and independent Headscale/Tailscale/FRR/DNS/NTP/Collector",
+        "limit": "BGP reached generation17; not stable all-service qualification, latest RA/SNAT/HA full-profile qualification or physical ONU/NIC qualification.",
+        "cleanup": "Owned processes/namespaces/private stage removed."
       }
     }
   },

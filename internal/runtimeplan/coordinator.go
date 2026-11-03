@@ -18,6 +18,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
 )
@@ -56,6 +57,23 @@ func (r *Runtime) waitApplicationLocked(ctx context.Context, effect *pendingAppl
 		}
 		if s.State == vrrp.StateActive && !vrrp.CurrentElection(s, clock) {
 			return serviceconfig.ApplicationReceipt{}, ErrStale
+		}
+		// Standby and graceful preparation do not publish a VIP. Confirm its
+		// applied absence without waiting for the uplink preparation they enable.
+		unpublished := s.State != vrrp.StateActive
+		if activation := r.config.protocols.vrrp[u.Name].GracefulActivation; s.State == vrrp.StateActive && !s.Active && activation != nil {
+			facts, err := r.conditionFactsLocked(r.config)
+			if err != nil {
+				return serviceconfig.ApplicationReceipt{}, err
+			}
+			ready, until := facts.ConditionAuthority(activation.ReadyWhen)
+			unpublished = ready != resourceprogram.True || facts.NowNanos == 0 || facts.NowNanos >= until
+		}
+		if unpublished && effect.sourceEpoch == r.sourceEpoch && r.applications[u.Name] == effect && r.applied.sourceEpoch == r.sourceEpoch && r.applied.network != nil && vrrpEffectApplied(u, *r.applied.network, false) == nil {
+			effect.receipt.VRRP, err = r.vrrpDecisionLocked(u.Name, false)
+			effect.receipt.Applied = err == nil
+			r.finishApplicationLocked(u.Name, err)
+			return effect.receipt, err
 		}
 	case "bgp":
 		provider, err := bgpProviderFor(u)

@@ -637,6 +637,9 @@ resources:
       listen: 198.19.0.3:8080
       title: routerd2
 - id: service/routing
+  # Keep routed replies on the owner that holds the client conntrack state.
+  when:
+    fact: service.lan-ha.elected
   depends_on:
   - address/bgp
   - address/lan

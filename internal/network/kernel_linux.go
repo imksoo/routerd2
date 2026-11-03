@@ -208,13 +208,6 @@ func (k *linuxKernel) Routes(table int) ([]RouteState, error) {
 		}
 		out = append(out, r)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		a, b := out[i], out[j]
-		if routeSlot(a.Route) == routeSlot(b.Route) {
-			return a.Interface+a.Gateway < b.Interface+b.Gateway
-		}
-		return routeSlot(a.Route) < routeSlot(b.Route)
-	})
 	return out, nil
 }
 

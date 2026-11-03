@@ -1,15 +1,10 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
-2026-11-03 05:13 UTC: 通常Makefile build ID `6ca951d3082a` + 本変更で、各47-resource profileを実HGWと独立BusyBox端末へ接続した両方向HA試験が終了0。現用daemon停止a→bは16.65秒、b→aは9.10秒でIPv4/IPv6 HTTPS・UDP/TCP DNS・広告されたIPv6 DNS・VIP NTPが復旧した（各1回の途中probe失敗）。同一公開HTTPS TCP接続は再接続なし、captureのSYNは1回、27応答・最大応答間隔7.96秒。同一UDP socketは31応答・13欠落・最大応答間隔7.51秒（1秒返信予算）。両方向でconntrack NAT tuple/mark、PD DUID/IAID/prefix、実DHCP Renew/ACKを維持し、旧現用の再加入・同期・非preemptを確認した。無停止・無損失の結果ではない。
+自然PD更新を含む単体長時間手順は678通信roundと全daemon再起動まで終了0。BGP再起動は残り、長時間安定性は未受入。二台では非対称BGPの戻りとVRRP準備中の不要な適用待ちを修正し、条件付きDNS/DoH・BGPを含む両方向の手順も終了0。全項目復旧62.72/34.00秒、TCP最大応答間隔57.38秒のため切替断の短縮と長時間安定性は残る。実行版・条件・結果は[引き継ぎ](pve-codex-handoff.md)を参照する。
 
-実障害から修正したのは、PD同期counterの所有者ごとの比較、IPv6専用macvlanにも必要なARP identity設定、元現用不在時にDHCPを停止し続けるmarker/fenceの撤去。設定はRA DNS寿命1800秒、固定B4 SNAT、静的backupの共有VIP SNAT（転送client interfaceに限定）へ修正した。旧routerdのVMAC ARP設定・PD/lease同期経路も比較した。Race Detector・vet、通常build、3実行物のstatic link、Python補助検査36件が通過。追加の`--peer-loss`独立手順は今回未実行。
+更新: 2026-11-03 05:46 UTC。単体の自然PD更新・全daemon復旧と、DNS/DoH・BGPを含む両方向HAの実通信手順が終了0。残る切替断・worker再起動・未受入機能を解消し、全体の完成へ進める。
 
-未受入: 二台profileの特別scope、条件付きDNS/DoH・BGP・Tailscale・履歴/telemetry全経路と長時間安定性、全homert/対象ONU/NIC。非同期DHCPの未受信割当を失った場合の重複回避は保証しない。自然PD T1は別の旧build/profileで観測継続中であり、本変更全体の資格には転用しない。旧buildの長時間観測でBGP等のworker再起動が増えており、effect ACK timeoutの原因は未解決。終了したHAのnamespace/process/key/stageは撤去済み。
-
-
-更新: 2026-11-03 05:13 UTC。syslog/OTLP、native nDPIの通信分類・計数・TLS SNIとfirewall履歴を同一単体profileへ接続し、実HGW/独立端末・受信peer、全daemon restart後の新規Health記録まで受入済み。通常/予約/特別scope・保持・RA配布も受入済み。次は全profileの自然更新・通信継続を進める。全homert/HAの受入は継続中。
-
-全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で9日17時間44分、記録済み期限から4日12時間16分経過した。34 work packageはin_progress22件/planned12件。部分受入を全体の完成に数えない。
+全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で9日18時間17分、記録済み期限から4日12時間49分経過した。34 work packageはin_progress22件/planned12件。部分受入を全体の完成に数えない。
 
 HA基盤の並行確認: 基準main `9fb64f4`の通常実行物、build ID `9fb64f4267e9`で`make check-ha-state`が終了0。独立Linux namespace/PID1の2 product processとclient/serverで、A→B/B→AのVRRP/NAT引継ぎ、同一TCP socketとUDP mapping、同期済みDHCP leaseの実Renew/ACK、worker/conntrack engine再起動を確認した。TCP再接続なし（captureのSYNは1回）、最大応答待ち1.665秒。UDPは50ms送信/200ms返信予算で3009送信・2942受信・67期限超過、最大無応答1.110秒（このfixture条件での測定）。同期断中の独立割当/更新と復帰、未設定証明書の拒否、実lease期限での失効、3日sticky期限を変えない再起動/引継ぎ、保持中の別client割当と元client再取得も通過。設定削除で同期workerを回収し、元のconntrack sysctlへ復元した。実HGWの38-resource全体を二台化した結果や、14-resource例・実homert二台の資格とは分ける。
 
@@ -908,7 +903,6 @@ DHCPv4は旧request encoderのsubnet mask要求漏れを独立dnsmasqで再現�
 
 
 
-
 DHCPv6の割当・情報・T1/T2・再送は元のBOOTTIMEへ変更し、controlの受信側grantを削除した。
 RAのrouter/PIO/DNSとAFTRまで元の期限を渡し、AFTRの二重input・clock anchor・再base・JSON identityを削除した。
 `make qemu-dhcp6-clock`で実UTC±24時間、凍結producerの元通知不変、LAN TCP/UDP、
@@ -1067,7 +1061,6 @@ DNS workerの設定write/file reload/raw lease注入とsticky sidecarは廃止�
 有限inputへ一本化した。条件付きrouteがPPP等のowned linkを利用するための依存・active条件を受け入れる。
 実DHCP→DNSと旧routerd importも確認した。最新の受入範囲・負荷時に残る遅延・物理機の限界は
 [引き継ぎ](pve-codex-handoff.md)を参照する。NET-06全体の完了ではない。
-
 
 範囲: 旧 routerd 互換 / track: network / risk: high。
 前提: CORE-03, CORE-04, NET-05。 設計判断: D-04。

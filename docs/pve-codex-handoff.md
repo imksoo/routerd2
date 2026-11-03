@@ -1,15 +1,20 @@
 # routerd2 開発引き継ぎ
 
-2026-11-03 05:13 UTC: 通常Makefile build ID `6ca951d3082a` + 本変更で、各47-resource profileを実HGWと独立BusyBox端末へ接続した両方向HA試験が終了0。現用daemon停止a→bは16.65秒、b→aは9.10秒でIPv4/IPv6 HTTPS・UDP/TCP DNS・広告されたIPv6 DNS・VIP NTPが復旧した（各1回の途中probe失敗）。同一公開HTTPS TCP接続は再接続なし、captureのSYNは1回、27応答・最大応答間隔7.96秒。同一UDP socketは31応答・13欠落・最大応答間隔7.51秒（1秒返信予算）。両方向でconntrack NAT tuple/mark、PD DUID/IAID/prefix、実DHCP Renew/ACKを維持し、旧現用の再加入・同期・非preemptを確認した。無停止・無損失の結果ではない。
+通常Makefile build ID `1ec748fbb2d8` + 本変更で、二台47-resource profileの拡張手順も終了0。初期通信と両方向切替後に、IPv4/IPv6 HTTPS、UDP/TCP DNS、広告されたIPv6 DNS、条件付きDNS/子suffix、Cloudflare/Google両DoHの状態と公開名への実query、VIP NTP、両FRRのLAN広告・現用側だけの戻り経路、端末の非NAT TCP/UDPを確認した。a→bは62.72秒（途中probe失敗2回）、b→aは34.00秒（1回）で全項目が復旧。同一TCPはSYN1回・69応答・最大応答間隔57.38秒、同一UDPは122応答・38欠落・最大応答間隔33.72秒（1秒返信予算）。両方向のNAT tuple/mark、DUID/IAID/prefix、実DHCP更新、再加入/同期/非preemptを維持した。長い断は残る改善対象であり、安定性や無停止を主張しない。
 
-実障害から修正したのは、PD同期counterの所有者ごとの比較、IPv6専用macvlanにも必要なARP identity設定、元現用不在時にDHCPを停止し続けるmarker/fenceの撤去。設定はRA DNS寿命1800秒、固定B4 SNAT、静的backupの共有VIP SNAT（転送client interfaceに限定）へ修正した。旧routerdのVMAC ARP設定・PD/lease同期経路も比較した。Race Detector・vet、通常build、3実行物のstatic link、Python補助検査36件が通過。追加の`--peer-loss`独立手順は今回未実行。
+Race Detector（`make race`）、vet、Python補助検査36件、通常build、3実行物のstatic linkが通過。初回の並行build中のRace試験では、既存の短時間fixtureが設定前に期限へ達して失敗した。最新ソースの全`make race`は再実行終了0。二台の特別scope、Tailscale双方向/exit、履歴・telemetry全経路と長時間安定性、単体BGP再起動、切替断の短縮、実機/配布先/34 package全体は残作業。
 
-未受入: 二台profileの特別scope、条件付きDNS/DoH・BGP・Tailscale・履歴/telemetry全経路と長時間安定性、全homert/対象ONU/NIC。非同期DHCPの未受信割当を失った場合の重複回避は保証しない。自然PD T1は別の旧build/profileで観測継続中であり、本変更全体の資格には転用しない。旧buildの長時間観測でBGP等のworker再起動が増えており、effect ACK timeoutの原因は未解決。終了したHAのnamespace/process/key/stageは撤去済み。
+## 今回の自然更新とHA修正
 
+自然PD更新の長時間試験は終了0。通常build `b03debf15982`、単体38-resource profile/runner `5861b7e`で、実HGW source port49153から05:24:16 UTCのRenew/Replyと期限更新、678回の両IP HTTPS/DNS確認を通過した。PD SIGKILL後2.22秒、通常再起動後7.05秒、全daemon再起動後112.21秒で復旧し、DUID/IAID/prefix・両端末/Tailscale通信を維持した。正常停止のzero-lifetime RA、kernel撤去、上流Releaseなしも確認した。BGPはgeneration17まで再起動したため、これは自然更新と復旧の受入であり長時間安定性の合格ではない。最新のRA寿命/SNAT/HA修正を含む全体の資格にも転用しない。stage/process/namespaceは撤去済み。
 
-更新: 2026-11-03 05:13 UTC。全体ゴールは継続中。
+二台用設定の両側常時LAN広告では、独立FRRの戻りが待機側へ入りSYN/ACKをINVALIDとして破棄する実障害を確認した。保存中homertのBGPのexport/connected intentと旧routerdのrender/route同期を参照し、このstateful二台profileのBGPは現用権で有効化する。新しい通信手順は両FRRの実経路が現用側だけを向くこと、端末TCP/UDPの非NAT往復、条件付きDNS/子suffixと両DoH上流を切替前後に確認する。
 
-## 現在
+製品の修正は、経路適用に不要なkernel route dumpのsort削除と、VIPが未公開の待機/準備通知を既に適用したVIP不在で応答する処理。これにより、準備を進める通知がその準備の完了を待ってtimeoutする依存を外す。準備条件が満たされた現用化とVIP撤去は実適用を待つ。診断用のstack timerは除去し、通常Makefile buildで上記の最終確認を実施した。
+
+更新: 2026-11-03 05:46 UTC。全体ゴールは継続中。
+
+## 前checkpointの単体結果
 
 38-resource native profile、基準main `b03debf` + LAN配布設定、build ID `b03debf15982`で実HGW統合gateが終了0。通常・予約・OUI・特定MACの独立端末5台で、通常gateway/DNS .1と特別gateway/DNS .253を実ACKから設定し、公開HTTPS/UDP DNSが往復した。通常/予約端末はNTP2アドレスとdomain-searchも取得。実Releaseで3日分の保持期限が保存され、端末IP撤去後も別MACの同アドレス要求には別leaseを配り、元MACには保持アドレスを再配布した。全daemon restart後も特別端末3台のRenew/ACK・通信とfingerprint APIが復旧した。LAN RAのhigh優先度/MTU1500/valid最大7200秒/preferred最大3600秒を実packetで確認。上流選択、4 DS-Lite、DNS/DoH、nDPI/計数/SNI、fresh syslog/OTLP、BGP/NTP/Tailscaleも通過。PD worker SIGKILL/通常再起動後の復旧2.96/5.85秒、全daemon restartから全確認102.76秒（60秒抑制と30秒sampling等を含む）。2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。自然T1・既存socket継続・3日/7日経過削除・全homert/HA/実機資格は今回の範囲外。
 
@@ -29,10 +34,8 @@ NTPのワイルドカード待受を許可する製品修正`19682da`はmainへp
 
 ## 次の作業
 
-進行中（2026-11-03T03:25:30Z）: 設定/runner `5861b7e`、通常build ID `b03debf15982`（製品Go不変）で`--seconds 7800 --full-restart --tailnet`の自然更新観測を起動した。live ownerと現在のPD bound/IAID1を実プロセス・IPCで確認済み。`/tmp/routerd2-natural-uplink.log`が現在の進捗。終了0/自然Renew/Replyはまだ未確認。重複起動やlive stageの削除をせず、実プロセスを再確認して観測を継続する。待機中は残る単体/HA作業を進める。
+1. 単体BGPのeffect ACK timeoutによる再起動と、全二台profileの長い切替断を直す。今回の待機/準備の応答改善を全ての適用待ちの解消へ読み替えない。初期AFTRのHTTP409/restartも残る。
+2. 二台の特別DHCP scope、Tailscale双方向/subnet/exit、管理・履歴・syslog/OTLP全経路と再起動後を実peerで受け入れる。DNS/DoH・BGPは今回確認した経路と長時間安定性を分ける。
+3. 保存homert全意図と保持dataset、MTU/期限/更新/配布、残る34 work packageを完了する。対象ONU/NIC・実機性能・arm64・cloud等は未受入。各実通信の直前に[試験計画](test-plan.md)全体を読む。PVE/QEMUと追加PBR調査は実行しない。
 
-1. LANの通常/予約/OUI/特定MAC配布、特別gateway/DNS、3日sticky hold、NTP/domain-search、fingerprint、RA high/MTU/寿命を今回受入済み。次は同一profileの自然PD T1と通信継続を確認し、その待機中に残る単体intent/HA実装を進める。全private DNS peer、BGP運用、保持dataset等の残差は未受入のまま。
-2. 実通信の直前に[試験計画](test-plan.md)全体を読む。現行のMakefileコマンドは`UPLINK_TAILNET=1`も必要。全設定のcold start、自然更新、継続通信、worker/daemon復旧を確認し、その後に二台HA・残るwork packageを進める。
-3. 今回はPVE/QEMUと追加のPBR調査を実行しない。対象ONU/NIC、全homert、HA、public Tailscale control、cloud等は未受入。独立作業を一つの観測待ちで止めない。
-
-全体開始から9日16時間11分、記録済み期限から4日10時間43分経過。全34 work packageは未完了。根拠のない完成日は出さず、関連チェックと実通信を通した変更をcommit/pushする。不要なstage/key/capture/build outputを各単位で撤去する。
+全体開始から9日18時間17分、記録済み期限から4日12時間49分経過（05:46 UTC）。全体ゴールは継続中。終了したstage/key/capture/log/重複build outputを撤去し、次の観測で必要な実行物・pinned peerだけを残す。

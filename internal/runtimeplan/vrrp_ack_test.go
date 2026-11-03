@@ -25,6 +25,38 @@ func conditionalVRRPSource() config.Document {
 	}}
 }
 
+func TestVRRPAcknowledgesAnUnpublishedVIPWithoutWaitingForPreparation(t *testing.T) {
+	for _, state := range []string{"standby", "preparing"} {
+		t.Run(state, func(t *testing.T) {
+			source := conditionalVRRPSource()
+			if state == "preparing" {
+				source = activationSource()
+			}
+			r := New(t.TempDir(), t.TempDir(), &memoryNetwork{}, testSupervisorInstance)
+			r.manager = &memoryManager{}
+			if err := r.ApplyConfig(context.Background(), 1, source); err != nil {
+				t.Fatal(err)
+			}
+			snapshot := bootVRRPSnapshot(t, source.Resources[0].Service.VRRPConfig())
+			snapshot.Active = false
+			if state == "standby" {
+				snapshot.State = vrrp.StateBackup
+			} else {
+				snapshot.ActivationState = "Preparing"
+				snapshot.ActivationStartedNanos = snapshot.ObservedNanos
+			}
+			snapshot.ValidUntil, snapshot.Deadline = time.Time{}, time.Time{}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			// No coordinator runs: this decision confirms only that the VIP is absent.
+			receipt, err := r.Apply(ctx, update(t, r, "service.ha", 1, snapshot))
+			if err != nil || !receipt.Applied || receipt.VRRP.Active {
+				t.Fatalf("unpublished VIP receipt: %+v, %v", receipt, err)
+			}
+		})
+	}
+}
+
 func TestConditionalVRRPWaitsForNetworkACK(t *testing.T) {
 	source := conditionalVRRPSource()
 	n := &memoryNetwork{}

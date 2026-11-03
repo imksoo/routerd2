@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import runpy
 import signal
 import subprocess
 import tarfile
@@ -94,6 +95,7 @@ def owner(stage, uplink):
             command = ["dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null", "--no-hosts", "--no-resolv", "--bind-interfaces", "--listen-address=" + address, "--port=" + str(port)]
             command += ["--address=/#/" + answer] if answer else ["--server=1.1.1.1"]
             start(key, command, "dns-" + str(port))
+        echo = runpy.run_path(str(stage / "peer-fixture.py"))
         for index in range(2):
             key = "bgp" + str(index)
             address = "192.0.2." + str(index+2)
@@ -108,6 +110,7 @@ def owner(stage, uplink):
             start(key, ["/usr/lib/frr/zebra", "-u", "frr", "-g", "frr", "-z", str(root / "zserv.api"), "--vty_socket", str(root), "-i", str(root / "zebra.pid"), "-f", str(root / "zebra.conf")], key + "-zebra")
             wait(lambda: (root / "zserv.api").exists())
             start(key, ["/usr/lib/frr/bgpd", "-S", "-z", str(root / "zserv.api"), "--vty_socket", str(root), "-i", str(root / "bgpd.pid"), "-f", str(root / "bgpd.conf")], key + "-bgpd")
+            start(key, ["python3", "-u", "-c", echo["ECHO_SERVER"], "203.0.113.1"], key + "-echo")
         # The existing UDP syslog fixture binds 192.0.2.2.
         start("bgp0", ["python3", "-I", str(stage / "syslog-peer.py"), "--mode", "receive", "--port", "5514", "--output", str(stage / "syslog.jsonl")], "syslog-peer")
         collector = stage / "collector.json"
@@ -200,6 +203,31 @@ def owner(stage, uplink):
             assert run(inside("client", ["dig", "-6", "@"+dns6, "example.net", "AAAA", "+short", "+time=3", "+tries=1"])).strip()
             run(inside("client", chrony + ["-Q", "-t", "8", "-u", "root", "-f", str(ntp_client)]), 12)
             print("PASS HA client NTP response", flush=True)
+            node = elected()
+            for query_name, expected in (("available.split.test", {"192.0.2.77", "192.0.2.78"}), ("branch.split.test", {"192.0.2.78"}), ("host.corp.test", {"192.0.2.78"})):
+                for server in (dns, dns6):
+                    answer = run(inside("client", ["dig", "@"+server, query_name, "A", "+short", "+time=3", "+tries=1"])).strip()
+                    assert answer in expected, (query_name, answer)
+            for server in (dns, dns6):
+                assert run(inside("client", ["dig", "@"+server, "www.cloudflare.com", "A", "+short", "+time=4", "+tries=1"])).strip()
+            def doh_ready():
+                upstreams = api(node, "services/dns.dns.sock", "/v1/status")["resources"][0]["observed"]["upstreams"]
+                return all(endpoint+":Healthy" in upstreams for endpoint in ("https://cloudflare-dns.com/dns-query", "https://dns.google/dns-query"))
+            wait(doh_ready)
+            def bgp_ready():
+                peers = api(node, "control.sock", "/v1/services/service.routing").get("snapshot", {}).get("peers", [])
+                return {p["address"]: p["state"] for p in peers} == {address: "SESSION_STATE_ESTABLISHED" for address in ("192.0.2.2", "192.0.2.3")}
+            wait(bgp_ready)
+            for index in range(2):
+                root = Path("/run/routerd-bgp-peer"+str(index))
+                view = json.loads(run(inside("bgp"+str(index), ["vtysh", "--vty_socket", str(root), "-d", "bgpd", "-c", "show bgp ipv4 unicast 198.18.0.0/24 json"])))
+                assert view.get("paths"), "independent FRR did not receive the LAN advertisement"
+                routes = json.loads(run(inside("bgp"+str(index), ["ip", "-j", "route", "show", "198.18.0.0/24"])))
+                expected_hop = "192.0.2.10" if node == "a" else "192.0.2.11"
+                hops = [hop.get("gateway") for route in routes for hop in route.get("nexthops", [route])]
+                assert hops and set(hops) == {expected_hop}, ("FRR return path bypasses the serving owner", hops)
+            run(inside("client", ["python3", "-c", echo["ECHO_CLIENT"], "203.0.113.1", address, address]))
+            print("PASS HA conditional DNS/nested suffix, both DoH peers, FRR advertisements and client TCP/UDP without NAT via", node, flush=True)
             print("PASS HA client lease and IPv4/IPv6 HTTPS, UDP/TCP DNS via", elected(), flush=True)
         def client_ipv6_ready():
             addresses = json.loads(run(inside("client", ["ip", "-j", "-6", "address", "show", "dev", "client0", "scope", "global"])))
@@ -207,7 +235,15 @@ def owner(stage, uplink):
                          for link in addresses for info in link.get("addr_info", []))
             return usable and bool(json.loads(run(inside("client", ["ip", "-j", "-6", "route", "show", "default"]))))
         wait(client_ipv6_ready, 90)
-        traffic()
+        started = time.monotonic()
+        def initial_traffic():
+            try:
+                traffic()
+                return True
+            except (RuntimeError, AssertionError) as error:
+                print("HA startup probe failed", round(time.monotonic()-started, 2), str(error), flush=True)
+                return False
+        wait(initial_traffic)
         neighbor = json.loads(run(inside("client", ["ip", "-j", "neigh", "show", "to", "198.18.0.1", "dev", "client0"])))
         assert len(neighbor) == 1 and neighbor[0].get("lladdr") == "00:00:5e:00:01:2a", neighbor
         print("PASS client learned the IPv4 VIP MAC rather than its IPv6 sibling", flush=True)
@@ -361,7 +397,7 @@ def main():
     root=[] if os.geteuid()==0 else ["sudo","-n"]
     stage=Path(run(root+["mktemp","-d","/tmp/routerd-full-ha.XXXXXX"]).strip())
     try:
-        files=[(Path(__file__),"owner.py"),(Path("scripts/syslog-peer.py"),"syslog-peer.py"),(Path("scripts/internet-flow.py"),"internet-flow.py")]
+        files=[(Path(__file__),"owner.py"),(Path("scripts/syslog-peer.py"),"syslog-peer.py"),(Path("scripts/internet-flow.py"),"internet-flow.py"),(Path("scripts/tailscale-peer.py"),"peer-fixture.py")]
         files += [(Path("dist/bin")/n,n) for n in ("routerd","routerd-modules","routerd-logging")]
         files += [(Path("dist")/n,n) for n in ("dnsmasq-engine.tar","conntrack-engine.tar","chrony-engine.tar","tailscale-engine.tar")]
         files += [(Path("dist/peer-env/tailscale")/n,n) for n in ("headscale","tailscale","tailscaled")]
