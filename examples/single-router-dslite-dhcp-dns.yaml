@@ -113,13 +113,13 @@ resources:
       - type: masquerade
         match: {family: 6, in_interface: lan0, out_interface: tailscale0}
       - type: snat
-        address: 192.0.0.2
+        address: 192.0.0.3
         match: {family: 4, source: 198.18.0.0/16, out_interface: dslite1, exclude_destinations: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 198.18.0.0/16, 198.19.0.0/16]}
       - type: snat
-        address: 192.0.0.2
+        address: 192.0.0.4
         match: {family: 4, source: 198.18.0.0/16, out_interface: dslite2, exclude_destinations: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 198.18.0.0/16, 198.19.0.0/16]}
       - type: snat
-        address: 192.0.0.2
+        address: 192.0.0.5
         match: {family: 4, source: 198.18.0.0/16, out_interface: dslite3, exclude_destinations: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 198.18.0.0/16, 198.19.0.0/16]}
   - id: route/ntp-device
     depends_on: [address/legacy-lan]
@@ -243,7 +243,7 @@ resources:
         source_delegation: b4-source
         candidates: [2404:8e00::feed:100]
         mtu: 1454
-        b4_address: 192.0.0.2/32
+        b4_address: 192.0.0.2/29
         default_route: true
         metric: 200
   - id: host-wan
@@ -400,7 +400,7 @@ resources:
         source_delegation: b4-source1
         candidates: [2404:8e00::feed:101]
         mtu: 1454
-        b4_address: 192.0.0.2/32
+        b4_address: 192.0.0.3/29
         default_route: true
         metric: 201
   - id: service/internet2
@@ -415,7 +415,7 @@ resources:
         source_delegation: b4-source2
         candidates: [2404:8e00::feed:102]
         mtu: 1454
-        b4_address: 192.0.0.2/32
+        b4_address: 192.0.0.4/29
         default_route: true
         metric: 202
   - id: service/internet3
@@ -430,7 +430,7 @@ resources:
         source_delegation: b4-source3
         candidates: [2404:8e00::feed:100]
         mtu: 1454
-        b4_address: 192.0.0.2/32
+        b4_address: 192.0.0.5/29
         default_route: true
         metric: 203
   # Keep probe/established-flow routes even when health withdraws new selection.
@@ -507,7 +507,7 @@ resources:
       name: health-dslite1
       health:
         interface: dslite1
-        source_address: 192.0.0.2
+        source_address: 192.0.0.3
         mark: 273
         target: 1.1.1.1
         protocol: tcp
@@ -522,7 +522,7 @@ resources:
       name: health-dslite2
       health:
         interface: dslite2
-        source_address: 192.0.0.2
+        source_address: 192.0.0.4
         mark: 274
         target: 1.1.1.1
         protocol: tcp
@@ -537,7 +537,7 @@ resources:
       name: health-dslite3
       health:
         interface: dslite3
-        source_address: 192.0.0.2
+        source_address: 192.0.0.5
         mark: 275
         target: 1.1.1.1
         protocol: tcp

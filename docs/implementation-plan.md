@@ -1,5 +1,7 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
+保存homertのB4 IPv4に合わせ、単体・二台例の4 DS-Liteを192.0.0.2/.3/.4/.5（各/29）と対応するSNAT・health送信元へ修正した。旧routerdのlocalAddressFrom経路と明示的な重複許可を参照した。通常build `cbde1604b383`・変更後の単体45-resource例で、実HGW・独立LAN端末との4本のHTTPS/UDP DNS、両IP Internet/DNS、設定rollback、PD再起動と全daemon再起動を通過した。Linuxの各アドレスと内側TCP往復をcaptureで確認。全daemon後の全項目再確認111.87秒は転送断時間ではない。2巡回、自然PD更新0回。二台例は設定検証のみで、変更後のHA通信は次に確認する。直接ONU・対象NIC資格、同一TCP継続は今回の範囲外。
+
 2026-11-03のユーザー指示により、IPsec（EXT-01）はhomert02/03の機能実装・受入後へ回す。両方の保存110-resource設定にIPsecConnectionは0件。初回homert受入では、保存設定にある機能と配布・復旧の実装を優先する。
 
 保存homertのprivate DNS/NextDNSを現行の単体45-resource・二台各54-resourceへ接続し、通常build `092ba33db448`で全daemon再起動と両方向HAを受け入れた。8質問を両IP UDP/TCPで、単体の再起動前後は各32照会、HAの初期/各切替後は計96照会。HA runnerの設定・domain・DoH上流の固定と試験peerの共通PID競合を修正した。private 1先の応答変動は残る。条件・限界・再実行は[引き継ぎ](pve-codex-handoff.md)へ集約する。

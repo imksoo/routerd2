@@ -379,7 +379,7 @@ resources:
       in_interface: lan6-ha
       out_interface: tailscale0
   - type: snat
-    address: 192.0.0.2
+    address: 192.0.0.3
     match:
       family: 4
       source: 198.18.0.0/16
@@ -391,7 +391,7 @@ resources:
       - 198.18.0.0/16
       - 198.19.0.0/16
   - type: snat
-    address: 192.0.0.2
+    address: 192.0.0.4
     match:
       family: 4
       source: 198.18.0.0/16
@@ -403,7 +403,7 @@ resources:
       - 198.18.0.0/16
       - 198.19.0.0/16
   - type: snat
-    address: 192.0.0.2
+    address: 192.0.0.5
     match:
       family: 4
       source: 198.18.0.0/16
@@ -602,7 +602,7 @@ resources:
       candidates:
       - 2404:8e00::feed:100
       mtu: 1454
-      b4_address: 192.0.0.2/32
+      b4_address: 192.0.0.2/29
       default_route: true
       metric: 200
   when:
@@ -881,7 +881,7 @@ resources:
       candidates:
       - 2404:8e00::feed:101
       mtu: 1454
-      b4_address: 192.0.0.2/32
+      b4_address: 192.0.0.3/29
       default_route: true
       metric: 201
   when:
@@ -901,7 +901,7 @@ resources:
       candidates:
       - 2404:8e00::feed:102
       mtu: 1454
-      b4_address: 192.0.0.2/32
+      b4_address: 192.0.0.4/29
       default_route: true
       metric: 202
   when:
@@ -921,7 +921,7 @@ resources:
       candidates:
       - 2404:8e00::feed:100
       mtu: 1454
-      b4_address: 192.0.0.2/32
+      b4_address: 192.0.0.5/29
       default_route: true
       metric: 203
   when:
@@ -1024,7 +1024,7 @@ resources:
     name: health-dslite1
     health:
       interface: dslite1
-      source_address: 192.0.0.2
+      source_address: 192.0.0.3
       mark: 273
       target: 1.1.1.1
       protocol: tcp
@@ -1042,7 +1042,7 @@ resources:
     name: health-dslite2
     health:
       interface: dslite2
-      source_address: 192.0.0.2
+      source_address: 192.0.0.4
       mark: 274
       target: 1.1.1.1
       protocol: tcp
@@ -1060,7 +1060,7 @@ resources:
     name: health-dslite3
     health:
       interface: dslite3
-      source_address: 192.0.0.2
+      source_address: 192.0.0.5
       mark: 275
       target: 1.1.1.1
       protocol: tcp

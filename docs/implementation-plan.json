@@ -905,6 +905,11 @@
           "source": "0fbb5c3; normal build0fbb5c31fd34; Go unchanged",
           "result": "2026-11-03、基準main `0fbb5c3` + native設定/fixture変更、通常build `0fbb5c31fd34`（製品Go不変）で、4つの保存IPv4経路を接続した単体43-resource実HGW手順が終了0。LAN gateway経由の個別host/私設網、WAN on-linkで独立clientのTCP/UDPが届き、選択interfaceとpeerの実観測sourceを照合した。10/8 blackholeはTCP/UDP timeout、実kernel routeと短時間captureのLAN ingressあり/egressなしで確認。追加経路と管理側通信は基本DHCP/DNSの直後に先行確認し、全daemon再起動後にも再確認した。",
           "limit": "通常Internet/DNS/NTP、DHCP、管理、BGP、運用記録、Tailscaleも通過。confirmed rollback期限切れ30.25秒/control再起動6.05秒、PD SIGKILL2.29秒/通常再起動4.98秒、全daemon後の全項目再確認111.44秒。全項目時間は転送断時間ではない。20秒の2巡回・自然PD更新0回。通常build・3実行物static link、make test-tools race vet・py_compileが通過。実Starlink/IX2215・物理NIC資格ではない。保存設定は異なる二つのLAN IPv4 subnetを使うが、単体例のDHCP profileはまだ同一subnetの別poolであり、次に実構成との差を解消する。"
+        },
+        "homert_b4_addresses": {
+          "implementation": "Single and both paired profiles now use saved homert B4 IPv4 .2/.3/.4/.5 with /29 and matching SNAT/health sources. Existing native path supports this directly. Compared routerd localAddressFrom controller and saved explicit overlap configuration.",
+          "validation": "Build cbde1604b383, changed single profile: four DS-Lite HTTPS/UDP DNS, kernel addresses and inner TCP captures, independent LAN IPv4/IPv6 Internet/DNS, config rollback, PD restart and full daemon restart passed. Full recheck 111.87s includes sampling and is not outage duration. Two rounds, zero natural PD updates. make check, static three-binary build and all three config validations passed.",
+          "remaining": "Changed paired profiles have config validation only. HA communication on these addresses is next. Continuous TCP, natural PD update and direct ONU/physical NIC were not exercised in this run."
         }
       }
     },

@@ -2,6 +2,12 @@
 
 更新: 2026-11-03。全体ゴールは継続中。
 
+## 保存homertに合わせたDS-Lite内側アドレス
+
+保存homertのB4 IPv4に合わせ、単体・二台例の4 DS-Liteを192.0.0.2/.3/.4/.5（各/29）と対応するSNAT・health送信元へ修正した。旧routerdのlocalAddressFrom経路と明示的な重複許可を参照した。通常build `cbde1604b383`・変更後の単体45-resource例で、実HGW・独立LAN端末との4本のHTTPS/UDP DNS、両IP Internet/DNS、設定rollback、PD再起動と全daemon再起動を通過した。Linuxの各アドレスと内側TCP往復をcaptureで確認。全daemon後の全項目再確認111.87秒は転送断時間ではない。2巡回、自然PD更新0回。二台例は設定検証のみで、変更後のHA通信は次に確認する。直接ONU・対象NIC資格、同一TCP継続は今回の範囲外。
+
+再実行は試験計画の通常単体手順（`UPLINK_SECONDS=20 UPLINK_FULL_RESTART=1 UPLINK_TAILNET=1`）。`make check`（Race Detector・vet）、3設定検証、通常buildの3実行物の静的リンク確認が通過。製品Go・試験runnerの変更は不要だった。
+
 ## 現行単体構成の自然PD更新・再起動
 
 main `f60b3d2`・通常build `f60b3d2789cb`の45-resource単体構成で、実HGWとの自然PD Renew/Reply 1組・期限更新と652巡回の両IP Internet/DNS・Tailscale通信が終了0。109回の周期観測で29 workerの世代は同一、全てReady=trueを維持した。PD SIGKILL3.25秒・通常再起動5.20秒、全daemon後の全項目再確認111.86秒も通過した。 111.86秒には抑制・sampling等を含み、転送断時間を表さない。実行は2026-11-03 19時台〜21:58 UTC。初期の設定rollback後から自然更新後まで同じ世代を保った。実captureのRenew/Replyと再起動時のRebind/Reply、DUID/IAID/prefix保持、正常停止のzero-lifetime RA・kernel撤去・上流Releaseなしをrunnerが照合した。
