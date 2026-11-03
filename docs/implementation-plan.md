@@ -41,7 +41,7 @@ DNSの複数上流/suffix/learnedDNS/両DoHを単体gateで接続した。次は
 
 上流選択の優先作業を修正する。実homertはPD由来DS-Lite群（weight120）→別DS-Lite候補（80）→既存LAN上の静的gateway（60）。ユーザーが示すDS-Lite/PPPoE/静的経路などの順序に、既存の候補と終端を沿わせる。別のens20 WANと試験host用IPを必要とした前提・依頼は撤回する。既存`EgressPolicy`のgroup/weight/Health/ownerをnative設定へ接続し、優先順位と両端末の通信を受入済み。運用ログ・通信履歴も今回接続済み。LAN配布設定も受入済み。次は自然更新済みprofileの残る意図と既存socketの通信継続を確認する。直接bindによる4 tunnel疎通は上流選択の完成ではない。
 
-2026-11-03、製品code `df49035`・通常build `df490351c3ff`で `make check-doh-outage` が終了0。実Cloudflare/GoogleへTLS通信し、片側ずつTCP443を遮断して各16packetのdropとDown、解除後の両Healthyを確認した。cache無効の独立dig端末は全段階でUDP/TCPのNOERROR/A回答を取得。Cloudflare停止直後の初回回答1.043秒、以後の確認回答0.025〜0.063秒。新DNS node/client/process/stageは撤去済み。元の38-resource自然PD試験への障害注入は行っていない。公開DoH IPv4 transportの独立受入であり、DS-Lite/HA全体の障害受入には転用しない。 手順は`make check-doh-outage`。自然PD T1は09:42:40 UTC予定で継続中。
+2026-11-03、製品code `df49035`・通常build `df490351c3ff`で `make check-doh-outage` が終了0。実Cloudflare/GoogleへTLS通信し、片側ずつTCP443を遮断して各16packetのdropとDown、解除後の両Healthyを確認した。cache無効の独立dig端末は全段階でUDP/TCPのNOERROR/A回答を取得。Cloudflare停止直後の初回回答1.043秒、以後の確認回答0.025〜0.063秒。新DNS node/client/process/stageは撤去済み。元の38-resource自然PD試験への障害注入は行っていない。公開DoH IPv4 transportの独立受入であり、DS-Lite/HA全体の障害受入には転用しない。 手順は`make check-doh-outage`。同日の自然PD更新は完了済み。実行結果は引き継ぎに記載する。
 
 ## 仕切り直した実行順
 
