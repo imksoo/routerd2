@@ -1,44 +1,40 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
-更新: 2026-11-03 01:27 UTC。main `646ee1c`由来buildでBGPを加えた22-resource native profileの実HGW/独立FRR・client統合gateが終了0。製品Goコードは不変。今回のPython checks、通常static build、設定検証も通過。全homertとHA/対象環境の受入は継続中。
+更新: 2026-11-03 01:39 UTC。main `5b46865`を基にBGP/Tailscaleを含む25-resource native単体profileが実HGW/独立peer/client gateを通過。OS標準CAをTailscale engineへ引き継ぐ修正、`make check`（Race Detector・vet）、static build/設定検証も通過。全homertとHA/対象環境は継続中。
 
-全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で9日13時間51分が経過し、2026-10-29 16:56:38 UTCの期限から4日8時間23分遅れている。34 work packageは`in_progress`22件、`planned`12件。部分合格を製品全体の完了に数えない。
+全体ゴールは2026-10-24 11:28:25 UTCに開始した。更新時点で9日14時間10分、記録済み期限から4日8時間42分経過した。34 work packageはin_progress22件/planned12件。部分受入を全体の完成に数えない。
 
 ## 現在の棚卸し
 
-- `make check` はGo/Python checks、Race Detector、vetを含め終了0。current-mainの署名付きSSH update/rollback統合試験は初回の試験全体90秒context切れを修正し、128.701秒で終了0。これは実SSH管理とrollback状態の受入であり、applianceの再起動受入ではない。
-- current-main `c9d7055` の通常Alpine/PID 1 applianceを隔離PVEで受け入れた。独立Linux LAN clientの動的DHCPv4、PPP/IPv4・IPv6 TCP/UDP、ISC DHCPv6 PD/Renew、再起動後のRebind、署名更新、明示rollback、Healthを失わせた候補の自動rollbackを確認した。自動復旧は113.06秒。試験VMは撤去済み。詳しい条件は[実通信試験計画](test-plan.md)に記録する。
-- 実HGWへ接続したmain由来product build `7c1cb3619acb` は、生成profileで独立LAN client、DHCPv4/DHCPv6/SLAAC、条件付きDoH、IPv4 DS-Lite/IPv6通信、WAN outage復旧、worker/full restartと自然PD T1 Renew/Replyを通過した。captureでUDP/49153からのAdvertise/Replyを受け、初回SolicitとRenewでDUID/IAID=1/prefixが一致し、期限更新した。旧routerdにも同じsource-port許容がある。実kernelではWAN/LANの`accept_dad=1`、global IPv6 addressはnon-tentativeでDAD failureなし。worker SIGKILL/graceful restart/full daemon restart後の復旧は1.32/3.61/3.99秒。自然DHCPv4 renew、IPv4/IPv6 HTTPS・学習DNS UDP/TCPを676 roundで確認し、試験後にraw artifactsを削除した。第6回のnative HGW gateは終了0。15-resource profileでWAN DHCPv4、予約/OUI-scope LAN DHCPv4、DHCPv6 Information/SLAAC、LAN DNS/DoH、DS-Lite IPv4/IPv6 HTTPS・DNS UDP/TCP、WAN outage recovery（0.79秒）、PD worker SIGKILL/graceful restart（1.57/3.53秒）、全daemon restart（3.78秒）、DUID/IAID/prefix保持、zero-lifetime RAによるLAN address撤去、upstream Releaseなしを確認した。自然PD T1（約7,176秒後）・DHCPv4 T1・連続TCPは未観測。raw artifactsは削除済み。homert全110 resources、ONU直結、対象物理NIC qualificationも未完了。
-- 2026-11-03に保存中のhomert02/03設定を読取専用で再集計した。各110 resources、全kind countは一致し、DNSForwarderは11件。両方にIPv6 host-traffic policy route（family IPv6/table 120）がある。設定値・秘密を出力・保存しない。
-- native例は `single-router-dslite-dhcp-dns.yaml` が16 resources、`homert02-native.yaml`と`homert03-native.yaml`が各14 resources。過去の57-resource試験用設定は現行例ではなく、110-resource homert受入にも数えない。
-- このhostの`ens18`/`ens20`はvirtio NIC。HGW通信は確認できるが、NTT ONU直結、対象NIC・実機資格は未受入。
-
-- NTP追加gateは実WAN学習源（stratum 3）への同期、独立LAN 2 clientの時刻応答、daemon全体restart後の再同期・応答まで終了0。全確認完了18.94秒はclient測定時間を含む。実kernelのconntrack TCP liberal=1も確認。fallback source、appliance clock adjustment、全homert profileは未受入。
+- 現行の単体例は25 resources。DHCP/PD/RA、DNS/cache/history/DoH、DS-Lite/IPv6 Internet、管理、NTP、BGP 1 peer、Tailscale subnet/exitを同じ実daemonで接続し、独立peer/clientとの通信と全daemon restartを通過した。最新条件・結果・再実行手順は[試験計画](test-plan.md)に集約する。
+- `make check`（Race Detector・vet）、通常static build、設定検証を通過。補助検査の成功を製品全体の完成とは扱わない。
+- 別checkpointで生成profileの自然PD T1、nativeのWAN遮断復旧、二WAN Health→PBR、Alpine/PID1の通信/署名更新/rollbackを確認済み。現在の全profileや実機資格への流用はせず、追加PVE/QEMU・PBR調査は行わない。
+- 保存中のhomert02/03設定は各110 resources、kind件数一致、DNSForwarder11件。両方のIPv6 host route table120、WAN /128 DS-Lite source、BGP広告、Tailscaleの運用を参照済み。実設定値・秘密は公開しない。
+- 全homertの複数DNS/learnedDNS、4 DS-Lite/backup、二BGP peers、残るLAN/運用機能と全体の自然更新・継続通信、二台HAが残る。各homert例14 resourcesは全設定の代わりにならない。
+- ens18/ens20はvirtio。NTT ONU直結、対象NIC/実機、arm64、cloud/Kubernetes全体は未受入。利用できる独立環境で実装を続け、必要な最小setupを範囲ごとに明記する。
 
 ## 今回の棚卸しと実行単位（2026-11-03）
 
-main `f64580e`を取得して差分なしを確認した。34 work packageの状態は部分実装を含むため、未完了件数だけでは次の作業を決めない。現在の製品経路と実homert設定の差を、次のまとまりで埋める。
+mainを取得し、直近の変更を統合した。34 work packageの状態は部分実装を含むため、未完了件数だけでは次の作業を決めない。現在の製品経路と実homert設定の差を、次のまとまりで埋める。
 
 | 順序 | 実装・接続するもの | 実通信で閉じる条件 | 現在 |
 | --- | --- | --- | --- |
-| 1 | 単体DNSのcache・query log、loopback/管理listener、SSH/Web管理 | 独立端末から解決・履歴閲覧・鍵認証、上流停止中のcache、管理interface制限、daemon再起動後の復旧 | 実HGWで合格、今回commit |
-| 2 | 複数DNS suffix/upstream、4本のDS-Liteとbackup回線、BGP、Tailscaleの単体設定 | 現行homertの各通信経路を独立peer/端末から通す。既存engineへ接続し、不足箇所だけ実装 | BGP 1 peerの単体経路は実HGWで合格。他は未接続部分あり |
+| 1 | 単体DNSのcache・query log、loopback/管理listener、SSH/Web管理 | 独立端末から解決・履歴閲覧・鍵認証、上流停止中のcache、管理interface制限、daemon再起動後の復旧 | 実HGWで合格、main反映済み |
+| 2 | 複数DNS suffix/upstream、4本のDS-Liteとbackup回線、BGP、Tailscaleの単体設定 | 現行homertの各通信経路を独立peer/端末から通す。既存engineへ接続し、不足箇所だけ実装 | BGP 1 peerとTailscaleの単体経路は合格。他は未接続部分あり |
 | 3 | 単体全体のcold start、自然更新、MTU/通信継続、更新・復旧 | 同一profileで端末の通常利用を維持し、変更後に戻る | 部分試験のみ |
 | 4 | 二台HAのVIP/lease/PD/conntrackと既存TCP/UDP | 両方向の停止・復帰、新規端末と既存通信を同時に確認 | 未受入 |
 | 5 | 残る34 work packageの機能・配布先ごとの残差 | 対応peer/配布先で受入。利用できない対象と最小追加setupを明記 | 未完了 |
 
 一回の変更単位は「設定から利用者の結果まで」とする。失敗時はpacket・socket・経路・workerのうち原因を決める観測だけを追加し、原因が分からないまま同じ試験を繰り返さない。自然T1の待ち時間には独立する実装を進める。試験を増やすことや報告書を作ることを進捗の代用にしない。合格した単位をcommit/pushしてから次へ移る。全体完成の見積りは、単体の全通信経路とHAの未解決原因が把握できた時点で更新する。
 
-19-resource native profile（基準HEAD `f64580e` + SSH修正、実行build ID `f64580e932b2`）の実HGW gateは終了0。loopback/管理/LAN両IP DNS、上流停止中のcache応答、未取得名のfailure isolationと復旧、query log API/Web閲覧、管理端末から鍵認証SSH、LANからWebへの遮断を確認した。SSHはaddress設定前から指定addressへ待受し初回generation=1/restarts=0。全daemon再起動後も同じhost keyでSSH接続でき、保存済みDNS履歴を閲覧できた。WAN学習NTP源stratum 3と両LAN chronyd client応答も通過。DHCP/PD/RA/SLAAC/DS-Lite/IPv6 HTTPS・DNS UDP/TCPを2 round、PD worker SIGKILL/通常再起動後3.10/4.94秒で復旧した。全daemon restartから管理/NTPを含む全確認完了17.63秒はclient測定時間を含む。zero-lifetime RA/kernel withdrawal、upstream Releaseなしを確認。自然T1、連続TCP、全homert/HA、ONU直結・対象NICは今回未受入。stage/capture/一時鍵/namespaceは撤去済み。
+25-resource native profile、基準main `5b46865` + OS trust-store修正、build ID `5b4686577c4a`で実HGW/独立FRR・Headscale・Tailscale・Linux clientの統合gateが終了0。CA指定を省略してHTTPS登録でき、LAN→tailnet peerのIPv4/IPv6 TCP/UDP、peer→広告LANのIPv4 TCP/UDP、product exit node経由のIPv4/IPv6 HTTPS・UDP DNSが通った。全daemon再起動後もnode identityを保持して同じ通信が復旧した。BGPの相互広告・両kernelの経路・LAN 2端末のNATなしTCP/UDP、DNS/cache/history・SSH/Web・WAN学習NTP源stratum 3と両IP Internetも同時に通過。PD worker SIGKILL/通常再起動後1.89/5.09秒で端末通信が戻り、full restartから全確認完了17.80秒（NTP測定を含む）。2通信round、zero-lifetime RA/kernel withdrawal、upstream Releaseなしを確認。host CA bundleのSHA-256は試験前後で一致。stage/key/CA mount/control DB/capture/namespaceは撤去済み。
 
-22-resource native profile、main由来build `646ee1c19db9`で実HGW統合gateが終了0。独立FRR 8.4.4/ZebraとのBGPで、peerの203.0.113.0/24とLAN198.18.0.0/24を相互広告し、両kernelのpeer next hopとFRRの受信RIBを確認した。両LAN clientが取得したsource IPv4のままTCP/UDPを往復し、既存captureでもBGP交換とNATなしの転送を確認した。全daemon restart後に同じ経路・両client通信が復旧。管理DNS/SSH/Web履歴・NTP（WAN学習源stratum 3）と両IP Internet通信も維持した。PD worker SIGKILL/通常再起動後の端末復旧2.81/4.97秒、full restartから全確認完了17.91秒（NTP client測定込み）。2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。自然T1・連続TCP・二BGP peers全体・長時間GR・HA・全homert・ONU直結/対象NICは今回未受入。stage/capture/FRR runtime/namespaceは撤去済み。
-
-次はTailscaleのnative単体設定を旧routerdの実運用へ合わせる。旧実装は通常のOS trust/DNSを使うが、現在のnative engineは専用root内で動くため、public control serverで必要なCAとbootstrap DNSの扱いも確認する。追加のPBR調査・PVE/QEMUは行わない。
+次は残る複数DNS/learnedDNS、DS-Lite/backup WANのnative設定、二BGP peers等の単体経路を埋め、同じprofileで自然更新と継続通信を確認する。追加のPBR調査・PVE/QEMUは行わない。
 
 ## 仕切り直した実行順
 
 1. **110-resource homert single profileを作る。** 本日再読した両node設定と旧routerdの実装・運用修正を、feature/caller/kernel effect単位で対応づける。まず現行single profileへ欠けている4本のDS-Lite service、Health/PBR、backup WAN、DHCP scopes/identity、複数DNS suffix/upstream/DoH、BGP/NTP/Tailscale/managementの実際に使われる範囲を実装する。実設定の値・秘密を転記しない。全設定を1回で置き換えるconverterは作らず、client通信経路を保ったままsectionごとに実HGWで受け入れる。
-2. **full single profileを同じ実HGW/独立clientでcold startから通す。** DNS/DHCP/RA/DS-Lite/Health/PBR、自然更新、worker/daemon restart、実通信とkernel/captureを確認し、完了済み15-resource gateの合格範囲を広げる。target ONU/NIC qualificationは分離して記録する。
+2. **full single profileを同じ実HGW/独立clientでcold startから通す。** DNS/DHCP/RA/DS-Lite/Health/PBR、自然更新、worker/daemon restart、実通信とkernel/captureを確認し、完了済み25-resource native gateの合格範囲を広げる。target ONU/NIC qualificationは分離して記録する。
 3. **実行環境は現在の実HGWと隔離Linuxに固定する。** 今回はPVE/QEMUの追加実行と追加のPBR調査を行わず、単体profileの未対応機能と実通信を進める。既存のPVE/Health→PBR試験結果を追加試験の理由にしない。ある一つの未解決gateが他の独立work packageの進行を止めない。
 4. **単体が通った後、二台HAを実環境で受け入れる。** VRRP/VIP readiness、DHCP/PD identity・lease同期、conntrack、既存TCP/UDPと新規通信、両方向切替・復帰を確認する。
 5. **34 work packageをJSONの依存関係に従い閉じる。** homertに必須のCORE/SYS/NET/HA/OPS/EXTを先行し、SAM/cloud/provider、image・hardware、Kubernetesを実peer・対象環境へ広げる。provider課金と本番変更は既存authorization内で行う。
@@ -48,7 +44,7 @@ main `f64580e`を取得して差分なしを確認した。34 work packageの状
 ## 1. 基準と到達点
 
 **routerd と routerd2 は別製品である。** routerd は稼働中の機能参照元、routerd2 は未リリースの開発対象。
-現在の routerd2 の二バイナリー構成・設定書式・内部API・保存形式には利用者がいないため、後方互換性を要求しない。
+計画開始時点の routerd2 の二バイナリー構成・設定書式・内部API・保存形式には利用者がいないため、後方互換性を要求しない。
 routerd2 の設定書式も新設計に合わせて変更できる。引き継ぐ routerd の機能範囲は維持する。
 以下の旧 source / schema / API の一覧は routerd 側の棚卸しであり、routerd2 の既存利用者との互換要件ではない。
 

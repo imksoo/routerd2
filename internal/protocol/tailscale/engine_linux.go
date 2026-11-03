@@ -41,12 +41,15 @@ func RunEngine() error {
 	if err = tailscaleconfig.Validate(cfg); err != nil {
 		return err
 	}
-	var ca []byte
-	if cfg.ControlCAFile != "" {
-		ca, err = os.ReadFile(cfg.ControlCAFile)
-		if err != nil {
-			return err
-		}
+	// Preserve the OS trust store when entering the engine's private root.
+	// An operator-supplied bundle replaces it for a private control server.
+	caFile := cfg.ControlCAFile
+	if caFile == "" {
+		caFile = "/etc/ssl/certs/ca-certificates.crt"
+	}
+	ca, err := os.ReadFile(caFile)
+	if err != nil {
+		return fmt.Errorf("Tailscale trust bundle: %w", err)
 	}
 	if err = unix.Unshare(unix.CLONE_NEWNS | unix.CLONE_FS); err != nil {
 		return fmt.Errorf("Tailscale mount namespace: %w", err)
@@ -125,21 +128,16 @@ func RunEngine() error {
 	if err = os.WriteFile("/etc/resolv.conf", []byte(resolver.String()), 0600); err != nil {
 		return err
 	}
-	if len(ca) != 0 {
-		if err = os.MkdirAll("/etc/ssl/certs", 0700); err != nil {
-			return err
-		}
-		if err = os.WriteFile("/etc/ssl/certs/control.pem", ca, 0600); err != nil {
-			return err
-		}
+	if err = os.MkdirAll("/etc/ssl/certs", 0700); err != nil {
+		return err
+	}
+	if err = os.WriteFile("/etc/ssl/certs/control.pem", ca, 0600); err != nil {
+		return err
 	}
 	if err = os.WriteFile("/bootstrap.json", []byte(`{"version":"alpha0","locked":false,"enabled":false}`), 0600); err != nil {
 		return err
 	}
-	env := []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "TS_DEBUG_FIREWALL_MODE=nftables", "TS_LOGS_DIR=/run/tailscale"}
-	if len(ca) != 0 {
-		env = append(env, "SSL_CERT_FILE=/etc/ssl/certs/control.pem")
-	}
+	env := []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "TS_DEBUG_FIREWALL_MODE=nftables", "TS_LOGS_DIR=/run/tailscale", "SSL_CERT_FILE=/etc/ssl/certs/control.pem"}
 	err = syscall.Exec("/usr/sbin/tailscaled", []string{"tailscaled", "--state=/state/tailscaled.state", "--statedir=/state", "--socket=/run/tailscale/local.sock", "--tun=" + cfg.Interface, "--port=41641", "--no-logs-no-support", "--config=/bootstrap.json"}, env)
 	return fmt.Errorf("execute bundled tailscaled: %w", err)
 }

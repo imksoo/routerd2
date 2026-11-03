@@ -17,6 +17,11 @@ resources:
   - id: address/bgp
     depends_on: [interface/bgp0]
     address: {interface: bgp0, cidr: 192.0.2.1/24}
+  - id: interface/peer0
+    interface: {name: peer0}
+  - id: address/tailnet-underlay
+    depends_on: [interface/peer0]
+    address: {interface: peer0, cidr: 198.51.100.2/24}
   - id: address/management
     depends_on: [interface/mgmt0]
     address: {interface: mgmt0, cidr: 198.19.0.1/24}
@@ -35,6 +40,10 @@ resources:
           - {match: {in_interface: wan0, protocol: udp, destination_ports: [{start: 53}]}, action: drop}
           - {match: {in_interface: wan0, protocol: tcp, destination_ports: [{start: 53}]}, action: drop}
       forward:
+        - {from: tailscale0, to: lan0}
+        - {from: tailscale0, to: dslite0}
+        - {from: tailscale0, to: wan0}
+        - {from: lan0, to: tailscale0}
         - {from: lan0, to: bgp0}
         - {from: bgp0, to: lan0}
         - {from: lan0, to: dslite0}
@@ -50,6 +59,12 @@ resources:
     nat:
       - type: masquerade
         match: {family: 4, source: 198.18.0.0/24, out_interface: dslite0}
+      - type: masquerade
+        match: {family: 4, source: 100.64.0.0/10, out_interface: dslite0}
+      - type: masquerade
+        match: {family: 6, source: fd7a:115c:a1e0::/48, out_interface: wan0}
+      - type: masquerade
+        match: {family: 6, in_interface: lan0, out_interface: tailscale0}
   - id: service/wan4
     depends_on: [interface/wan0]
     service:
@@ -244,3 +259,14 @@ resources:
             - {source: routerd-static, prefix: 198.18.0.0/24}
         bind_interface: bgp0
         fib_interface: bgp0
+  - id: service/tailnet
+    depends_on: [address/tailnet-underlay, address/lan]
+    service:
+      name: tailnet
+      tailscale:
+        interface: tailscale0
+        server_url: https://198.51.100.1:8443
+        hostname: hgw-router
+        auth_key_file: /run/routerd-uplink/tailscale.key
+        advertise_routes: [198.18.0.0/24]
+        advertise_exit_node: true

@@ -96,9 +96,6 @@ func ValidateNode(n Node) error {
 	if n.AuthKeyFile != "" && (!filepath.IsAbs(n.AuthKeyFile) || filepath.Clean(n.AuthKeyFile) != n.AuthKeyFile) {
 		return errors.New("Tailscale auth_key_file must be an absolute private file")
 	}
-	if u.Scheme == "https" && n.ControlCAFile == "" {
-		return errors.New("Tailscale HTTPS control server requires an explicit control_ca_file trust bundle")
-	}
 	if n.ControlCAFile != "" && !filepath.IsAbs(n.ControlCAFile) {
 		return errors.New("Tailscale control_ca_file must be absolute")
 	}

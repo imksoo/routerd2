@@ -255,7 +255,7 @@ check-ra-aftr: build
 .PHONY: check-uplink
 check-uplink: build dnsmasq-engine $(if $(UPLINK_CONFIG),chrony-engine) $(if $(filter 1,$(UPLINK_TAILNET)),tailscale-engine tailscale-peers)
 	@test -n '$(UPLINK_INTERFACE)' -a \( -n '$(UPLINK_CONFIG)' -o -n '$(UPLINK_AFTR)' \) || { printf '%s\n' 'UPLINK_INTERFACE and either UPLINK_CONFIG or UPLINK_AFTR must select the authorized local access network'; exit 1; }
-	@if test -n '$(UPLINK_CONFIG)'; then test -z '$(UPLINK_AFTR)' -a -z '$(UPLINK_DNS_UPSTREAM)' -a '$(UPLINK_TAILNET)' = 0 || { printf '%s\n' 'UPLINK_CONFIG supplies its own AFTR, DNS and features'; exit 1; }; $(RELEASE_BUILT_DIR)/routerd config validate '$(UPLINK_CONFIG)'; fi
+	@if test -n '$(UPLINK_CONFIG)'; then test -z '$(UPLINK_AFTR)' -a -z '$(UPLINK_DNS_UPSTREAM)' || { printf '%s\n' 'UPLINK_CONFIG supplies its own AFTR, DNS and features'; exit 1; }; $(RELEASE_BUILT_DIR)/routerd config validate '$(UPLINK_CONFIG)'; fi
 	$(PYTHON) scripts/uplink-smoke.py --uplink '$(UPLINK_INTERFACE)' $(if $(UPLINK_CONFIG),--config '$(UPLINK_CONFIG)',--aftr '$(UPLINK_AFTR)') --seconds '$(UPLINK_SECONDS)' $(if $(UPLINK_CONFIG),,--dns-upstream '$(UPLINK_DNS_UPSTREAM)') --wan-mac '$(UPLINK_WAN_MAC)' $(if $(UPLINK_STATE_DIR),--state-dir '$(UPLINK_STATE_DIR)') $(if $(filter 1,$(UPLINK_WAN_OUTAGE)),--wan-outage) $(if $(filter 1,$(UPLINK_FULL_RESTART)),--full-restart) $(if $(filter 1,$(UPLINK_TAILNET)),--tailnet)
 
 .PHONY: check-ra-route-refresh

@@ -11185,8 +11185,8 @@
     "physical_target_profile": "homert02/03 are identified PVE guests with4vCPU/4GiB, three VirtIO NICs and VirtIO/SCSI disks. Matching isolated PVE product boot/recovery was exercised; actual WAN/LAN attachment, clean installation from a preconverted native configuration, measured load and any additional hardware/architecture qualification remain open.",
     "validation_reporting": "Use docs/test-plan.md for the concise current gate state. Detailed historical checkpoint ledgers are not acceptance authority; keep only current result, limits and repeatable procedure. Never claim unrun gates or partial homert profiles complete.",
     "current_acceptance": {
-      "as_of_utc": "2026-11-03T01:27:33Z",
-      "product_code_checkpoint": "646ee1c19db9",
+      "as_of_utc": "2026-11-03T01:39:09Z",
+      "product_code_checkpoint": "5b4686577c4a plus the OS trust-store change in this commit",
       "homert_source": "User-provided read-only working copies at chatty.lain.local:~/homert02; the current homert02 and homert03 files each contain 110 resources with matching kind counts. Do not publish configuration values or secrets.",
       "completed_gates": [
         "The product code checkpoint passed make check including Go/Python checks, race detector and vet.",
@@ -11200,7 +11200,7 @@
         "observed_so_far": "On main-derived build 7c1cb3619acb with the generated test profile, the real HGW returned PD Advertise/Reply from UDP source port 49153 to client port 546. One natural T1 Renew/Reply was captured; initial Solicit and Renew had the same DUID, configured IAID 1 and delegated prefix, and the lease deadline advanced. DAD was enabled on WAN/LAN; all observed global addresses were non-tentative with no DAD failures. PD worker SIGKILL, graceful worker restart and full daemon restart restored both clients in 1.32s, 3.61s and 3.99s. Zero-lifetime RA withdrew the kernel prefix without releasing the upstream grant; both independent clients naturally renewed DHCPv4 and completed 676 rounds of IPv4/IPv6 HTTPS and learned-DNS UDP/TCP.",
         "limit": "not direct ONU, target physical NIC, full homert profile or two-node HA qualification"
       },
-      "current_changes": "The 22-resource native profile integrates BGP with the accepted DHCP/PD/RA/DNS/management/NTP/Internet path. Independent FRR/Zebra and product kernels installed each other's routes; both LAN clients completed TCP/UDP without NAT before and after daemon restart. See docs/test-plan.md for scope and limits. Go code is unchanged; previous race/vet results apply, and Python tools, build and native profile validation passed. Continue native Tailscale and remaining homert paths.",
+      "current_changes": "The 25-resource native profile passed a combined real-HGW/FRR/Headscale/Tailscale/Linux-client gate. Tailscale uses the OS standard CA bundle when no private bundle is supplied. Subnet/exit traffic and node identity recovered after daemon restart alongside BGP, DHCP/PD/RA/DNS, management and NTP. make check with race/vet, static build and validation passed. Continue remaining full homert single-router paths before HA; no PVE/QEMU or additional PBR investigations.",
       "open_work_packages": 34,
       "unqualified_profiles": [
         "homert-single full input",
@@ -11210,17 +11210,17 @@
         "Kubernetes",
         "SAM/federation full path"
       ],
-      "tested_source_head": "646ee1c19db9 plus the native BGP profile and peer runner in this commit",
+      "tested_source_head": "5b4686577c4a plus native Tailscale profile/runner and OS trust-store change",
       "native_examples": {
-        "examples/single-router-dslite-dhcp-dns.yaml": 22,
+        "examples/single-router-dslite-dhcp-dns.yaml": 25,
         "examples/homert02-native.yaml": 14,
         "examples/homert03-native.yaml": 14,
         "full_homert_profile": "not present; the examples do not represent the complete current 110-resource intent"
       },
       "latest_native_profile_gate": {
-        "status": "22-resource real-HGW BGP integrated profile passed (exit 0)",
-        "observed": "22-resource native profile、main由来build 646ee1c19db9で実HGW統合gateが終了0。独立FRR 8.4.4/ZebraとのBGPで、peerの203.0.113.0/24とLAN198.18.0.0/24を相互広告し、両kernelのpeer next hopとFRRの受信RIBを確認した。両LAN clientが取得したsource IPv4のままTCP/UDPを往復し、既存captureでもBGP交換とNATなしの転送を確認した。全daemon restart後に同じ経路・両client通信が復旧。管理DNS/SSH/Web履歴・NTP（WAN学習源stratum 3）と両IP Internet通信も維持した。PD worker SIGKILL/通常再起動後の端末復旧2.81/4.97秒、full restartから全確認完了17.91秒（NTP client測定込み）。2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。自然T1・連続TCP・二BGP peers全体・長時間GR・HA・全homert・ONU直結/対象NICは今回未受入。stage/capture/FRR runtime/namespaceは撤去済み。",
-        "limit": "One IPv4 BGP peer only; no two-peer full homert, long GR, HA, natural T1, continuous TCP or target hardware qualification."
+        "status": "25-resource real-HGW BGP/Tailscale integrated profile passed (exit 0)",
+        "observed": "25-resource native profile、基準main 5b46865 + OS trust-store修正、build ID 5b4686577c4aで実HGW/独立FRR・Headscale・Tailscale・Linux clientの統合gateが終了0。CA指定を省略してHTTPS登録でき、LAN→tailnet peerのIPv4/IPv6 TCP/UDP、peer→広告LANのIPv4 TCP/UDP、product exit node経由のIPv4/IPv6 HTTPS・UDP DNSが通った。全daemon再起動後もnode identityを保持して同じ通信が復旧した。BGPの相互広告・両kernelの経路・LAN 2端末のNATなしTCP/UDP、DNS/cache/history・SSH/Web・WAN学習NTP源stratum 3と両IP Internetも同時に通過。PD worker SIGKILL/通常再起動後1.89/5.09秒で端末通信が戻り、full restartから全確認完了17.80秒（NTP測定を含む）。2通信round、zero-lifetime RA/kernel withdrawal、upstream Releaseなしを確認。host CA bundleのSHA-256は試験前後で一致。stage/key/CA mount/control DB/capture/namespaceは撤去済み。",
+        "limit": "No full homert/two-peer BGP/long GR/HA/continuous TCP/native natural T1/direct ONU/target NIC/public Tailscale control qualification."
       }
     }
   },
@@ -11228,7 +11228,7 @@
     {
       "stage": 1,
       "profile": "homert-single-implementation",
-      "next": "DNS/cache/history, management, NTP and one BGP/FRR single-router path are integrated. Next connect native Tailscale using the old routerd operational behavior, then the remaining homert DNS/DS-Lite/backup/two-peer paths before full single-node recovery and HA. Follow docs/implementation-plan.md and read docs/test-plan.md before actual communication.",
+      "next": "DNS/cache/history, management, NTP, BGP/FRR and Tailscale subnet/exit paths are integrated in the 25-resource native profile. Complete remaining homert DNS/learnedDNS, DS-Lite/backup, two-peer BGP and other single-router intent before full single-node natural renewal/continuous traffic and HA. Follow docs/implementation-plan.md and read docs/test-plan.md before actual communication.",
       "acceptance": "Cold-start the complete single-router profile with an independent WAN peer and Linux client. Verify WAN/LAN DHCPv4 scopes and reservations, DHCPv6-PD/Information identity and natural renew, RA/DAD/SLAAC, local/conditional/DoH DNS, all DS-Lite paths and IPv6, Health/PBR, NAT/MTU/MSS, BGP/NTP/Tailscale/management where configured, and worker/daemon restart and recovery from actual packets, client results, kernel routes and firewall state. Keep ONU/physical-NIC qualification separate."
     },
     {

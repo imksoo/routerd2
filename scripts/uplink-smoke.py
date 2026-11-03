@@ -402,21 +402,22 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             namespaces.append(remote)
             run(["ip", "-n", remote, "link", "set", "lo", "up"])
             run(["ip", "link", "add", "peer0", "netns", router, "type", "veth", "peer", "name", "underlay0", "netns", remote])
-            run(["ip", "-n", remote, "addr", "add", "192.0.2.1/24", "dev", "underlay0"])
+            control_address = "198.51.100.1" if config_path is not None else "192.0.2.1"
+            run(["ip", "-n", remote, "addr", "add", control_address + "/24", "dev", "underlay0"])
             run(["ip", "-n", remote, "link", "set", "underlay0", "up"])
             peerbin = stage / "tailnet"
             cert, key = peerbin / "cert.pem", peerbin / "key.pem"
-            run(["openssl", "req", "-config", "/dev/null", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-keyout", str(key), "-out", str(cert), "-subj", "/CN=routerd-uplink", "-addext", "subjectAltName=IP:192.0.2.1"])
+            run(["openssl", "req", "-config", "/dev/null", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-keyout", str(key), "-out", str(cert), "-subj", "/CN=routerd-uplink", "-addext", "subjectAltName=IP:" + control_address])
             hsconfig = peerbin / "headscale.json"
             hsconfig.write_text(json.dumps({
-                "server_url": "https://192.0.2.1:8443", "listen_addr": "192.0.2.1:8443",
+                "server_url": "https://" + control_address + ":8443", "listen_addr": control_address + ":8443",
                 "noise": {"private_key_path": str(peerbin / "noise.key")},
                 "prefixes": {"v4": "100.64.0.0/10", "v6": "fd7a:115c:a1e0::/48"},
                 "database": {"type": "sqlite", "sqlite": {"path": str(peerbin / "db.sqlite")}},
                 "derp": {"urls": [], "paths": [], "auto_update_enabled": False, "server": {
                     "enabled": True, "region_id": 999, "region_code": "fixture", "region_name": "isolated DERP",
                     "stun_listen_addr": "0.0.0.0:3478", "private_key_path": str(peerbin / "derp.key"),
-                    "automatically_add_embedded_derp_region": True, "ipv4": "192.0.2.1"}},
+                    "automatically_add_embedded_derp_region": True, "ipv4": control_address}},
                 "dns": {"override_local_dns": False, "magic_dns": True, "base_domain": "test.invalid"},
                 "unix_socket": str(peerbin / "headscale.sock"), "tls_cert_path": str(cert), "tls_key_path": str(key),
                 "disable_check_updates": True, "log": {"level": "warn"},
@@ -426,40 +427,47 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             wait(lambda: (peerbin / "headscale.sock").exists())
             user = json.loads(run(inside(remote, head + ["users", "create", "fixture", "-o", "json"])))
             auth = json.loads(run(inside(remote, head + ["preauthkeys", "create", "--user", str(user["id"]), "--reusable", "-o", "json"])))
-            authfile = peerbin / "auth.key"
+            authfile = Path("/run/routerd-uplink/tailscale.key") if config_path is not None else peerbin / "auth.key"
+            authfile.parent.mkdir(mode=0o700, exist_ok=True)
+            if config_path is not None:
+                system_roots = Path("/etc/ssl/certs/ca-certificates.crt")
+                trusted = peerbin / "system-ca.pem"
+                trusted.write_bytes(system_roots.read_bytes() + cert.read_bytes())
+                run(["mount", "--bind", str(trusted), str(system_roots)])
             authfile.write_text(auth["key"])
             authfile.chmod(0o600)
             boot["workers"]["tailscale"] = str(stage / "routerd-modules")
             boot["engines"]["tailscale"] = str(peerbin / "tailscale-engine.tar")
-            resources += [
-                {"id": "tailnet-underlay", "interface": {"name": "peer0"}},
-                {"id": "tailnet-underlay-ip", "address": {"interface": "peer0", "cidr": "192.0.2.2/24"}},
-                {"id": "tailnet", "service": {"name": "tailnet", "tailscale": {
-                    "interface": "tailscale0", "server_url": "https://192.0.2.1:8443", "hostname": "hgw-router",
-                    "auth_key_file": str(authfile), "control_ca_file": str(cert),
-                    "advertise_routes": ["198.18.0.0/24"], "advertise_exit_node": True,
-                }}},
-            ]
-            firewall = next(r["firewall"] for r in resources if "firewall" in r)
-            firewall["forward"] += [{"from": "tailscale0", "to": name} for name in ("lan0", "dslite0", "wan0")]
-            firewall["forward"].append({"from": "lan0", "to": "tailscale0"})
-            nat_rules += [
-                {"type": "masquerade", "match": {"family": 4, "source": "100.64.0.0/10", "out_interface": "dslite0"}},
-                {"type": "masquerade", "match": {"family": 6, "source": "fd7a:115c:a1e0::/48", "out_interface": "wan0"}},
-            ]
-            # No delegated IPv6 subnet is advertised in this profile. Make
-            # outbound LAN IPv6 use the router's tailnet identity explicitly;
-            # upstream's local-destination filter otherwise drops its replies.
-            nat_rules.append({"type": "masquerade", "match": {
-                "family": 6, "in_interface": "lan0", "out_interface": "tailscale0"}})
+            if config_path is None:
+                resources += [
+                    {"id": "tailnet-underlay", "interface": {"name": "peer0"}},
+                    {"id": "tailnet-underlay-ip", "address": {"interface": "peer0", "cidr": "192.0.2.2/24"}},
+                    {"id": "tailnet", "service": {"name": "tailnet", "tailscale": {
+                        "interface": "tailscale0", "server_url": "https://192.0.2.1:8443", "hostname": "hgw-router",
+                        "auth_key_file": str(authfile), "control_ca_file": str(cert),
+                        "advertise_routes": ["198.18.0.0/24"], "advertise_exit_node": True,
+                    }}},
+                ]
+                firewall = next(r["firewall"] for r in resources if "firewall" in r)
+                firewall["forward"] += [{"from": "tailscale0", "to": name} for name in ("lan0", "dslite0", "wan0")]
+                firewall["forward"].append({"from": "lan0", "to": "tailscale0"})
+                nat_rules += [
+                    {"type": "masquerade", "match": {"family": 4, "source": "100.64.0.0/10", "out_interface": "dslite0"}},
+                    {"type": "masquerade", "match": {"family": 6, "source": "fd7a:115c:a1e0::/48", "out_interface": "wan0"}},
+                ]
+                # No delegated IPv6 subnet is advertised in this profile. Make
+                # outbound LAN IPv6 use the router's tailnet identity explicitly;
+                # upstream's local-destination filter otherwise drops its replies.
+                nat_rules.append({"type": "masquerade", "match": {
+                    "family": 6, "in_interface": "lan0", "out_interface": "tailscale0"}})
+                (stage / "config.json").write_text(json.dumps({"schema_version": 2, "resources": resources}))
             (stage / "boot.json").write_text(json.dumps(boot))
-            (stage / "config.json").write_text(json.dumps({"schema_version": 2, "resources": resources}))
             peer_socket = peerbin / "peer.sock"
-            start(remote, ["tcpdump", "--immediate-mode", "-Z", "root", "-U", "-n", "-i", "any", "-w", str(stage / "peer.pcap"), "ip6 or udp port 41641"], "tailnet-capture")
+            start(remote, ["tcpdump", "--immediate-mode", "-Z", "root", "-U", "-n", "-i", "any", "-C", "4", "-W", "2", "-w", str(stage / "peer.pcap"), "ip6 or udp port 41641"], "tailnet-capture")
             start(remote, ["env", "SSL_CERT_FILE=" + str(cert), "TS_LOGS_DIR=" + str(peerbin), str(peerbin / "tailscaled"), "--state=" + str(peerbin / "peer.state"), "--statedir=" + str(peerbin), "--socket=" + str(peer_socket), "--tun=tailscale0", "--port=41641", "--no-logs-no-support"], "tailnet-peer")
             wait(peer_socket.exists)
             peer_cli = [str(peerbin / "tailscale"), "--socket=" + str(peer_socket)]
-            run(inside(remote, ["env", "SSL_CERT_FILE=" + str(cert)] + peer_cli + ["up", "--timeout=15s", "--login-server=https://192.0.2.1:8443", "--hostname=independent-peer", "--auth-key=file:" + str(authfile), "--accept-dns=false", "--accept-routes=true", "--netfilter-mode=off"]), timeout=20)
+            run(inside(remote, ["env", "SSL_CERT_FILE=" + str(cert)] + peer_cli + ["up", "--timeout=15s", "--login-server=https://" + control_address + ":8443", "--hostname=independent-peer", "--auth-key=file:" + str(authfile), "--accept-dns=false", "--accept-routes=true", "--netfilter-mode=off"]), timeout=20)
             echo = runpy.run_path(str(peerbin / "peer-fixture.py"))
         capture = start(
             router,
@@ -731,7 +739,9 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                     source = next(a for a in product_ips if ipaddress.ip_address(a).version == 6) if family == 6 else address
                     flows = [(automatic, peer_ips[family], source)]
                     if family == 4:
-                        flows.append((remote, address, peer_ips[family]))
+                        # Upstream defaults to SNAT for traffic entering an advertised
+                        # subnet; old routerd's tailscale up kept that default.
+                        flows.append((remote, address, "198.18.0.1"))
                     for ns, destination, source in flows:
                         try:
                             run(inside(ns, ["python3", "-c", echo["ECHO_CLIENT"], destination, source]))
@@ -742,7 +752,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                             status = json.loads(run(inside(remote, peer_cli + ["status", "--json"])))
                             print("Failed tailnet peer state", {k: status.get(k) for k in ("BackendState", "Health")},
                                   [{k: p.get(k) for k in ("HostName", "ExitNode", "ExitNodeOption", "AllowedIPs", "PrimaryRoutes", "RxBytes", "TxBytes")} for p in status.get("Peer", {}).values()], flush=True)
-                            for path in (*stage.glob("wan.pcap*"), stage / "peer.pcap"):
+                            for path in (*stage.glob("wan.pcap*"), *stage.glob("peer.pcap*")):
                                 print("Failed tailnet packets", run(["tcpdump", "-nn", "-r", str(path), ("ip6" if family == 6 else "ip") + " and (tcp port 18080 or udp port 18081)"]).splitlines()[-40:], flush=True)
                             print("Failed tailnet peer log", "\n".join((stage / "tailnet-peer.log").read_text().splitlines()[-20:]), flush=True)
                             raise
@@ -755,7 +765,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                         assert "status: NOERROR" in response, (family, response)
                     except (RuntimeError, AssertionError):
                         packet_filter = ("ip6" if family == "-6" else "ip") + " and host " + server + " and udp port 53"
-                        for path in (*stage.glob("wan.pcap*"), stage / "peer.pcap"):
+                        for path in (*stage.glob("wan.pcap*"), *stage.glob("peer.pcap*")):
                             capture = subprocess.run(["tcpdump", "-nn", "-r", str(path), packet_filter], capture_output=True, text=True, timeout=10)
                             print("Failed tailnet exit DNS packets", str(path.name), capture.returncode, capture.stdout.splitlines()[-30:], capture.stderr.strip(), flush=True)
                         for namespace in (remote, router):
@@ -1232,8 +1242,6 @@ def main():
         parser.error("--aftr belongs to the generated fixture; the native profile owns AFTR intent")
     if args.config and args.dns_upstream:
         parser.error("--dns-upstream belongs to the generated fixture; the native profile owns DNS intent")
-    if args.config and args.tailnet:
-        parser.error("--tailnet currently uses the generated fixture")
     if not args.config and not args.aftr:
         parser.error("--aftr is required by the generated fixture")
     if args.inside:
