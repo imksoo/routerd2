@@ -11194,11 +11194,14 @@
         "The actual supervisor/control/network/Health two-WAN PBR failover/recovery gate with independent peers, TCP/UDP and packet capture recorded in docs/test-plan.md passed."
       ],
       "active_actual_hgw_run": {
-        "build_identity": "7c1cb3619acb",
-        "path": "ens18 virtio uplink through the real home gateway, isolated macvlan router namespace and independent Linux LAN clients",
-        "status": "completed; command exited 0 and owned namespace, capture, lease state and stage were removed",
-        "observed_so_far": "On main-derived build 7c1cb3619acb with the generated test profile, the real HGW returned PD Advertise/Reply from UDP source port 49153 to client port 546. One natural T1 Renew/Reply was captured; initial Solicit and Renew had the same DUID, configured IAID 1 and delegated prefix, and the lease deadline advanced. DAD was enabled on WAN/LAN; all observed global addresses were non-tentative with no DAD failures. PD worker SIGKILL, graceful worker restart and full daemon restart restored both clients in 1.32s, 3.61s and 3.99s. Zero-lifetime RA withdrew the kernel prefix without releasing the upstream grant; both independent clients naturally renewed DHCPv4 and completed 676 rounds of IPv4/IPv6 HTTPS and learned-DNS UDP/TCP.",
-        "limit": "not direct ONU, target physical NIC, full homert profile or two-node HA qualification"
+        "as_of_utc": "2026-11-03T03:25:30Z",
+        "build_identity": "b03debf15982",
+        "profile_and_runner_commit": "5861b7ef38a60f79372db94f8ee79a58e5ca32e6",
+        "command": "python3 scripts/uplink-smoke.py --uplink ens18 --config examples/single-router-dslite-dhcp-dns.yaml --seconds 7800 --wan-mac 02:72:6f:75:74:03 --full-restart --tailnet",
+        "status": "running; owner process and live PD bound/IAID1 verified; natural T1 and final exit status pending",
+        "local_progress_log": "/tmp/routerd2-natural-uplink.log",
+        "ownership": "Protect the active private stage, binaries, keys, state, namespace and bounded captures until this run finishes. Revalidate the actual process before treating it as stopped; do not duplicate the same MAC/uplink trial. Remove raw data after acceptance is summarized.",
+        "limit": "not full homert, HA, continuous existing sockets, direct ONU, target physical NIC or hardware qualification"
       },
       "current_changes": "38-resource native profile、基準main b03debf + LAN配布設定、build ID b03debf15982で実HGW統合gateが終了0。通常・予約・OUI・特定MACの独立端末5台で、通常gateway/DNS .1と特別gateway/DNS .253を実ACKから設定し、公開HTTPS/UDP DNSが往復した。通常/予約端末はNTP2アドレスとdomain-searchも取得。実Releaseで3日分の保持期限が保存され、端末IP撤去後も別MACの同アドレス要求には別leaseを配り、元MACには保持アドレスを再配布した。全daemon restart後も特別端末3台のRenew/ACK・通信とfingerprint APIが復旧した。LAN RAのhigh優先度/MTU1500/valid最大7200秒/preferred最大3600秒を実packetで確認。上流選択、4 DS-Lite、DNS/DoH、nDPI/計数/SNI、fresh syslog/OTLP、BGP/NTP/Tailscaleも通過。PD worker SIGKILL/通常再起動後の復旧2.96/5.85秒、全daemon restartから全確認102.76秒（60秒抑制と30秒sampling等を含む）。2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。自然T1・既存socket継続・3日/7日経過削除・全homert/HA/実機資格は今回の範囲外。",
       "open_work_packages": 34,

@@ -46,6 +46,8 @@ WAN/tailnet captureは各最大8MB、PD captureはudp546と実行時間で限定
 
 ## 自然更新と残る全体受入
 
+進行中（2026-11-03T03:25:30Z）: 設定/runner `5861b7e`、通常build ID `b03debf15982`（製品Go不変）で`--seconds 7800 --full-restart --tailnet`の自然更新観測を起動した。live ownerと現在のPD bound/IAID1を実プロセス・IPCで確認済み。`/tmp/routerd2-natural-uplink.log`が現在の進捗。終了0/自然Renew/Replyはまだ未確認。重複起動やlive stageの削除をせず、実プロセスを再確認して観測を継続する。待機中は残る単体/HA作業を進める。
+
 自然PD T1は同じprofileで`UPLINK_SECONDS=7800`など実際の`renew_at`へ達する時間を選び、packetのRenew/Reply、DUID/IAID/prefixと更新期限、端末の通信・lease更新を確認する。短時間gateで代用しない。既存TCP socket/UDP mappingの継続は新規接続と別に観測する。自然更新待ちには独立する実装を進める。
 
 別checkpointの限定根拠: 生成profile/build`7c1cb3619acb`はHGW source49153からの自然PD T1、同一DUID/IAID/prefix、期限更新、通常DAD、両端末の自然DHCPv4更新と676通信roundを確認済み。15-resource native/build`8ea44d776dc3`はWAN遮断解除後0.79秒の復旧を確認済み。実supervisor/control/network/Healthと独立二WANのTCP/UDP・packetによる障害復帰/worker再起動/古い通知/期限切れ/confirmed rollback、および限定Alpine/PID1 PVEの独立PPPoE/ISC DHCPv6/通信/署名更新rollbackも別gateで確認済み。現在の全profile・HA・実機資格には流用せず、今回は追加実行しない。raw stageは撤去済み。

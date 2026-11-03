@@ -14,6 +14,8 @@
 
 ## 次の作業
 
+進行中（2026-11-03T03:25:30Z）: 設定/runner `5861b7e`、通常build ID `b03debf15982`（製品Go不変）で`--seconds 7800 --full-restart --tailnet`の自然更新観測を起動した。live ownerと現在のPD bound/IAID1を実プロセス・IPCで確認済み。`/tmp/routerd2-natural-uplink.log`が現在の進捗。終了0/自然Renew/Replyはまだ未確認。重複起動やlive stageの削除をせず、実プロセスを再確認して観測を継続する。待機中は残る単体/HA作業を進める。
+
 1. LANの通常/予約/OUI/特定MAC配布、特別gateway/DNS、3日sticky hold、NTP/domain-search、fingerprint、RA high/MTU/寿命を今回受入済み。次は同一profileの自然PD T1と通信継続を確認し、その待機中に残る単体intent/HA実装を進める。全private DNS peer、BGP運用、保持dataset等の残差は未受入のまま。
 2. 実通信の直前に[試験計画](test-plan.md)全体を読む。現行のMakefileコマンドは`UPLINK_TAILNET=1`も必要。全設定のcold start、自然更新、継続通信、worker/daemon復旧を確認し、その後に二台HA・残るwork packageを進める。
 3. 今回はPVE/QEMUと追加のPBR調査を実行しない。対象ONU/NIC、全homert、HA、public Tailscale control、cloud等は未受入。独立作業を一つの観測待ちで止めない。
