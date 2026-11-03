@@ -12,6 +12,7 @@ retains the test router's identity and WAN leases. This is not NIC qualification
 """
 
 import argparse
+import copy
 import ipaddress
 import json
 import os
@@ -1240,6 +1241,71 @@ print(*s.getsockname())
                 )
             )
             assert selected[0]["dev"] == "dslite0", "IPv4 traffic bypassed the AFTR"
+
+        if config_path is not None:
+            # Disable the candidate LAN cache as well as changing the core zone:
+            # both applications and rollback must be visible to the same client.
+            for recovery in ("timeout", "restart"):
+                wan_workers = {m["name"]: m["pid"] for m in query("supervisor.sock", "/v1/status")["modules"]
+                    if m["name"] in ("service.wan4", "service.wan-ra", "service.wan-pd")}
+                original = query("control.sock", "/v1/config")
+                candidate = copy.deepcopy(original["config"])
+                core = next(r["service"]["dns"] for r in candidate["resources"] if r["id"] == "service/dns-core")
+                record = next(r for r in core["zones"][0]["spec"]["records"] if r["hostname"] == "router")
+                original_answer = str(ipaddress.IPv4Address(record["ipv4"]))
+                record["ipv4"] = "192.0.2.99"
+                lan = next(r["service"]["dns"] for r in candidate["resources"] if r["id"] == "service/dns")
+                lan["spec"]["cache"]["enabled"] = False
+                request_id = "uplink-confirmed-" + recovery
+                request = stage / "confirmed-request.json"
+                request.write_text(json.dumps({"expected_revision": original["revision"],
+                    "request_id": request_id, "config": candidate, "confirm_timeout_seconds": 30}))
+                applied = json.loads(run(["curl", "--fail", "--max-time", "30", "-sS",
+                    "--unix-socket", str(stage / "run/control.sock"), "-H", "Content-Type: application/json",
+                    "--data-binary", "@" + str(request), "http://localhost/v1/config/commit"], timeout=35))
+                assert applied["confirmation"]["request_id"] == request_id, applied
+
+                def client_answers(expected):
+                    for server in (lease[3], str(router_dns)):
+                        for transport in ("+notcp", "+tcp"):
+                            answer = subprocess.run(inside(client, ["dig", "@" + server,
+                                "router.home.arpa", "A", "+short", "+time=2", "+tries=1", transport]),
+                                capture_output=True, text=True, timeout=4)
+                            if answer.returncode or answer.stdout.strip() != expected:
+                                return False
+                    return True
+
+                wait(lambda: client_answers("192.0.2.99"), 20)
+                current_wan = {m["name"]: m["pid"] for m in query("supervisor.sock", "/v1/status")["modules"] if m["name"] in wan_workers}
+                assert current_wan == wan_workers, ("DNS edit restarted unrelated WAN workers", wan_workers, current_wan)
+                check_traffic()
+                started = time.monotonic()
+                if recovery == "restart":
+                    control = next(m for m in query("supervisor.sock", "/v1/status")["modules"] if m["name"] == "control")
+                    os.kill(control["pid"], signal.SIGKILL)
+
+                def rolled_back():
+                    response = subprocess.run(["curl", "--fail", "--max-time", "2", "-sS",
+                        "--unix-socket", str(stage / "run/control.sock"), "http://localhost/v1/config"],
+                        capture_output=True, text=True, timeout=4)
+                    if response.returncode:
+                        return False
+                    state = json.loads(response.stdout)
+                    return state["revision"] > applied["revision"] and not state.get("confirmation") and state["healthy"]
+
+                wait(rolled_back, 45)
+                restored = query("control.sock", "/v1/config")
+                assert restored["config"] == original["config"], "rollback did not restore the complete original intent"
+                changes = query("control.sock", "/v1/events?producer_epoch=" + restored["producer_epoch"] + "&after_sequence=0")
+                assert any(e["type"] == "rolled_back_" + recovery and e.get("request_id") == request_id for e in changes["events"]), changes
+                wait(lambda: client_answers(original_answer), 20)
+                if recovery == "timeout":
+                    current_wan = {m["name"]: m["pid"] for m in query("supervisor.sock", "/v1/status")["modules"] if m["name"] in wan_workers}
+                    assert current_wan == wan_workers, ("DNS rollback restarted unrelated WAN workers", wan_workers, current_wan)
+                check_traffic()
+                print("PASS confirmed configuration rollback", recovery,
+                    "restored full intent and client IPv4/IPv6 UDP/TCP DNS/Internet; seconds",
+                    round(time.monotonic() - started, 2), flush=True)
 
         if wan_outage:
             check_traffic()

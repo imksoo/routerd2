@@ -120,6 +120,42 @@ func reconcileConditions(t *testing.T, r *Runtime) {
 		}
 	}
 }
+
+func TestUnrelatedConfigurationEditKeepsLiveDependentWorker(t *testing.T) {
+	ctx := t.Context()
+	r, n, manager := conditionalFixture(t)
+	if err := r.Observe(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
+		t.Fatal(err)
+	}
+	reconcileConditions(t, r)
+	manager.before = func(modules []supervisor.DynamicModule) {
+		for _, module := range modules {
+			if module.Name == "service.dependent" {
+				return
+			}
+		}
+		t.Fatal("unrelated MTU edit retired the live WAN consumer", modules)
+	}
+	next := conditionSource()
+	next.Resources[3].Interface.MTU = 1450
+	if err := r.ApplyConfig(ctx, 2, next); err != nil {
+		t.Fatal(err)
+	}
+	if !conditionalRoute(n) {
+		t.Fatal("unrelated edit withdrew the live route")
+	}
+	manager.before = nil
+	changed := conditionSource()
+	changed.Resources[3].Interface.MTU = 1450
+	changed.Resources[0].Service.DHCP4.Interface = "wan1"
+	if err := r.ApplyConfig(ctx, 3, changed); err != nil {
+		t.Fatal(err)
+	}
+	if conditionalRoute(n) {
+		t.Fatal("changed WAN reused the previous producer's authority")
+	}
+}
+
 func TestConditionalRuntimeStartWithdrawRecover(t *testing.T) {
 	ctx := context.Background()
 	r, n, m := conditionalFixture(t)

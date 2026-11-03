@@ -471,13 +471,12 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 func (r *Runtime) retainedLocked(expected protocolPlan) map[string]serviceconfig.Update {
 	retained := map[string]serviceconfig.Update{}
 	effective := r.observationsLocked()
-	for name, desired := range expected.instances {
+	for name := range expected.instances {
 		old, present := r.bindings[name]
-		ha, shared := expected.leaseHA[name]
 		// HA workers can keep serving across an unrelated configuration edit.
 		// Keep their original observations when either prepared identity matches;
 		// the projection still selects the worker from the current election.
-		if present && (old.digest == desired.digest || shared && old.digest == ha.serving.digest) {
+		if present && expected.retains(name, old) {
 			if value, ok := effective[name]; ok {
 				retained[name] = value
 			}

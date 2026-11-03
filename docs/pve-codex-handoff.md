@@ -1,6 +1,10 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03 08:31 UTC。全体ゴールは継続中。
+更新: 2026-11-03 09:17 UTC。全体ゴールは継続中。
+
+基準main `1fa7cf0` + 候補設定の観測保持修正、通常build `1fa7cf099ae0`で単体39-resourceの実HGW手順が終了0。30秒のconfirmed commitでcoreのAレコードとLAN cache設定を変更し、両IP/UDP/TCPの候補回答と公開通信、無確認期限切れとcontrol SIGKILL後の元intent全体・回答・公開通信への復帰を確認した。候補疎通確認後から元の疎通を再確認するまで33.42秒/9.30秒で、転送断時間ではない。DNS編集と期限切れrollbackではWAN DHCPv4/RA/PDのPIDを維持した。PD SIGKILL3.21秒/通常再起動6.72秒、全daemon後の全項目再確認103.04秒も通過した。
+
+候補準備で全ての観測を空にしていた処理を除き、同じworker設定のproducerと、同じ設定・依存関係の適用済みresourceだけを元の有限期限のまま評価する。準備段階は現在の条件履歴・イベント/derived ownerを進めない。小さな回帰確認では旧関数が無関係なMTU編集で稼働中consumerを停止することを再現し、修正後は維持、WAN自体の変更では旧観測を流用しないことを確認した。世代番号は他の退役workerからも引き継ぐため、番号だけで個々の再起動回数を推定しない。 `make check`（Race Detector/vet/補助36件）、最終のruntimeplan Race、通常Makefile buildと3実行物のstatic linkが通過。これは設定transactionと実通信の受入であり、署名runtimeの更新/boot、HA中の設定変更、全homert private peer、全34 packageの完成には数えない。
 
 今回の補助確認: `make test-tools race vet`、3設定例の検証、通常`make build DOCKER='sudo -n docker'`が終了0。後続build IDは`9fe72fede476`で、3実行物のstatic linkを確認した。実通信で実行したbuild IDは上記`df490351c3ff`であり、製品Go sourceは同一。
 
@@ -8,7 +12,7 @@
 
 2026-11-03、製品code `df49035`・通常build `df490351c3ff`で `make check-doh-outage` が終了0。実Cloudflare/GoogleへTLS通信し、片側ずつTCP443を遮断して各16packetのdropとDown、解除後の両Healthyを確認した。cache無効の独立dig端末は全段階でUDP/TCPのNOERROR/A回答を取得。Cloudflare停止直後の初回回答1.043秒、以後の確認回答0.025〜0.063秒。新DNS node/client/process/stageは撤去済み。元の38-resource自然PD試験への障害注入は行っていない。公開DoH IPv4 transportの独立受入であり、DS-Lite/HA全体の障害受入には転用しない。 再実行条件は[試験計画](test-plan.md#公開dohの片側停止復旧)に記載。Go製品codeは変更していない。今回の補助チェック `make test-tools` は36件通過。
 
-実行継続中（2026-11-03 07:52 UTC確認）: コミット済み`df49035`の通常build `df490351c3ff`、単体38-resource profileで`--seconds 0 --full-restart --tailnet`を07:42 UTCに起動した。初期機能一式、31通信roundまで通過し、28 worker全てgeneration1/Ready=trueを確認。実PD T1は09:42:40 UTCの予定で、まだ更新・最終再起動までの完了結果ではない。ownerの最小stage/log/captureは実行終了まで保持し、終了後に結果を確認して撤去する。待機中も独立する残作業を進める。
+実行継続中（2026-11-03 09:12 UTC確認）: source `df49035`、通常build `df490351c3ff`、別の単体38-resource profileは445通信roundまでReady=true/全28 worker generation1。実PD T1は09:42:40 UTC予定。完了までowner/stageを保持し、結果を確認して終了済み資料を撤去する。
 
 同じ稼働中の実DHCP割当を読み、その送信元へbindしてMTU/MSSを確認した。IPv4合計1500byte・DF=1の実pingが公開peerと往復し、WANでAFTRからの同一IDのIPv6断片2個（offset0/752、payload752/748）を観測した。TCPは同じ実tuple/sequenceでLAN SYN MSS1460→DS-Lite送信1414、受信SYN/ACK1420→LAN1414となり、HTTPSが成功。ここで確認したのは選択されたDS-Lite経路の往復・受信側外側IPv6再構成と双方向MSS調整。B4側送信断片化、実IPv6 PTB/外側MTU縮小の全条件や性能は未受入。[RFC6333 section5.3](https://www.rfc-editor.org/rfc/rfc6333.html#section-5.3)に照らし、1500byte DFを一律のICMP拒否条件にしない。
 

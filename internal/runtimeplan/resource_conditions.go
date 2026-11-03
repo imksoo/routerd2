@@ -2,6 +2,7 @@ package runtimeplan
 
 import (
 	"encoding/json"
+	"reflect"
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
@@ -132,20 +133,20 @@ func (r *Runtime) conditionFactsLocked(cfg configuration) (result resourceprogra
 	scope := resourceprogram.FactScope{BootID: clock.BootID, ConfigDigest: cfg.digest, OperatorRevision: cfg.revision, ProjectionGeneration: r.projectionGeneration}
 	ticks := uint64(clock.BoottimeNanoseconds)
 	facts := resourceprogram.FactSnapshot{Scope: scope, NowNanos: ticks, WallTime: clock.WallTime}
-	if cfg.revision != r.config.revision || cfg.digest != r.config.digest {
-		return facts, nil
+	current := cfg.revision == r.config.revision && cfg.digest == r.config.digest
+	if current {
+		defer func() {
+			if resultErr == nil {
+				resultErr = r.advanceVRRPTracksLocked(result)
+			}
+			if resultErr == nil {
+				resultErr = r.observeEventRulesLocked(result)
+			}
+			if resultErr == nil {
+				resultErr = r.observeDerivedLocked(result)
+			}
+		}()
 	}
-	defer func() {
-		if resultErr == nil {
-			resultErr = r.advanceVRRPTracksLocked(result)
-		}
-		if resultErr == nil {
-			resultErr = r.observeEventRulesLocked(result)
-		}
-		if resultErr == nil {
-			resultErr = r.observeDerivedLocked(result)
-		}
-	}()
 	if r.guard.bootID != clock.BootID || ticks >= r.guard.untilNanos {
 		return facts, nil
 	}
@@ -159,14 +160,32 @@ func (r *Runtime) conditionFactsLocked(cfg configuration) (result resourceprogra
 			until = min(until, r.applied.untilNanos)
 		}
 		fact := resourceprogram.Fact{Value: resourceprogram.True, ObservedNanos: r.guard.observedNanos, ExpiresNanos: until, WorkerGeneration: network.Generation, ProducerEpoch: r.supervisorInstance}
-		facts.Facts["network.applied"] = fact
+		if cfg.digest == r.config.digest {
+			facts.Facts["network.applied"] = fact
+		}
+		var unchanged map[string]bool
+		if !current {
+			unchanged = make(map[string]bool, len(cfg.resources))
+			for _, id := range cfg.plan.Order {
+				unchanged[id] = reflect.DeepEqual(cfg.resources[id], r.config.resources[id])
+				for _, dep := range cfg.plan.Dependencies[id] {
+					unchanged[id] = unchanged[id] && unchanged[dep]
+				}
+			}
+		}
 		for id, state := range r.resourceStates {
+			if !current && !unchanged[id] {
+				continue
+			}
 			fact.Value = state.Ready
 			facts.Facts["resource."+id+".applied"] = fact
 		}
 	}
 
 	for name, binding := range r.bindings {
+		if !current && !cfg.protocols.retains(name, binding) {
+			continue
+		}
 		module, ok := r.guard.modules[name]
 		if !ok || module.Generation == 0 || module.ConfigDigest != binding.digest {
 			continue
@@ -272,7 +291,7 @@ func (r *Runtime) conditionFactsLocked(cfg configuration) (result resourceprogra
 
 		if record.Role == "ra" {
 			grant := r.guardGrants[name]
-			if !module.Ready || grant.revision != cfg.revision || grant.generation != module.Generation || grant.epoch != record.ProducerEpoch || grant.sequence != record.Sequence || grant.ra == nil {
+			if !module.Ready || grant.revision != r.config.revision || grant.generation != module.Generation || grant.epoch != record.ProducerEpoch || grant.sequence != record.Sequence || grant.ra == nil {
 				continue
 			}
 			value := resourceprogram.False
@@ -325,7 +344,7 @@ func (r *Runtime) conditionFactsLocked(cfg configuration) (result resourceprogra
 			continue
 		}
 		grant, ok := r.guardGrants[name]
-		if !ok || !module.Ready || grant.revision != cfg.revision || grant.bootID != clock.BootID || grant.generation != module.Generation || grant.epoch != record.ProducerEpoch || grant.sequence != record.Sequence {
+		if !ok || !module.Ready || grant.revision != r.config.revision || grant.bootID != clock.BootID || grant.generation != module.Generation || grant.epoch != record.ProducerEpoch || grant.sequence != record.Sequence {
 			continue
 		}
 		value := resourceprogram.False
@@ -334,7 +353,13 @@ func (r *Runtime) conditionFactsLocked(cfg configuration) (result resourceprogra
 		}
 		facts.Facts[name+".active"] = resourceprogram.Fact{Value: value, ObservedNanos: grant.observedNanos, ExpiresNanos: grant.untilNanos, WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
 	}
-	return r.conditionTimeline.Observe(cfg.source, facts)
+	if current {
+		return r.conditionTimeline.Observe(cfg.source, facts)
+	}
+	// Preparing a candidate may use unchanged producers, but must not advance
+	// the committed source's observation history or event owners.
+	timeline := r.conditionTimeline
+	return timeline.Observe(cfg.source, facts)
 }
 
 func (r *Runtime) projectProgramLocked(cfg configuration, records map[string]serviceconfig.Update, now time.Time) (projection, error) {

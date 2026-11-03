@@ -41,6 +41,18 @@ type leaseHAPlan struct {
 	serving binding
 }
 
+func (p protocolPlan) retains(name string, previous binding) bool {
+	desired, exists := p.instances[name]
+	if !exists {
+		return false
+	}
+	if previous.digest == desired.digest {
+		return true
+	}
+	ha, shared := p.leaseHA[name]
+	return shared && previous.digest == ha.serving.digest
+}
+
 // The complete Native source has passed config.Compile, including worker
 // ownership and service limits.
 func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolPlan, error) {

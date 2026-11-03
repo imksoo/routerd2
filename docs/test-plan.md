@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 08:31 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 09:17 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 実行原則
 
@@ -12,9 +12,11 @@
 
 ## 現在の結果と限界
 
+基準main `1fa7cf0` + 候補設定の観測保持修正、通常build `1fa7cf099ae0`で単体39-resourceの実HGW手順が終了0。30秒のconfirmed commitでcoreのAレコードとLAN cache設定を変更し、両IP/UDP/TCPの候補回答と公開通信、無確認期限切れとcontrol SIGKILL後の元intent全体・回答・公開通信への復帰を確認した。候補疎通確認後から元の疎通を再確認するまで33.42秒/9.30秒で、転送断時間ではない。DNS編集と期限切れrollbackではWAN DHCPv4/RA/PDのPIDを維持した。PD SIGKILL3.21秒/通常再起動6.72秒、全daemon後の全項目再確認103.04秒も通過した。 `make check`（Race Detector/vet/補助36件）、最終のruntimeplan Race、通常Makefile buildと3実行物のstatic linkが通過。これは設定transactionと実通信の受入であり、署名runtimeの更新/boot、HA中の設定変更、全homert private peer、全34 packageの完成には数えない。
+
 基準main `9fe72fe` + 二段DNS設定、製品Go不変の通常build `df490351c3ff`で単体39-resource実HGW手順が終了0。LAN resolver（cache1000・queryLogなし）からcore resolver（cache10000・queryLogあり）へloopback UDP53で転送し、coreがzone/条件付き/学習DNS/DoHを所有する。実端末からの新しいqueryと同じIDのloopback往復・回答をcaptureで照合した。両IPのDNS/Internet、条件付き上流の停止/cache/SERVFAIL/復旧、coreのcache hit/履歴API/Web、DHCP各scope・sticky、BGP/NTP/Tailscale/運用記録が通過。PD SIGKILL3.16秒/通常再起動7.06秒、全daemon再起動後の全項目再確認103.15秒。後者は抑制/samplingを含み転送断時間ではない。自然PD更新0回・通信round2の短時間実行であり、長時間安定性や全homert private peerの受入には数えない。
 
-自然更新のlive ownerは別の38-resource profile・同じbuild `df490351c3ff`で2026-11-03 07:42 UTCから継続中。直近235通信round、全28 worker generation1/Ready=true。実PD T1は09:42:40 UTC予定で、更新・最終再起動の終了結果は未取得。二段DNS追加後の39-resource profileの自然更新結果には転用しない。前checkpoint `b03debf15982`は自然PD更新と終了0を確認したが、BGP等の再起動があり安定性は未受入。
+自然更新のlive ownerは別の38-resource profile・同じbuild `df490351c3ff`で2026-11-03 07:42 UTCから継続中。直近445通信round、全28 worker generation1/Ready=true。実PD T1は09:42:40 UTC予定で、更新・最終再起動の終了結果は未取得。二段DNS追加後の39-resource profileの自然更新結果には転用しない。前checkpoint `b03debf15982`は自然PD更新と終了0を確認したが、BGP等の再起動があり安定性は未受入。
 
 同じ二段DNSの各48-resource二台profileも実HGWで終了0。両方向のDNS/DoH・履歴API/Web、DHCP更新/Release/再取得・sticky/fingerprint、PD identity、BGP/NTP/Tailscale/exitと運用記録を確認。同一TCPはSYN1回・209応答・最大応答間隔10.89秒、UDP239応答・19期限超過・最大応答間隔10.52秒（1秒返信予算）。全項目確認58.91/73.57秒はsampling/再取得を含み、転送断時間ではない。二台のprocess/namespace/stageは撤去済み。短時間の両方向受入であり、長時間安定性・全private DNS peer・実機資格は残る。 先行する47-resource profileは両方向の同一TCP/UDP、DHCP scope/sticky/fingerprint、PD identity、DNS/DoH/BGP/NTP/Tailscale、管理/運用記録が終了0。停止中heartbeat、共通IPC3秒打切り、AFTR入力/通知の並列所有、古いsupervisor状態cacheを修正後、観測した停止理由でAFTR409/BGP/VRRP timeoutは未再発。長時間安定性は引き続き確認する。
 
@@ -45,6 +47,8 @@ WAN/tailnet captureは各最大8MB、PD captureはudp546と実行時間で限定
 6. **BGP・NTP。** この二台profileでは、現用権を持つnodeだけでBGP serviceを有効にし、両FRRの戻り経路がそのnodeを指すことを確認する。両nodeから固定LANを常時広告した旧試験設定では、待機側でSYN/ACKがINVALIDとして破棄され、port hash次第で通信が失敗した。 独立FRR/Zebra2台でLAN198.18.0.0/24とpeer203.0.113.0/24を相互広告し、受信RIB・両kernel・product best pathでLAN2端末のNATなしTCP/UDPを確認する。各bgpdを一台ずつ停止/再加入し、残るpeerの通信と復旧を確認する。特定peerの初期選択や切戻しを要求しない。長時間GR期限・両peer同時断・既存socket無損失継続は別の受入。NTPは実WAN学習源と独立chronyd2 clientの応答を確認し、`-x`/`-Q`でhost時計を変更しない。fallbackとappliance時計補正は別の受入。
 7. **管理・Tailscale。** 一時鍵で管理SSH `show status`、Web履歴、LANからWebへの拒否、初回management generation1/restarts0、再起動後の鍵/履歴を確認する。独立Headscale/TailscaleへIPv4 LAN/exitを広告し、acceptDNS/acceptRoutes=falseとupstream既定のsubnet SNATを維持する。OS標準CAと試験CAはownerのprivate mount内で結合し、auth key/control DBをprivate stageへ置く。LAN→peer両IP、peer→LAN IPv4、両IP exit HTTPS/UDP DNSとnode identity保持を確認する。LAN→tailnet IPv6は明示NATであり、delegated IPv6 subnetの双方向広告ではない。public control/hostname bootstrapは別の受入。
 8. **運用と復旧。** INFO syslog/OTLP、logs/metrics/traces、group1 NFLOG、group2 native nDPI/flow history、7日/daily/vacuumを既存ownerへ接続する。独立BGP peer上にsyslog UDP5514と公式Collector gRPC4317をdaemonより先に待受させる。実公開通信の双方向計数・native由来・TLS SNI、実管理拒否のhistory、観測開始後の新しいHealth syslog/log/metric/spanを照合する。samplingは旧既定30秒で、短flow全件保存・lossless deliveryを主張しない。PD worker SIGKILL/通常再起動と全daemon再起動後に上記の通信・identity・履歴・更新を確認し、正常停止時には上流Releaseなしでprefixを撤去する。
+
+9. **設定変更とconfirmed rollback。** 同じ単体profileの現在のintent/revisionをcontrol APIから取得し、coreの`router.home.arpa` AレコードとLAN cache無効化を一つの候補へまとめる。30秒の確認期限付きcommitを実APIへ送り、両IPのUDP/TCPで候補回答と公開通信を確認する。確認を送らず、期限切れによる元のintent全体・revision・回答・公開通信への復帰を確認する。もう一度候補を適用し、control workerをSIGKILLして再起動による復帰も確認する。イベントでtimeout/restartの理由を区別し、DNSだけの変更と期限切れrollbackではWAN DHCPv4/RA/PD workerを再起動しないことを確認する。control再起動では現在の明示的な再取得手順を検証する。保存DBや設定ファイルの手修復は使わない。署名runtimeの更新・boot・rollbackは別の受入であり、この設定transactionの結果へまとめない。
 
 二段DNSのpacket確認: 上記ownerの`location.json`と実leaseを読み、同じprivate mount内のrouter namespaceで`tcpdump -l -n -vv -i lo -c 8 'udp port 53'`を最大5秒捕捉する。client namespaceから実leaseへbindした`dig -b <実lease> @198.18.0.1 observed-two-stage.split.test A +nocookie +time=3 +tries=1`を送る。同じ名前/IDのLAN回答と127.0.0.1:53のquery/replyを照合してcaptureを止める。新しい名前を用い、LAN cacheだけの回答でcore転送を確認したことにしない。raw captureは保存しない。
 
