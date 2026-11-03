@@ -5,6 +5,7 @@
 # SSH is configured separately in the boot file; use the management address,
 # port 2222 and operator authorized_keys to match this profile's input policy.
 schema_version: 2
+retention: {max_age_seconds: 604800, interval_seconds: 86400, vacuum: true}
 resources:
   - id: interface/wan0
     interface: {name: wan0, ipv4_rp_filter: 0}
@@ -32,11 +33,12 @@ resources:
     forwarding: {ipv4: true, ipv6: true, ipv4_rp_filter: 0, conntrack_tcp_liberal: true}
   - id: firewall
     firewall:
+      flow_observation_group: 2
       input:
         policy: accept
         rules:
           - {match: {in_interface: mgmt0, source: 198.19.0.0/24, protocol: tcp, destination_ports: [{start: 2222}, {start: 8080}]}, action: accept}
-          - {match: {protocol: tcp, destination_ports: [{start: 2222}, {start: 8080}]}, action: drop}
+          - {match: {protocol: tcp, destination_ports: [{start: 2222}, {start: 8080}]}, action: drop, log: {group: 1, copy_range: 2048, prefix: management-deny}}
           - {match: {in_interface: wan0, protocol: udp, destination_ports: [{start: 53}]}, action: drop}
           - {match: {in_interface: wan0, protocol: tcp, destination_ports: [{start: 53}]}, action: drop}
       forward:
@@ -205,6 +207,7 @@ resources:
     service:
       name: dns
       dns:
+        query_log_retention: {max_age_seconds: 604800, interval_seconds: 86400, vacuum: true}
         spec:
           cache: {enabled: true, maxEntries: 10000, minTTL: 60s, maxTTL: 24h, negativeTTL: 30s}
           queryLog: {enabled: true}
@@ -486,3 +489,30 @@ resources:
         timeout_ms: 700
         healthy_threshold: 2
         unhealthy_threshold: 3
+  - id: service/remote-log
+    service:
+      name: remote-log
+      syslog: {address: "192.0.2.2:5514", facility: local6, tag: routerd2, min_level: info}
+  - id: service/telemetry
+    service:
+      name: telemetry
+      otlp_logs:
+        endpoint: 192.0.2.2:4317
+        insecure: true
+        service_name: routerd2
+        service_namespace: routerd
+        min_level: info
+        signals: [logs, metrics, traces]
+  - id: service/flows
+    service:
+      name: flows
+      traffic_flow:
+        application_layer: true
+        packet_group: 2
+        retention: {max_age_seconds: 604800, interval_seconds: 86400, vacuum: true}
+  - id: service/packets
+    service:
+      name: packets
+      firewall_log:
+        group: 1
+        retention: {max_age_seconds: 604800, interval_seconds: 86400, vacuum: true}

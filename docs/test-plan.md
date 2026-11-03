@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03 02:49 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-03 03:02 UTC。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## 判定と実行原則
 
@@ -15,11 +15,11 @@
 
 ## 現在の実通信と限界
 
-34-resource native profile、基準main `5da8661` + 上流選択設定と同一LAN forwardの制限撤去、build ID `5da86617fc36`で実HGW統合gateが終了0。Health 5本と既存EgressPolicyを接続し、DS-Lite群120→4本目80→LAN上の静的gateway60→群120の順に両LAN端末の新規UDP/DNS・TCP/HTTPSが往復した。実conntrack markは通常274/273、次候補275、静的276、復帰274/273。kernelの経路とgatewayも一致し、実設定の60秒hysteresisを保持した。全daemon restart後にも通常群と通信が復旧（全確認72.29秒、切戻し抑制・DoH/NTP確認込み）。4 DS-Lite個別疎通、DNS/両DoH、管理、独立BGP 2 peersの各停止/再加入、NTP stratum3、Tailscale subnet/exitも通過。PD worker SIGKILL/通常再起動後のLAN復旧1.98/4.93秒、2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。自然T1と既存socketの無損失継続は今回未確認。
+38-resource native profile、基準main `b1a3e48` + 運用設定、build ID `b1a3e489ca77`で実HGW統合gateが終了0。独立LAN端末の公開HTTPS/DNSについて双方向計数・native nDPI由来・TLS SNIをtraffic-history API、管理WebへのLAN接続拒否をfirewall-history APIから確認した。独立syslog receiverと公式OTLP Collectorへ製品ログ/metrics/tracesが届き、全daemon restart後の新しいHealth syslog/log/metric/spanも実時刻で照合した。通常の上流選択120→80→60→120、4 DS-Lite、DNS/両DoH、管理、BGP 2 peersの各停止/再加入、NTP stratum3、Tailscale subnet/exitも通過。PD worker SIGKILL/通常再起動後のLAN復旧2.02/5.84秒、全daemon restartから全確認73.22秒、2通信round、zero-lifetime RA/kernel撤去、上流Releaseなし。7日保持は設定済みで期限削除の今回実証ではなく、自然T1・既存socket無損失継続・全homert/HA/実機資格も別に残る。
 
-今回の`make check`（Go/Python、Race Detector、vet）、`make test-tools`（36件）、通常Makefile build、設定検証が終了0。製品Goの変更は同一interface間forwardを拒む不要な制限の撤去。3実行物は`readelf`でdynamic dependencyなし、nDPI source/license noticesを確認した。補助検査は実通信の代替ではない。
+製品Goは`b1a3e48`から不変。前checkpointの`make check`に加え、今回の`make race vet`、`make test-tools`（36件）、通常Makefile build、設定検証が終了0。3実行物は`readelf`でdynamic dependencyなし、nDPI source/license noticesを確認した。補助検査は実通信の代替ではない。
 
-homert02/03の保存中の実設定は各110 resources。native単体例は34 resourcesであり、resource数の一致を移植目標にはしないが、全意図の受入は未完了。34 work packageもin_progress22/planned12のまま。ens18/ens20はvirtio NICで、NTT ONU直結、対象NIC/実機、arm64、HA、cloud/Kubernetes全体を資格済みとは扱わない。
+homert02/03の保存中の実設定は各110 resources。native単体例は38 resourcesであり、resource数の一致を移植目標にはしないが、全意図の受入は未完了。34 work packageもin_progress22/planned12のまま。ens18/ens20はvirtio NICで、NTT ONU直結、対象NIC/実機、arm64、HA、cloud/Kubernetes全体を資格済みとは扱わない。
 
 ## 現行単体gateの再実行
 
@@ -30,7 +30,7 @@ make check-uplink DOCKER='sudo -n docker' \
   UPLINK_SECONDS=20 UPLINK_FULL_RESTART=1 UPLINK_TAILNET=1
 ```
 
-必要setup: 許可された実HGW uplink、sudo/root、iproute2、BusyBox、dhcpcd、dnsmasq、curl/dig/tcpdump、OpenSSL/SSH、FRR/Zebra/vtysh。Makefileが製品とengineを通常buildし、checksum-pinnedのHeadscale/Tailscale peerを準備する。host管理address/route/clockを変更せず、専用macvlan MACとnamespaceを使う。LANはbenchmark prefix198.18.0.0/24、管理は198.19.0.0/24、BGP peerは192.0.2.0/24、tailnet control/peerは198.51.100.0/24へ隔離する。router側のlink/address/forward/NAT/serviceはnative profileが所有し、runnerで追加変換しない。
+必要setup: 許可された実HGW uplink、sudo/root、iproute2、BusyBox、dhcpcd、dnsmasq、curl/dig/tcpdump、OpenSSL/SSH、FRR/Zebra/vtysh、公式otelcol-contrib。Makefileが製品とengineを通常buildし、checksum-pinnedのHeadscale/Tailscale peerを準備する。host管理address/route/clockを変更せず、専用macvlan MACとnamespaceを使う。LANはbenchmark prefix198.18.0.0/24、管理は198.19.0.0/24、BGP peerは192.0.2.0/24、tailnet control/peerは198.51.100.0/24へ隔離する。router側のlink/address/forward/NAT/serviceはnative profileが所有し、runnerで追加変換しない。
 
 独立peer setupは次のとおり。
 
@@ -92,6 +92,14 @@ native profileにHealth 5本と既存EgressPolicyを接続し、通常Makefile b
 初回に全Healthの実TCP到達を確認し、DS-Lite 3本の外側sourceを試験専用nft tableで遮断して4本目へ、続いて4本目も遮断してLAN gatewayへ切り替える。各段階でLAN 2端末の新規UDP/DNSとTCP/HTTPS、conntrack markと実kernel next hopを確認し、遮断解除後はweight120へ復帰する。既存socketの無損失継続とは区別する。全daemon restart後も通常優先順位と両端末の通信を確認する。試験専用tableはfinallyで撤去し、peer/process/namespaceは既存ownerが撤去する。
 
 最終確認は、同じMakefile build IDの実行物で`python3 scripts/uplink-smoke.py --uplink ens18 --config examples/single-router-dslite-dhcp-dns.yaml --seconds 20 --wan-mac 02:72:6f:75:74:03 --full-restart --tailnet`を実行した。試行中、試験用nftファイルの書式と、端末のDHCPアドレスを送信元と決めつけたconntrack照合を修正した。ソケットの実送信元を読んで照合し、製品側に迂回・retryは追加していない。終了後はstage/key/state/pcap/namespaceを撤去する。
+
+## 単体の運用ログ・通信履歴の接続
+
+単体profileは38 resourcesへ接続済みで、今回の実HGW gateが終了0。旧routerdのeventlog、TelemetryEnvironment、LogRetentionController、conntrackobserverと、実homertのINFO syslog/OTLP logs・metrics・traces、TLS SNI/application classification、group1 NFLOG、7日/daily/vacuumの意図を参照する。既存workerを使い、受信・分類・保存の所有者を増やさない。DNS・通信flow・firewallとoperational eventに7日/daily保持を設定するが、短時間試験で7日経過の削除を実証したとは扱わない。access/plugin/DHCP fingerprintなど全datasetの保持は別に照合する。
+
+独立BGP peer側namespaceの192.0.2.2に既存syslog receiver（UDP5514）と公式otelcol-contrib 0.151.0（OTLP/gRPC4317、file exporter）を置く。試験hostに`/usr/local/bin/otelcol-contrib`が必要。製品の外部依存ではなく独立受信peer。両receiverはdaemon起動前に待受を確認し、受信内容はprivate stageに置いて終了時に撤去する。
+
+既存firewallにflow observation group2と管理拒否ruleのgroup1ログを明示する。独立LAN端末→public peerの実HTTPS/UDP DNSで、kernel conntrackの双方向計数、native nDPI由来、TLS SNIを製品のtraffic-history APIで読む。管理WebへLAN経由の接続は従来どおり拒否し、その実パケットをfirewall-history APIへ記録する。syslogの製品ログ、公式Collectorのlogs/metrics/tracesとHealth probe spanを確認する。受入時の追加観測で、全daemon再起動後の新しいHealth記録4種を時刻で照合して通過した。この新規記録の照合もrunnerへ含める。全daemon restart後も同じ通信・管理拒否・履歴・送信を確認する。samplingは旧既定30秒のままとし、短いflowの全件記録やlossless deliveryを主張しない。通常WAN/LAN/上流選択/PD/DNS/BGP/NTP/Tailscaleも同じgateで維持する。
 
 ## 残作業の実行順と合格条件
 

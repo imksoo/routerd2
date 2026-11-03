@@ -108,7 +108,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         "dns",
     ]
     if config_path is not None:
-        roles.extend(["ntp", "web_console", "bgp", "health"])
+        roles.extend(["ntp", "web_console", "bgp", "health", "syslog", "otlp_logs", "traffic_flow", "firewall_log"])
     boot = dict(
         platform="host",
         config=str(config_path or stage / "config.json"),
@@ -418,6 +418,27 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                 name = "bgp-echo-" + address
                 start(namespace, ["python3", "-u", "-c", echo["ECHO_SERVER"], "203.0.113.1"], name)
                 wait(lambda: "READY" in (stage / (name + ".log")).read_text())
+
+        if config_path is not None:
+            log_peer = bgp_peers[0][0]
+            syslog_rows = stage / "received-syslog.jsonl"
+            start(log_peer, ["python3", "-I", str(stage / "syslog-peer.py"), "--mode", "receive",
+                "--port", "5514", "--output", str(syslog_rows)], "syslog-receiver")
+            wait(lambda: syslog_rows.exists() and bool(syslog_rows.read_text().strip()))
+            collector_config = stage / "collector.json"
+            telemetry_rows = stage / "received-telemetry.jsonl"
+            collector_config.write_text(json.dumps({
+                "receivers": {"otlp": {"protocols": {"grpc": {"endpoint": "192.0.2.2:4317"}}}},
+                "exporters": {"file": {"path": str(telemetry_rows), "append": True, "flush_interval": "100ms"}},
+                "service": {"telemetry": {"logs": {"level": "error"}, "metrics": {"level": "none"}},
+                    "pipelines": {signal: {"receivers": ["otlp"], "exporters": ["file"]} for signal in ("logs", "metrics", "traces")}}
+            }))
+            collector = start(log_peer, ["/usr/local/bin/otelcol-contrib", "--config", str(collector_config)], "otlp-receiver")
+            def collector_listening():
+                if collector.poll() is not None:
+                    raise RuntimeError((stage / "otlp-receiver.log").read_text())
+                return bool(run(inside(log_peer, ["ss", "-H", "-ltn", "sport = :4317"])))
+            wait(collector_listening, 10)
 
         private_dns = start_private_dns(5353, "192.0.2.77")
         if config_path is not None:
@@ -1001,6 +1022,32 @@ print(*s.getsockname())
             assert denied.returncode != 0, "management console was reachable through the LAN interface"
             print("PASS loopback/management DNS, cache during upstream outage, persistent query history, SSH host identity and Web access restricted to management interface", flush=True)
 
+        def check_operations():
+            since = time.time_ns()
+            run(inside(automatic, ["curl", "-4", "--noproxy", "*", "--fail", "--max-time", "8", "--resolve",
+                "one.one.one.one:443:1.1.1.1", "-sS", "-I", "https://one.one.one.one/"]))
+            answer = run(inside(automatic, ["dig", "@1.1.1.1", "example.net", "A", "+short", "+time=3", "+tries=1"]))
+            assert answer.strip(), "independent client received no public DNS answer"
+            observed_flows = []
+            def classified():
+                observed_flows[:] = query("control.sock", "/v1/services/service.flows/traffic-history?client=" + str(auto_address) + "&peer=1.1.1.1&limit=100")["flows"] or []
+                return any(f.get("engine") == "ndpi" and f.get("source") == "libndpi" and f.get("accounting") and f.get("bytesOut", 0) > 0 and f.get("bytesIn", 0) > 0 for f in observed_flows) and any(f.get("tlsSNI") == "one.one.one.one" for f in observed_flows)
+            wait(classified, diagnostic=lambda: json.dumps(observed_flows))
+            wait(lambda: any(e.get("action") == "drop" and e.get("dstPort") == 8080 and e.get("inIface") == "lan0" for e in (query("control.sock", "/v1/services/service.packets/firewall-history?action=drop&limit=100")["entries"] or [])))
+            wait(lambda: any(row.get("time", 0) * 1e9 >= since and "health probe completed" in row.get("message", "") for row in (json.loads(line) for line in syslog_rows.read_text().splitlines(keepends=True) if line.endswith("\n"))))
+            def signals_received():
+                if not telemetry_rows.exists():
+                    return False
+                batches = [json.loads(line) for line in telemetry_rows.read_text().splitlines(keepends=True) if line.endswith("\n")]
+                logs = [record for batch in batches for resource in batch.get("resourceLogs", []) for scope in resource.get("scopeLogs", []) for record in scope.get("logRecords", [])]
+                metrics = [metric for batch in batches for resource in batch.get("resourceMetrics", []) for scope in resource.get("scopeMetrics", []) for metric in scope.get("metrics", [])]
+                spans = [span for batch in batches for resource in batch.get("resourceSpans", []) for scope in resource.get("scopeSpans", []) for span in scope.get("spans", [])]
+                return (any(int(record.get("timeUnixNano", 0)) >= since and record.get("body", {}).get("stringValue") == "health probe completed" for record in logs)
+                    and any(metric.get("name") == "routerd.healthcheck.probes" and any(int(point.get("timeUnixNano", 0)) >= since for point in metric.get("sum", {}).get("dataPoints", [])) for metric in metrics)
+                    and any(span.get("name") == "healthcheck.probe" and int(span.get("startTimeUnixNano", 0)) >= since for span in spans))
+            wait(signals_received)
+            print("PASS public peer traffic has measured counters, native nDPI classification and TLS SNI; LAN denial persisted; actual product syslog and OTLP logs/metrics/traces reached independent receivers", flush=True)
+
         def check_time():
             after = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
 
@@ -1021,6 +1068,7 @@ print(*s.getsockname())
             check_management()
             check_bgp()
             check_bgp_peer_recovery()
+            check_operations()
             check_time()
 
         start(router, ["ip", "-ts", "monitor", "route"], "router-routes")
@@ -1246,6 +1294,7 @@ print(*s.getsockname())
                 check_dslite_paths()
                 wait(lambda: all(query("control.sock", "/v1/services/service.health-dslite" + str(i)).get("snapshot", {}).get("active", False) for i in range(3)))
                 check_selected_upstream({272, 273, 274})
+                check_operations()
                 check_time()
             print("PASS actual HGW full daemon restart retained identity and restored both clients; seconds", round(time.monotonic() - restart_at, 2), flush=True)
             if tailnet:
@@ -1452,7 +1501,7 @@ def main():
             profile = stage / "resource-program.yaml"
             run(root + ["install", "-m", "600", str(args.config.resolve()), str(profile)])
             run(root + ["install", "-m", "500", str(Path("dist/chrony-engine.tar").resolve()), str(stage / "chrony-engine.tar")])
-        for source, name in ([(Path("scripts/tailscale-peer.py"), "peer-fixture.py")] if args.config else []) + [(Path(__file__), "owner.py"), (Path("dist/dnsmasq-engine.tar"), "dnsmasq-engine.tar")] + [
+        for source, name in ([(Path("scripts/tailscale-peer.py"), "peer-fixture.py"), (Path("scripts/syslog-peer.py"), "syslog-peer.py")] if args.config else []) + [(Path(__file__), "owner.py"), (Path("dist/dnsmasq-engine.tar"), "dnsmasq-engine.tar")] + [
             (args.binary_dir / n, n)
             for n in ["routerd", "routerd-modules", "routerd-logging"]
         ]:
