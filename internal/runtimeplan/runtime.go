@@ -663,7 +663,7 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 			}
 		}
 		if !matched {
-			return nil, ErrStale
+			return nil, fmt.Errorf("unregistered protocol producer %s generation %d: %w", u.Name, u.Generation, ErrStale)
 		}
 		producerStatus = &status
 	}

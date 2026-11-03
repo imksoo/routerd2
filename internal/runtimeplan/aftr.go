@@ -341,7 +341,7 @@ func (r *Runtime) validateAFTRSnapshotLocked(b binding, raw json.RawMessage) err
 	}
 	in, ok := r.aftrInputs[b.instance.Name]
 	if !ok || in.ConfigDigest != b.digest || snap.Generation != in.Generation {
-		return ErrStale
+		return fmt.Errorf("AFTR input changed (present=%t input_generation=%d snapshot_generation=%d): %w", ok, in.Generation, snap.Generation, ErrStale)
 	}
 	private.Protocol.ConfigDigest = b.digest
 	return aftr.ValidateSnapshot(private.Protocol, in, snap)

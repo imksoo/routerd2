@@ -428,7 +428,7 @@ func TestRuntimeAPIRefusesReplacingRegularFileAndSymlinkDirectory(t *testing.T) 
 	if err := os.WriteFile(path, []byte("preserve me"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if a, err := openAPI(context.Background(), dir, Status{}); err == nil {
+	if a, err := openAPI(context.Background(), dir); err == nil {
 		a.close()
 		t.Fatal("API replaced regular file")
 	}
@@ -439,7 +439,7 @@ func TestRuntimeAPIRefusesReplacingRegularFileAndSymlinkDirectory(t *testing.T) 
 	if err := os.Symlink(dir, link); err != nil {
 		t.Fatal(err)
 	}
-	if a, err := openAPI(context.Background(), link, Status{}); err == nil {
+	if a, err := openAPI(context.Background(), link); err == nil {
 		a.close()
 		t.Fatal("API accepted symlink runtime directory")
 	}

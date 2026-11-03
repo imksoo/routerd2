@@ -410,11 +410,9 @@ func (c *effectsClient) send(ctx context.Context, b json.RawMessage) (servicecon
 	c.identity.Sequence++
 	r := c.identity
 	r.Snapshot = b
-	callCtx, stop := context.WithTimeout(ctx, 3*time.Second)
-	defer stop()
 	if c.identity.Role == "vrrp" || c.identity.Role == "bgp" {
 		var ack serviceconfig.ApplicationReceipt
-		if err := c.client.Do(callCtx, "POST", "/v1/services/effects", r, &ack); err != nil {
+		if err := c.client.Do(ctx, "POST", "/v1/services/effects", r, &ack); err != nil {
 			return ack, err
 		}
 		if !ack.Applied {
@@ -422,6 +420,8 @@ func (c *effectsClient) send(ctx context.Context, b json.RawMessage) (servicecon
 		}
 		return ack, nil
 	}
+	callCtx, stop := context.WithTimeout(ctx, 3*time.Second)
+	defer stop()
 	return serviceconfig.ApplicationReceipt{}, c.client.Do(callCtx, "POST", "/v1/services/state", r, nil)
 }
 

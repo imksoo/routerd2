@@ -154,7 +154,7 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 	defer apiCancel()
 	started := time.Now()
 	initial := Status{Lifecycle: Running, InstanceID: o.instanceID, ReleaseID: o.ReleaseID, Platform: o.Platform, PID: os.Getpid(), StartedAt: started}
-	a, err := openAPI(apiCtx, o.RuntimeDir, initial)
+	a, err := openAPI(apiCtx, o.RuntimeDir)
 	if err != nil {
 		return PowerOff, fmt.Errorf("supervisor API: %w", err)
 	}
@@ -186,6 +186,7 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 	var powerResponse <-chan struct{}
 	ctxDone := ctx.Done()
 
+	observation := initial
 	publish := func() error {
 		clock, err := boottime.Read()
 		if err != nil {
@@ -217,7 +218,7 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 		if s.ExpiresNanos == ^uint64(0) {
 			s.ExpiresNanos = s.ObservedNanos
 		}
-		a.publish(s)
+		observation = s
 		if s.Ready && !wasReady {
 			slog.Info("ROUTERD_READY", "release", o.ReleaseID, "platform", o.Platform)
 			// Keep a boot-console marker even when structured diagnostics are
@@ -361,6 +362,10 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 			// Flush the local API acceptance before draining its clients.
 			powerResponse = nil
 			beginShutdown()
+		case reply := <-a.statuses:
+			// Publish runs before this select, after process creation and reaping.
+			// Initial worker reports cannot authenticate against a pre-start cache.
+			reply <- observation
 		case request := <-a.restarts:
 			c := byName[request.name]
 			if c == nil || c.retired || lifecycle != Running {

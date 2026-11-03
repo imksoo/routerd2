@@ -58,7 +58,7 @@ func TestWorkerDiscardsOldQueryGenerationAndWithdraws(t *testing.T) {
 		return r, nil
 	}
 	go func() {
-		done <- run(ctx, cfg, in, updates, EffectsFunc(func(_ context.Context, s Snapshot) error { snapshots <- s; return nil }), nil, lookup)
+		done <- run(ctx, cfg, testInputSource(in, updates), EffectsFunc(func(_ context.Context, s Snapshot) error { snapshots <- s; return nil }), nil, lookup)
 	}()
 	select {
 	case <-oldStarted:
@@ -139,7 +139,7 @@ func TestWorkerExpiresSourceWhileDNSLookupIsBlocked(t *testing.T) {
 		return resolution{}, ctx.Err()
 	}
 	go func() {
-		done <- run(ctx, cfg, in, nil, EffectsFunc(func(_ context.Context, s Snapshot) error { snapshots <- s; return nil }), nil, lookup)
+		done <- run(ctx, cfg, testInputSource(in, nil), EffectsFunc(func(_ context.Context, s Snapshot) error { snapshots <- s; return nil }), nil, lookup)
 	}()
 	select {
 	case <-queryStopped:
@@ -168,9 +168,9 @@ func TestWorkerRejectsChangedSameGenerationAndCallbackFailure(t *testing.T) {
 	next := cloneInput(in)
 	next.Source.Address = "2001:db8:1::2"
 	updates <- next
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	err := run(ctx, cfg, in, updates, EffectsFunc(func(context.Context, Snapshot) error { return nil }), nil, func(ctx context.Context, _ Config, _ Input) (resolution, error) {
+	err := run(ctx, cfg, testInputSource(in, updates), EffectsFunc(func(context.Context, Snapshot) error { return nil }), nil, func(ctx context.Context, _ Config, _ Input) (resolution, error) {
 		<-ctx.Done()
 		return resolution{}, ctx.Err()
 	})
@@ -178,11 +178,27 @@ func TestWorkerRejectsChangedSameGenerationAndCallbackFailure(t *testing.T) {
 		t.Fatal("bad generation was not rejected")
 	}
 	ready := false
-	err = run(ctx, cfg, in, nil, EffectsFunc(func(context.Context, Snapshot) error { return errors.New("writer unavailable") }), func() { ready = true }, nilLookup)
+	err = run(ctx, cfg, testInputSource(in, nil), EffectsFunc(func(context.Context, Snapshot) error { return errors.New("writer unavailable") }), func() { ready = true }, nilLookup)
 	if err == nil || ready {
 		t.Fatal("callback failure was swallowed or announced ready")
 	}
 }
 func nilLookup(context.Context, Config, Input) (resolution, error) {
 	return resolution{}, errors.New("unreachable test lookup")
+}
+
+func testInputSource(initial Input, updates <-chan Input) func(context.Context) (Input, error) {
+	first := true
+	return func(context.Context) (Input, error) {
+		if first {
+			first = false
+			return initial, nil
+		}
+		select {
+		case in := <-updates:
+			initial = in
+		default:
+		}
+		return initial, nil
+	}
 }

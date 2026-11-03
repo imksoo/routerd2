@@ -34,6 +34,8 @@ release ID を専用 FD で通知し、PID/role/name/sequence と heartbeat を�
 FD の閉鎖、startup/heartbeat timeout、exit は状態に残し、役割ごとに再起動する。
 停止処理中のworkerは既にReady=falseであり、その期限切れheartbeatを正常なworkerの
 観測期限へ混ぜない。正常なworkerの元の期限と、全体の未準備状態はそのまま保持する。
+状態APIもプロセス管理ループが応答し、別mutexで守るキャッシュは持たない。
+workerの初回通知は、登録前の状態キャッシュを理由に拒否されない。
 
 PID 1 に通常のプロトコル socket や DNS/BGP engine を置かない。初期版では worker は
 同じ UID で動く。FD と private UDS による分離は ABI とメンテナンス上の境界であり、

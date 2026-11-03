@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/imksoo/routerd2/internal/localapi"
@@ -35,8 +34,7 @@ type reconcileRequest struct {
 }
 
 type api struct {
-	mu         sync.RWMutex
-	status     Status
+	statuses   chan chan Status
 	restarts   chan restartRequest
 	powers     chan powerRequest
 	reconciles chan reconcileRequest
@@ -47,7 +45,7 @@ type api struct {
 	path       string
 }
 
-func openAPI(ctx context.Context, dir string, initial Status) (*api, error) {
+func openAPI(ctx context.Context, dir string) (*api, error) {
 	if !filepath.IsAbs(dir) || filepath.Clean(dir) == "/" {
 		return nil, errors.New("runtime directory must be an absolute non-root path")
 	}
@@ -106,7 +104,7 @@ func openAPI(ctx context.Context, dir string, initial Status) (*api, error) {
 		_ = lock.Close()
 		return nil, err
 	}
-	a := &api{status: initial, restarts: make(chan restartRequest), powers: make(chan powerRequest), reconciles: make(chan reconcileRequest), ctx: ctx, listener: listener, lock: lock, path: path}
+	a := &api{statuses: make(chan chan Status), restarts: make(chan restartRequest), powers: make(chan powerRequest), reconciles: make(chan reconcileRequest), ctx: ctx, listener: listener, lock: lock, path: path}
 	a.server = &http.Server{
 		Handler: a, ReadHeaderTimeout: 2 * time.Second, ReadTimeout: 3 * time.Second,
 		WriteTimeout: 3 * time.Second, IdleTimeout: 10 * time.Second, MaxHeaderBytes: 8192,
@@ -119,12 +117,6 @@ func (a *api) close() {
 	_ = a.listener.Close()
 	_ = os.Remove(a.path)
 	_ = a.lock.Close()
-}
-
-func (a *api) publish(s Status) {
-	a.mu.Lock()
-	a.status = s
-	a.mu.Unlock()
 }
 
 func (a *api) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -209,10 +201,22 @@ func (a *api) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 			return
 		}
-		a.mu.RLock()
-		s := a.status
-		a.mu.RUnlock()
-		_ = json.NewEncoder(w).Encode(s)
+		reply := make(chan Status, 1)
+		select {
+		case a.statuses <- reply:
+		case <-a.ctx.Done():
+			localapi.Fail(w, 503, errors.New("supervisor is stopping"))
+			return
+		case <-r.Context().Done():
+			return
+		}
+		select {
+		case status := <-reply:
+			_ = json.NewEncoder(w).Encode(status)
+		case <-a.ctx.Done():
+			localapi.Fail(w, 503, errors.New("supervisor is stopping"))
+		case <-r.Context().Done():
+		}
 		return
 	}
 	const prefix, suffix = "/v1/modules/", "/restart"

@@ -9,7 +9,7 @@ sysctls or firewall state, and it does not start another executable.
 ## API and ownership
 
 ```go
-func Run(ctx context.Context, cfg Config, initial Input, updates <-chan Input,
+func Run(ctx context.Context, cfg Config, input func(context.Context) (Input, error),
     effects Effects, ready func()) error
 func Validate(Config) error
 func ValidateInput(Config, Input) error
@@ -21,6 +21,12 @@ interface, answer selection, attempt timeout and retry interval. The verified
 module loader attaches `ConfigDigest`; that digest covers the complete private
 instance, including dependency references and the coordinator's tunnel policy.
 The digest is excluded from `Config` JSON so it does not hash itself.
+
+The worker reads inputs and publishes snapshots in one loop. There is no
+independent polling goroutine that can advance the coordinator's generation
+while the preceding snapshot is still being published. Failed periodic reads
+leave the original dependency deadlines in force. Periodic reads retain the
+one-second cadence and two-second read budget.
 
 `Input` is a full replacement of the coordinator's authorized dependencies:
 

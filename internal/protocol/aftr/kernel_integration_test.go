@@ -265,7 +265,7 @@ func nativeAFTR(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		defer close(finished)
-		done <- Run(ctx, cfg, in, updates, EffectsFunc(func(_ context.Context, s Snapshot) error { snapshots <- s; return nil }), nil)
+		done <- Run(ctx, cfg, testInputSource(in, updates), EffectsFunc(func(_ context.Context, s Snapshot) error { snapshots <- s; return nil }), nil)
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -319,7 +319,9 @@ func nativeAFTR(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	next.Source.PreferredUntil = lifetime.Deadline{BootID: clock.BootID, Nanos: uint64(clock.BoottimeNanoseconds) + uint64(500*time.Millisecond)}
+	// Keep this source live through the normal one-second input poll, then
+	// observe withdrawal at its original deadline.
+	next.Source.PreferredUntil = lifetime.Deadline{BootID: clock.BootID, Nanos: uint64(clock.BoottimeNanoseconds) + uint64(2*time.Second)}
 	inputs[2] = next
 	updates <- next
 	literal := wait(func(s Snapshot) bool { return s.Generation == 2 && s.Available })

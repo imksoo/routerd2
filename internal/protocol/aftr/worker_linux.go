@@ -22,23 +22,26 @@ type lookupResult struct {
 	err      error
 }
 
-// Run consumes complete compiler inputs, not kernel state. ready means the
+// Run reads complete compiler inputs before publishing their results. The
+// same owner reads inputs and publishes snapshots, so reading a new generation
+// cannot invalidate a snapshot still being published. ready means the
 // initial bounded snapshot was acknowledged; it does not imply DNS or tunnel
-// availability. Errors from the update stream, validation or callback are
+// availability. Errors from initial input, validation or publication are
 // fatal. DNS failures are explicit status and preserve last-good data only
 // until all of its original source/answer lifetimes remain usable.
-func Run(ctx context.Context, c Config, initial Input, updates <-chan Input, effects Effects, ready func()) error {
-	return run(ctx, c, initial, updates, effects, ready, resolve)
+func Run(ctx context.Context, c Config, input func(context.Context) (Input, error), effects Effects, ready func()) error {
+	return run(ctx, c, input, effects, ready, resolve)
 }
 
-func run(ctx context.Context, c Config, initial Input, updates <-chan Input, effects Effects, ready func(), lookup lookupFunc) (result error) {
-	if err := ValidateInput(c, initial); err != nil {
-		return err
-	}
-	if effects == nil || lookup == nil {
-		return errors.New("AFTR effects and lookup are required")
+func run(ctx context.Context, c Config, input func(context.Context) (Input, error), effects Effects, ready func(), lookup lookupFunc) (result error) {
+	if input == nil || effects == nil || lookup == nil {
+		return errors.New("AFTR input, effects and lookup are required")
 	}
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	initial, err := input(ctx)
+	if err != nil {
 		return err
 	}
 	now, err := boottime.Read()
@@ -101,6 +104,8 @@ func run(ctx context.Context, c Config, initial Input, updates <-chan Input, eff
 	defer func() { cancel(); workers.Wait() }()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
+	inputTicker := time.NewTicker(time.Second)
+	defer inputTicker.Stop()
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -141,9 +146,12 @@ func run(ctx context.Context, c Config, initial Input, updates <-chan Input, eff
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-		case in, ok := <-updates:
-			if !ok {
-				return errors.New("AFTR input stream closed")
+		case <-inputTicker.C:
+			call, stop := context.WithTimeout(ctx, 2*time.Second)
+			in, err := input(call)
+			stop()
+			if err != nil {
+				continue // Original dependencies still expire during a failed poll.
 			}
 			now, err = boottime.Read()
 			if err != nil {
