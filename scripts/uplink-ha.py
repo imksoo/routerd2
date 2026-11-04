@@ -153,6 +153,7 @@ def owner(stage, uplink, retention_check):
         echo = runpy.run_path(str(stage / "peer-fixture.py"))
         addresses = json.loads(run(inside("gateway", ["ip", "-j", "-4", "address", "show", "dev", "wan0"])))
         wan_device = next(a["local"] for link in addresses for a in link["addr_info"] if a["family"] == "inet")
+        run(inside("gateway", ["ip", "route", "add", "192.0.2.2/32", "via", "192.0.2.100", "dev", "wan0", "onlink"]))
         for address in ("192.168.100.1", "172.20.1.1"):
             run(inside("gateway", ["ip", "address", "add", address + "/32", "dev", "lo"]))
         for key, address in (("admin", "10.255.255.254"), ("gateway", "198.19.0.253"),
@@ -315,6 +316,13 @@ def owner(stage, uplink, retention_check):
             run(inside("client", chrony + ["-Q", "-t", "8", "-u", "root", "-f", str(ntp_client)]), 12)
             print("PASS HA client NTP response", flush=True)
             node = elected()
+            expected_hop = "192.0.2.10" if node == "a" else "192.0.2.11"
+            run(inside("bgp0", ["ip", "route", "add", wan_device + "/32", "via", expected_hop, "dev", "eth0"]))
+            try:
+                run(inside("bgp0", ["python3", "-c", echo["ECHO_CLIENT"], wan_device, "192.0.2.2", "192.0.2.2"]))
+            finally:
+                run(inside("bgp0", ["ip", "route", "del", wan_device + "/32", "via", expected_hop, "dev", "eth0"]))
+            print("PASS HA WAN-zone peers completed routed TCP/UDP with original source via", node, flush=True)
             for query_name, expected in (("available.split.test", {"192.0.2.77", "192.0.2.78"}), ("branch.split.test", {"192.0.2.78"}), ("host.corp.test", {"192.0.2.78"})):
                 for server in (dns, dns6):
                     answer = run(inside("client", ["dig", "@"+server, query_name, "A", "+short", "+time=3", "+tries=1"])).strip()
@@ -336,7 +344,6 @@ def owner(stage, uplink, retention_check):
                 view = json.loads(run(inside("bgp"+str(index), ["vtysh", "--vty_socket", str(root), "-d", "bgpd", "-c", "show bgp ipv4 unicast 198.18.0.0/16 json"])))
                 assert view.get("paths"), "independent FRR did not receive the LAN advertisement"
                 routes = json.loads(run(inside("bgp"+str(index), ["ip", "-j", "route", "show", "198.18.0.0/16"])))
-                expected_hop = "192.0.2.10" if node == "a" else "192.0.2.11"
                 hops = [hop.get("gateway") for route in routes for hop in route.get("nexthops", [route])]
                 assert hops and set(hops) == {expected_hop}, ("FRR return path bypasses the serving owner", hops)
             kernel_routes = json.loads(run(inside(node, ["ip", "-j", "-4", "route", "show"])))

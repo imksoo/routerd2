@@ -1,6 +1,6 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
-保存homertのmgmt roleからの新規転送をnative三例へ接続した。変更前の実管理端末→WAN peerのTCP期限切れを確認し、既存forward rule一つで修正した。通常build `39531c64246b`で単体全daemon再起動と両方向HAが終了0。単体の管理→WAN capture、各現用nodeの管理→実DHCP端末TCP/UDP・元送信元、既存の管理console制限を確認した。初期NTP照会の期限超過2回と全項目の結果・残る実機/更新/MTU/全policyの範囲は[引き継ぎ](pve-codex-handoff.md)へ記録する。
+保存FirewallPolicyのlogDeny/sameRoleAcceptとrole/interfaceの許可関係をnative三例へ接続した。変更前のWAN同role間TCP期限切れを再現し、既存forward pairsへ保存意図を表現した。通常build `e4e822133f20`の単体全daemon再起動と両方向HAが終了0。独立WAN peer間TCP/UDP・元送信元、wan0/wan-haの実capture、WAN→LAN/self拒否と履歴を確認した。今回のNTP照会timeoutは0回。実サイト全構成・対象実機/更新/時計補正/MTUの残る受入と測定値は[引き継ぎ](pve-codex-handoff.md)へ記録する。
 
 通常image buildにkernel対応ソースの同梱を接続した。基準main `773121c` + 本変更、通常build `773121ce3681`、Alpine linux-lts `6.18.60-r0` / kernel `6.18.60-0-lts` / recipe `97a4e7b01d88cdec22ef3a5d30247628dc14d8bc`で`make image`が終了0。APKの全Go checkと3実行物のstatic link確認、image組立て、出力全体のSHA256、同梱22 sourceのSHA512、installed configの実APKとの一致、元COPYING/GPL-2.0の存在を確認した。 対応source archiveのfile/digestをmanifestへ接続した。独立kernel/時計での全構成起動・更新と対象実機の受入を継続する。条件・digest・再実行は[引き継ぎ](pve-codex-handoff.md)に記載する。
 

@@ -2,15 +2,15 @@
 
 更新: 2026-11-04。全体ゴールは継続中。
 
-## 管理網からの新規転送を保存policyへ接続
+## 保存FirewallPolicyのrole許可を接続
 
-基準main `39531c6` + 本変更、通常build `39531c64246b`。保存両homertのzone/rule/NATと旧routerdのimplicitFirewallActionを照合し、mgmt roleからの新規転送がnative三例から欠けていることを確認した。変更前設定を実HGW/通常daemonで動かすと、管理端末から独立WAN peerへのTCPが期限切れとなった。既存forward_chain.rulesへmgmt0のacceptを一つ追加し、追加NATや新しいGo実装は不要だった。
+基準main `e4e8221` + 本変更、通常build `e4e822133f20`。保存両homertのrole/interfaceとlogDeny/sameRoleAcceptを再読し、旧routerdのwriteFirewallPairChain/implicitFirewallActionを照合した。native三例の既存forward pairsでtrust内・trust→untrust・明示trust→management・untrust内を表現した（単体41/二台各80 pairs）。前回のmgmt許可と入力既定drop/NFLOGも維持する。変更前設定では独立WAN peer間のTCPが期限切れとなり、同role許可の不足を再現した。
 
-通常の単体45-resource `make check-uplink`と、続く各54-resource `make check-uplink-ha`が終了0。単体では実管理端末→独立WAN FRR peerのTCP/UDPと元送信元を全daemon再起動前後で確認した。既存captureの両回でmgmt0 ingress→wan0 egress、TCP SYN/SYN-ACKとUDP往復を照合した。二台では初期a・切替b・逆方向aと再加入後に、独立管理端末→実DHCP leaseのLAN端末へのTCP/UDPと元送信元を確認した。peerの必要な戻り経路を初期設定へ宣言し、確認用host routeはfinallyで撤去する。
+同じ全機能profileの通常`make check-uplink`と、続く`make check-uplink-ha`が終了0。別subnetのWAN FRR→実DHCPを受けたWAN gateway peerへのTCP/UDP・元送信元を確認した。単体は全daemon再起動前後の実TCP/UDPが通過し、初期captureでwan0内のroutingと往復を確認した。二台は初期a・切替b・逆方向aと再加入後に同じ通信を確認し、初期a・切替bのcaptureでwan0 ingress→wan-ha egress、wan-ha ingress→wan0 egressのTCP/UDPを照合した。必要なpeer戻り経路は初期setupで宣言し、確認用host routeはfinallyで撤去する。実WAN addressを固定値にしない。
 
-両IP Internet/DNS、通常/機器用DHCP、PD/DAD/SLAAC/Information、4 DS-Lite、BGP/Tailscale/NTP、管理SSH/Web、LANからの管理拒否、input/forward NFLOG/OTLP、設定rollbackも通過。単体のPD SIGKILL2.25秒/通常再起動5.89秒、設定timeout30.11秒/control再起動5.89秒、全daemon後の全項目再確認111.65秒、2巡回/自然PD更新0回。HA全項目再確認90.96/74.52秒、公開TCP439応答/maxgap7.96秒・UDP460/15期限超過/maxgap8.51秒、固定WAN TCP468/max7.09秒・UDP467/9期限超過/max8.01秒。TCP各SYN1回・同一socket/NAT tuple保持。設定timeout32.58/32.09秒・confirm3.70/3.68秒。初期NTP照会の8秒期限超過2回と、その後の応答を記録する。
+両IP Internet/DNS、通常/機器用DHCP、PD/DAD/SLAAC/Information、4 DS-Lite、BGP/Tailscale/NTP、管理網発転送/SSH/Web、LANからの管理拒否とWAN→LAN/self拒否のNFLOG/OTLP、設定rollbackも通過。単体PD SIGKILL2.93秒/通常再起動5.89秒、設定timeout30.85秒/control再起動6.60秒、全daemon後の全項目再確認111.34秒、2巡回/自然PD更新0回。HA全項目再確認86.80/74.75秒、公開TCP412応答/maxgap15.31秒・UDP446/19期限超過/maxgap11.52秒、固定WAN TCP446/max14.02秒・UDP452/12期限超過/max11.01秒。TCP各SYN1回・同一socket/NAT tuple保持。設定timeout33.16/32.59秒・confirm3.91/3.77秒、新規DHCP名公開0.49/1.19秒。今回のNTP照会timeoutは0回。
 
-`make check`（Race/vet/Python）・fmt-check、3設定検証と通常3 static実行物が通過。再実行は[試験計画](test-plan.md)の単体/二台手順と管理網の節。全zone/policy field、NTP起動品質、全homert applianceの実機boot/時計補正/更新、MTU全経路と物理ONU/NICの受入は継続する。PVE/QEMU・追加PBR調査は実行していない。owner/namespace/stageは終了時に撤去し、詳細log/captureと重複build出力はcommit/push後に撤去する。
+`make check`（Race/vet/Python）・fmt-check、3設定検証、変更後のPython構文と通常3 static実行物を確認した。再実行は[試験計画](test-plan.md)の単体/二台手順と同role転送の節。保存zone/policyの接続と、実サイト全構成・物理機器の受入は範囲を分ける。NTP起動品質、全homert applianceの実機boot/時計補正/更新、MTU全経路と物理ONU/NICは継続する。PVE/QEMU・追加PBR調査は実行していない。owner/namespace/stageは終了時に撤去し、詳細log/captureと重複build出力はcommit/push後に撤去する。
 
 ## 通常x86ディスクをGPT・BIOS/UEFIへ統一
 

@@ -389,6 +389,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             echo = runpy.run_path(str(stage / "peer-fixture.py"))
             gateway_addresses = json.loads(run(["ip", "-n", gateway, "-j", "-4", "address", "show", "dev", "gateway-wan"]))
             wan_local_peer = next(a["local"] for link in gateway_addresses for a in link["addr_info"] if a["family"] == "inet")
+            run(["ip", "-n", gateway, "route", "add", "192.0.2.2/32", "via", "192.0.2.1", "dev", "gateway-wan", "onlink"])
             for address, interface in (("192.168.100.1", "lo"), ("172.20.1.1", "lo"), ("192.168.50.1", "gateway-wan")):
                 run(["ip", "-n", gateway, "address", "add", address + "/32", "dev", interface])
                 name = "static-device-" + address
@@ -936,6 +937,13 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                 # automatic client so packets actually traverse the router.
                 run(inside(automatic, ["python3", "-c", echo["ECHO_CLIENT"], destination, translated]))
             print("PASS independent LAN client reached management/WAN-local devices with source NAT and the legacy LAN device with its original source over TCP/UDP", flush=True)
+            namespace, peer_address, _ = bgp_peers[0]
+            run(inside(namespace, ["ip", "route", "add", wan_local_peer + "/32", "via", "192.0.2.1", "dev", "bgp-wan"]))
+            try:
+                run(inside(namespace, ["python3", "-c", echo["ECHO_CLIENT"], wan_local_peer, peer_address, peer_address]))
+            finally:
+                run(inside(namespace, ["ip", "route", "del", wan_local_peer + "/32", "via", "192.0.2.1", "dev", "bgp-wan"]))
+            print("PASS WAN-zone peers on different subnets completed routed TCP/UDP with the original source", flush=True)
 
         def check_static_routes():
             wan = query("control.sock", "/v1/services/service.wan4")["snapshot"]["currentAddress"]

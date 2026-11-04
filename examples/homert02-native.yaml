@@ -122,68 +122,90 @@ resources:
       rules:
         - {match: {in_interface: mgmt0}, action: accept}
     forward:
-    - from: tailscale0
-      to: lan0
-    - from: tailscale0
-      to: mgmt0
-    - from: tailscale0
-      to: dslite0
-    - from: tailscale0
-      to: wan-ha
-    - from: tailscale0
-      to: wan0
-    - from: lan0
-      to: tailscale0
-    - from: vip0
-      to: tailscale0
-    - from: lan6-ha
-      to: tailscale0
-    - from: lan0
-      to: lan0
-    - from: vip0
-      to: lan0
-    - from: lan6-ha
-      to: lan0
-    - from: lan0
-      to: dslite0
-    - from: vip0
-      to: dslite0
-    - from: lan6-ha
-      to: dslite0
-    - from: lan0
-      to: dslite1
-    - from: vip0
-      to: dslite1
-    - from: lan6-ha
-      to: dslite1
-    - from: lan0
-      to: dslite2
-    - from: vip0
-      to: dslite2
-    - from: lan6-ha
-      to: dslite2
-    - from: lan0
-      to: dslite3
-    - from: vip0
-      to: dslite3
-    - from: lan6-ha
-      to: dslite3
-    - from: lan0
-      to: wan-ha
-    - from: vip0
-      to: wan-ha
-    - from: lan6-ha
-      to: wan-ha
-    - from: lan0
-      to: wan0
-    - from: vip0
-      to: wan0
-    - from: lan6-ha
-      to: wan0
-    - from: lan0
-      to: mgmt0
-    - from: vip0
-      to: mgmt0
+      # Saved sameRoleAccept within trust.
+      - {from: lan0, to: lan0}
+      - {from: lan0, to: vip0}
+      - {from: lan0, to: lan6-ha}
+      - {from: lan0, to: tailscale0}
+      - {from: vip0, to: lan0}
+      - {from: vip0, to: vip0}
+      - {from: vip0, to: lan6-ha}
+      - {from: vip0, to: tailscale0}
+      - {from: lan6-ha, to: lan0}
+      - {from: lan6-ha, to: vip0}
+      - {from: lan6-ha, to: lan6-ha}
+      - {from: lan6-ha, to: tailscale0}
+      - {from: tailscale0, to: lan0}
+      - {from: tailscale0, to: vip0}
+      - {from: tailscale0, to: lan6-ha}
+      - {from: tailscale0, to: tailscale0}
+      # Trust may reach untrust.
+      - {from: lan0, to: wan0}
+      - {from: lan0, to: wan-ha}
+      - {from: lan0, to: dslite0}
+      - {from: lan0, to: dslite1}
+      - {from: lan0, to: dslite2}
+      - {from: lan0, to: dslite3}
+      - {from: vip0, to: wan0}
+      - {from: vip0, to: wan-ha}
+      - {from: vip0, to: dslite0}
+      - {from: vip0, to: dslite1}
+      - {from: vip0, to: dslite2}
+      - {from: vip0, to: dslite3}
+      - {from: lan6-ha, to: wan0}
+      - {from: lan6-ha, to: wan-ha}
+      - {from: lan6-ha, to: dslite0}
+      - {from: lan6-ha, to: dslite1}
+      - {from: lan6-ha, to: dslite2}
+      - {from: lan6-ha, to: dslite3}
+      - {from: tailscale0, to: wan0}
+      - {from: tailscale0, to: wan-ha}
+      - {from: tailscale0, to: dslite0}
+      - {from: tailscale0, to: dslite1}
+      - {from: tailscale0, to: dslite2}
+      - {from: tailscale0, to: dslite3}
+      # Saved explicit LAN-zone to management-zone allow.
+      - {from: lan0, to: mgmt0}
+      - {from: vip0, to: mgmt0}
+      - {from: lan6-ha, to: mgmt0}
+      - {from: tailscale0, to: mgmt0}
+      # Saved sameRoleAccept within untrust.
+      - {from: wan0, to: wan0}
+      - {from: wan0, to: wan-ha}
+      - {from: wan0, to: dslite0}
+      - {from: wan0, to: dslite1}
+      - {from: wan0, to: dslite2}
+      - {from: wan0, to: dslite3}
+      - {from: wan-ha, to: wan0}
+      - {from: wan-ha, to: wan-ha}
+      - {from: wan-ha, to: dslite0}
+      - {from: wan-ha, to: dslite1}
+      - {from: wan-ha, to: dslite2}
+      - {from: wan-ha, to: dslite3}
+      - {from: dslite0, to: wan0}
+      - {from: dslite0, to: wan-ha}
+      - {from: dslite0, to: dslite0}
+      - {from: dslite0, to: dslite1}
+      - {from: dslite0, to: dslite2}
+      - {from: dslite0, to: dslite3}
+      - {from: dslite1, to: wan0}
+      - {from: dslite1, to: wan-ha}
+      - {from: dslite1, to: dslite0}
+      - {from: dslite1, to: dslite1}
+      - {from: dslite1, to: dslite2}
+      - {from: dslite1, to: dslite3}
+      - {from: dslite2, to: wan0}
+      - {from: dslite2, to: wan-ha}
+      - {from: dslite2, to: dslite0}
+      - {from: dslite2, to: dslite1}
+      - {from: dslite2, to: dslite2}
+      - {from: dslite2, to: dslite3}
+      - {from: dslite3, to: wan0}
+      - {from: dslite3, to: wan-ha}
+      - {from: dslite3, to: dslite0}
+      - {from: dslite3, to: dslite1}
+      - {from: dslite3, to: dslite2}
+      - {from: dslite3, to: dslite3}
     mss_clamp:
     - from: lan0
       to: dslite1

@@ -62,7 +62,15 @@ WAN/tailnet captureは各最大8MB、PD captureはudp546と実行時間で限定
 
 単体では既存管理peerと独立WAN FRR peerを使う。独立WAN peerの初期設定に管理網への戻り経路を宣言し、管理peerにWAN peer宛のhost routeを管理gateway経由で一時設定する。単体再起動後にも往復を確認し、既存の有界WAN captureでmgmt0 ingress/wan0 egressと応答を照合する。
 
-二台では独立管理端末から現用nodeを経由し、実DHCP leaseのLAN echo serverへ接続する。初期と両方向切替後でTCP/UDP・元送信元を確認する。各確認のhost routeはfinallyで撤去し、管理SSH/Web/DNSとLANからの管理console拒否も同時に維持する。全zone/policy項目の照合は継続する。
+二台では独立管理端末から現用nodeを経由し、実DHCP leaseのLAN echo serverへ接続する。初期と両方向切替後でTCP/UDP・元送信元を確認する。各確認のhost routeはfinallyで撤去し、管理SSH/Web/DNSとLANからの管理console拒否も同時に維持する。
+
+## 保存FirewallPolicyの同role転送
+
+保存zoneのrole/interfaceと、旧routerdのwriteFirewallPairChain/implicitFirewallActionを照合する。native三例の既存forward pairsでtrust内、trust→untrust、明示trust→management、sameRoleAcceptによるuntrust内の許可を表現する。管理発の許可とinput/forwardのlogDenyも同じprofileで維持する。
+
+通常単体/二台手順は、既存WAN FRR peerから、実DHCPで得たgateway peerのWAN addressへTCP/UDPを送る。両端は異なるsubnetで、WAN FRRのhost routeは製品経由とし、gatewayの戻り経路を初期setupで宣言する。単体はwan0内のrouting、二台は現用の物理WAN addressをnext hopにしてwan0→wan-ha、共有WAN identityを経由する戻りを確認する。host routeはfinallyで撤去する。packet captureの入出interfaceと往復、peerが受けた元送信元を照合する。
+
+単体の全daemon再起動、二台の両方向切替/再加入後にも確認し、既存WAN→LAN新規着信とWAN→selfの拒否・NFLOG/OTLPを同時に確認する。同じ全機能profileの端末通信と役割の境界を観測する。
 
 ## HA基盤の再実行
 
