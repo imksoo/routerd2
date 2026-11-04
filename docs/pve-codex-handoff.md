@@ -1,5 +1,14 @@
 # routerd2 開発引き継ぎ
 
+## 単体全構成でのNTP全上流停止・復旧
+
+基準main `6881c72` + 実通信手順追加、通常build `6881c720e1a5`、Linux `6.8.0-136-generic`、45-resource単体例・実HGW/ens18・独立LAN chronyd端末2台で確認した。旧routerdのresolveServersとserver/iburst/listen/allow、現行の同じchronydを維持する経路を読んでから、router namespaceのoutputだけでUDP宛先123を遮断した。実counterは5packet、遮断74.06秒の間も両端末のNTP品質判定と両IP DNS/HTTPSが通過。root dispersionは0.002228054秒だった。解除後37.28秒で同じworker PID/generationの実reference_timeが進み、両端末が再度時刻を取得した。captureで上流IPv6 NTP request/replyとLAN応答を照合した。poll周期・独立clientの品質/8秒期限・製品設定は変えていない。
+
+同じ通常`make check-uplink`（`UPLINK_SECONDS=20 UPLINK_FULL_RESTART=1 UPLINK_TAILNET=1`）は終了0。DHCP各scope/Information/SLAAC・DNS/DoH・4 DS-Lite・静的経路/NAT・BGP・管理・nDPI/履歴/syslog/OTLP・Tailscaleと全daemon再起動後の再確認が通過した。PD SIGKILL2.29秒/通常再起動5.83秒、設定timeout30.09秒/control再起動5.75秒、全daemon後の全項目再確認111.71秒（転送断時間ではない）、2巡回/自然PD更新0回。通常buildの3 ELF static linkと`make check`（Race/vet/Python）・fmt-checkも通過。owner/process/namespaceは正常終了で撤去された。
+
+今回の既存NTP実装はこの条件を通過したため、製品Goの変更は不要だった。実通信手順を通常の単体gateへ接続した。共有hostの時計補正は無効。長時間holdover品質、独立kernelでのappliance時計補正、実BIOS/UEFI起動・state保持、対象NIC/storage、whole-OS署名/A-B更新は継続する。再実行は[試験計画](test-plan.md#単体全構成のntp全上流停止復旧)。一時capture/logと重複build出力はcommit/push後に撤去する。
+
+
 ## GRUB対応ソース付き通常disk build
 
 2026-11-04、基準main `9c639e0` + 本変更、通常image build `9c639e08d492` / kernel `6.18.60-0-lts`で、`make image`とprivate mount namespace内の`make disk-image`が終了0。Debian/Ubuntu build hostの実インストールpackageからGRUB `2.12-1ubuntu7.3`の対応sourceを選び、認証済みAPT downloadの`grub2`と`grub2-unsigned`をDSCのsize/SHA256で検証して同梱する。3 binary packageのcopyright、元source・Debian recipe/patchとmetadataを含む`grub-sources.tar`のSHA256は`03ec98ae0d20d60a685b51227622519504f98be359fa7ffba2ec662e5bac8fdd`。

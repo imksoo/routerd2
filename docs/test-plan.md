@@ -127,6 +127,12 @@ rootで`nsenter --mount=/proc/<owner_pid>/ns/mnt ip netns exec <router>`内のWA
 3. **全34 work package。** SYS（OS/capability/time/worker障害/watchdog）、NET（PPPoE/link/VRF/VXLAN/DHCPv6 stateful/relay/DNS/BGP/BFD/WireGuard）、CORE/OPS（transaction/lifecycle/event/dynamic config/plugin/API/CLI/Web/logging/retention/DPI）、HA/EXT（同期/IPsec/Tailscale）、CLOUD（provider/federation/SAM）、DIST（signed runtime/boot/更新/A-B/実機/arm64/cloud image/Kubernetes）を各packageの受入条件で実peerへ接続する。一つの不具合で独立作業を止めない。
 4. **QUAL。** 全field/default/lifecycle/status/eventと明示的置換、各配布先の通信・障害復旧・性能・更新rollbackを照合する。対象ONU/NIC/providerが使えなければ最小の不足setupと未受入範囲を残す。本番変更/課金は実際のauthorization内で行い、全条件が実証されるまで全体完成を宣言しない。
 
+## 単体全構成のNTP全上流停止・復旧
+
+通常の単体`make check-uplink`はNTP同期と独立LAN端末2台の時刻取得後、router namespaceのoutputだけでUDP宛先123を遮断する。実nft counterの増加で上流照会の遮断を確認し、その後30秒以上のholdover中に同じ独立chronydの品質判定でLAN応答を確認する。両IPのDNS UDP/TCP・HTTPSも確認する。起動時の未同期と、取得済みの時刻を保つholdoverを区別し、遮断直後の未同期化は要求しない。
+
+遮断をfinallyで撤去し、chronydの実reference_timeが遮断中の値より進み、同じworker PID/generationで再取得することを確認する。自然のpoll周期を変えず、遮断packet待ちと復旧待ちは各150秒を上限とする。LANへの時刻応答・上流request/replyを最大100packetのcaptureで確認し、終了時に撤去する。host時計補正は無効のまま、製品設定・共有hostのroute/clockは変更しない。この短いholdover確認と、長時間品質・appliance時計補正・対象実機を区別する。
+
 ## 通常署名bundleのPID 1起動とPPPoE/PD
 
 `make check-pppoe-pd DOCKER='sudo -n docker'`は通常の3実行物・全5 engineとsource/licenseを

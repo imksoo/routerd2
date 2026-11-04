@@ -1,5 +1,7 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
+単体全構成のNTP全上流停止・復旧を実HGWと独立chronyd端末で確認した。通常build `6881c720e1a5`、74.06秒の全上流遮断中もLAN時刻取得と両IP DNS/HTTPSを維持し、解除後37.28秒で同じworkerの新しい参照時刻を取得した。既存製品実装で通過し、通常単体gateへ再実行手順を接続した。長時間品質・appliance時計補正と実機/whole-OS更新は残る。条件とcapture確認は[引き継ぎ](pve-codex-handoff.md)へ記録する。
+
 通常disk buildへGRUB対応source・3 packageのcopyright同梱を接続した。基準main `9c639e0` + 本変更、通常image build `9c639e08d492`でimage/disk生成と実read-only内容検査、既存出力の保持確認が通過した。Debian/Ubuntu build hostの認証済みAPT sourceを使用する。実起動・再起動後state・対象実機と署名whole-OS更新は残る。条件と再実行は[引き継ぎ](pve-codex-handoff.md)へ記録した。
 
 保存FirewallPolicyのlogDeny/sameRoleAcceptとrole/interfaceの許可関係をnative三例へ接続した。変更前のWAN同role間TCP期限切れを再現し、既存forward pairsへ保存意図を表現した。通常build `e4e822133f20`の単体全daemon再起動と両方向HAが終了0。独立WAN peer間TCP/UDP・元送信元、wan0/wan-haの実capture、WAN→LAN/self拒否と履歴を確認した。今回のNTP照会timeoutは0回。実サイト全構成・対象実機/更新/時計補正/MTUの残る受入と測定値は[引き継ぎ](pve-codex-handoff.md)へ記録する。

@@ -391,10 +391,10 @@ SSH keys and fallback between signed userland generations. Configured signed
 userland selection includes trial/health confirmation and rollback; it is not
 a bootloader or kernel/rootfs A/B update.
 
-The BIOS raw disk is the only disk format currently produced. No installer ISO,
-cloud image or cloud-provider integration is produced. UEFI, Secure Boot
-enrollment, bootloader slot selection and physical power-loss guarantees remain
-outside this builder.
+The combined BIOS/UEFI GPT raw disk is the disk format currently produced.
+Installer ISO, cloud images and cloud-provider integration remain to be built.
+Secure Boot enrollment, bootloader slot selection and physical power-loss
+recovery remain acceptance work.
 `bootloader_ab_updates` remains false for both state-volume profiles.
 
 Alpine and Go patch versions are pinned in the build arguments. The kernel

@@ -1438,6 +1438,46 @@ print(*s.getsockname())
             assert selected[0]["dev"] == "dslite0", "IPv4 traffic bypassed the AFTR"
 
         if config_path is not None:
+            time_worker = next(m for m in query("supervisor.sock", "/v1/status")["modules"] if m["name"] == "service.time")
+            ntp_packets = start(router, ["tcpdump", "--immediate-mode", "-Z", "root", "-U", "-n", "-i", "any",
+                "-c", "100", "-w", str(stage / "ntp-outage.pcap"), "udp port 123"], "ntp-outage-capture")
+            outage = stage / "ntp-outage.nft"
+            outage.write_text('table inet r2_ntp_outage {\n chain output { type filter hook output priority -300; policy accept; udp dport 123 counter drop; }\n}\n')
+            run(inside(router, ["nft", "-f", str(outage)]))
+            outage_started = time.monotonic()
+
+            def ntp_drops():
+                rules = json.loads(run(inside(router, ["nft", "-j", "list", "table", "inet", "r2_ntp_outage"])))
+                return sum(expr["counter"]["packets"] for item in rules["nftables"]
+                    for expr in item.get("rule", {}).get("expr", []) if "counter" in expr)
+
+            try:
+                wait(lambda: ntp_drops() > 0, 150)
+                time.sleep(30)
+                check_time()
+                check_traffic()
+                held_time = query("control.sock", "/v1/services/service.time")["snapshot"]
+                dropped = ntp_drops()
+                print("PASS all NTP upstream traffic blocked; LAN clients accepted holdover time and both IP families retained DNS/HTTPS; seconds",
+                    round(time.monotonic() - outage_started, 2), "dropped", dropped,
+                    "root dispersion", held_time["root_dispersion_seconds"], flush=True)
+            finally:
+                run(inside(router, ["nft", "delete", "table", "inet", "r2_ntp_outage"]))
+            restored_at = time.monotonic()
+
+            def fresh_time_reference():
+                snapshot = query("control.sock", "/v1/services/service.time").get("snapshot", {})
+                return snapshot.get("synchronized", False) and datetime.fromisoformat(snapshot["reference_time"]) > datetime.fromisoformat(held_time["reference_time"])
+
+            wait(fresh_time_reference, 150)
+            restored_worker = next(m for m in query("supervisor.sock", "/v1/status")["modules"] if m["name"] == "service.time")
+            assert (time_worker["pid"], time_worker["generation"]) == (restored_worker["pid"], restored_worker["generation"]), "NTP worker restarted during upstream loss/recovery"
+            check_time()
+            ntp_packets.terminate()
+            ntp_packets.wait(timeout=5)
+            packets = run(["tcpdump", "-nn", "-r", str(stage / "ntp-outage.pcap"), "-c", "12"])
+            print("Observed NTP packets", packets, flush=True)
+            print("PASS NTP upstream recovered with a newer real reference on the same worker; seconds", round(time.monotonic() - restored_at, 2), flush=True)
             # Disable the candidate LAN cache as well as changing the core zone:
             # both applications and rollback must be visible to the same client.
             for recovery in ("timeout", "restart"):
