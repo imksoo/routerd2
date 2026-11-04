@@ -264,13 +264,15 @@ HA runnerの設定ファイル・local domain・DoH providerの固定を撤去�
 
 これは明示した短いpolicyの自然期限・送信error/復旧と27件の受信確認であり、7日経過、lossless UDP配送、全signal/物理機器の資格ではない。変更した二台設定例はschema検証済みで、このarchive条件のHA実通信は未実行。
 
-## 失敗した署名候補からの実通信復旧
+## 失敗した署名候補の保存所有者と実通信復旧
 
-2026-11-03、通常build `30054e56fdf6` / `799377d12628`の全factory署名bundleと独立RP-PPPoE/ISC/Linux LANで、更新→明示的復帰→失敗候補からの自動選択復旧が終了0。確認済み版へ再度rollbackする候補の起動時に、router namespace内の独立UDP processでDNS port53を占有した。実DNS workerのEADDRINUSEを観測し、11:03:26 UTC開始の既定120秒trialが11:05:26 UTCに失敗して製品自身がrebootを要求した。読取専用CLIで失敗digest、以前のactive、pending/attempt解消を確認。競合process終了後、保存選択/設定を手修復せずPID 1を再起動し、旧runtimeとpaired startupのrecovered記録、revisionの採用、更新後に追加したDNS回答、DUID、DNS UDP/TCPと両IP TCP/UDPが復旧した。high watermark=2、正常poweroff、captureの上流PD Releaseなしも通過。
+2026-11-04、基準main `b08753c` + 本変更、通常build `3ecfdf4ff83b` → `b08753c90ee3`の署名runtime更新・復帰が`make check-runtime-update`で終了0。今回はsupervisorの実装変更を跨ぐ。全factory engine/source/licenseを含む通常bundleを使い、独立RP-PPPoEのPAP・ISC DHCPv6・Linux LAN端末で実PID 1のupload/stage/prepare、自動confirm、旧版への明示rollbackと候補失敗からの選択復旧を確認した。
 
-同sequenceのprepare再送はhigh watermarkで拒否される。確認済み保存版の選択には既存のrollback APIを使い、境界を緩めない。DNS競合時の最初の期限処理ではrelease store busyも記録され、その後の停止処理で失敗状態が保存された。上記の実保存状態と復旧を確認しており、busyを候補正常確認へ読み替えていない。製品Goの変更なし。通常Makefile build/3 static実行物、`make race vet`とPython補助36件が通過。再実行は試験計画の`make check-runtime-update`。
+以前のDNS port53競合では、期限監視が設定writerのrelease store lockと競合し、停止前のFailBootはbusyとなり、停止後の呼出しで一般的なstartup失敗理由が保存されていた。監視はreadiness期限errorを返し、PID 1が実worker treeを停止してから失敗を一度保存する形にした。破棄したfail callbackと対応test stateを削除し、元の期限理由はtyped errorから選ぶ。通常shutdownとconfirmの所有権は維持する。
 
-これはOS待受競合による候補失敗と、外部競合解消後の復旧の確認。両buildの製品Goは同一で、同じkernelのPID namespaceを再起動した。実装/ABI変更を跨ぐ更新、kernel/bootloader再起動・停電、競合が続いた状態でのDNS提供、全homert profile/ONU/NIC資格は残る。PVE/QEMUと追加PBR調査、共有host時計の変更は行っていない。
+今回も候補の起動前に独立UDP processでDNS port53を占有し、既定120秒trialの失敗と製品のrebootを待った。読取専用release CLIで、失敗対象digestと元の`release readiness deadline exceeded`理由、以前のactive、pending/attempt解消を照合した。競合processを止め、保存state/設定の手修復をせずに同じboot経路で旧版へ復帰した。paired startupのrecovered記録とrevision進行、更新後に追加したDNS回答、同じDUID、両IP DNS UDP/TCP・TCP/UDP通信、high watermark=2、正常poweroff/上流PD Releaseなしを確認した。
+
+`make check`（Race/vet/Python）・fmt-check、関連Go check、通常3実行物のstatic linkも通過。再実行は[試験計画](test-plan.md#通常runtimeの署名更新復帰)の通常Make手順。owner/process/namespaceとfactory store/bundle/鍵は終了時に撤去する。同一kernel上のPID namespace再起動によるruntime受入であり、kernel/bootloader再起動・停電・全homert appliance構成と対象ONU/NICは残る。NTP起動品質と独立実機での時計補正も継続する。PVE/QEMU・追加PBR調査・共有host時計の変更は行っていない。
 
 ## 通常runtimeの実通信更新・復帰
 

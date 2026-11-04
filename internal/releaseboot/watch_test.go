@@ -19,7 +19,7 @@ import (
 
 func TestContinuousHealthWindowAndChangedConfirmation(t *testing.T) {
 	t.Parallel()
-	checks, confirms, failures := 0, 0, 0
+	checks, confirms := 0, 0
 	start := time.Now()
 	err := watch(context.Background(), 4*time.Second, 550*time.Millisecond,
 		func(context.Context) error {
@@ -38,16 +38,15 @@ func TestContinuousHealthWindowAndChangedConfirmation(t *testing.T) {
 				return errTrialHealthChanged
 			}
 			return nil
-		},
-		func(context.Context) error { failures++; return nil })
-	if err != nil || confirms != 3 || failures != 0 || checks < 7 || time.Since(start) < 1500*time.Millisecond {
-		t.Fatalf("unstable or busy trial incorrectly confirmed: checks=%d confirms=%d failures=%d elapsed=%s err=%v", checks, confirms, failures, time.Since(start), err)
+		})
+	if err != nil || confirms != 3 || checks < 7 || time.Since(start) < 1500*time.Millisecond {
+		t.Fatalf("unstable or busy trial incorrectly confirmed: checks=%d confirms=%d elapsed=%s err=%v", checks, confirms, time.Since(start), err)
 	}
 }
 
 func TestDeadlineCannotConfirmAfterSlowHealthRead(t *testing.T) {
 	t.Parallel()
-	confirmed, failed := false, false
+	confirmed := false
 	err := watch(context.Background(), 400*time.Millisecond, time.Nanosecond,
 		func(ctx context.Context) error {
 			select {
@@ -57,10 +56,9 @@ func TestDeadlineCannotConfirmAfterSlowHealthRead(t *testing.T) {
 				return ctx.Err()
 			}
 		},
-		func(context.Context) error { confirmed = true; return nil },
-		func(context.Context) error { failed = true; return nil })
-	if err == nil || !strings.Contains(err.Error(), "deadline") || confirmed || !failed {
-		t.Fatalf("deadline bypass: confirmed=%t failed=%t err=%v", confirmed, failed, err)
+		func(context.Context) error { confirmed = true; return nil })
+	if !errors.Is(err, errTrialDeadline) || confirmed {
+		t.Fatalf("deadline bypass: confirmed=%t err=%v", confirmed, err)
 	}
 }
 
@@ -70,7 +68,7 @@ func TestShutdownDoesNotConfirmOrDeclareFailedBoot(t *testing.T) {
 	cancel()
 	called := false
 	callback := func(context.Context) error { called = true; return nil }
-	if err := watch(ctx, time.Second, time.Millisecond, callback, callback, callback); err != nil || called {
+	if err := watch(ctx, time.Second, time.Millisecond, callback, callback); err != nil || called {
 		t.Fatal("shutdown changed boot selection", called, err)
 	}
 }
@@ -80,8 +78,7 @@ func TestStaleConfirmationIsNotRetriedAsCurrentBoot(t *testing.T) {
 	confirmed := 0
 	err := watch(context.Background(), 2*time.Second, time.Nanosecond,
 		func(context.Context) error { return nil },
-		func(context.Context) error { confirmed++; return release.ErrStale },
-		func(context.Context) error { t.Fatal("failure callback must not target an unrelated boot"); return nil })
+		func(context.Context) error { confirmed++; return release.ErrStale })
 	if !errors.Is(err, release.ErrStale) || confirmed != 1 {
 		t.Fatal("stale attempt retried", confirmed, err)
 	}
@@ -102,8 +99,7 @@ func TestConfirmationUsesRemainingTrialBudget(t *testing.T) {
 			case <-ctx.Done():
 				return ctx.Err()
 			}
-		},
-		func(context.Context) error { t.Error("valid slow verification failed the boot"); return nil })
+		})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,13 +107,11 @@ func TestConfirmationUsesRemainingTrialBudget(t *testing.T) {
 
 func TestConfirmationCannotOutliveTrialBudget(t *testing.T) {
 	t.Parallel()
-	failed := false
 	err := watch(context.Background(), time.Second, time.Nanosecond,
 		func(context.Context) error { return nil },
-		func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() },
-		func(context.Context) error { failed = true; return nil })
-	if err == nil || !failed || !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("overdue verification did not fail the trial: failed=%t err=%v", failed, err)
+		func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() })
+	if !errors.Is(err, errTrialDeadline) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("overdue verification did not fail the trial: err=%v", err)
 	}
 }
 
@@ -127,8 +121,7 @@ func TestShutdownDuringConfirmationPreservesUnconfirmedTrial(t *testing.T) {
 	defer cancel()
 	err := watch(ctx, 4*time.Second, time.Nanosecond,
 		func(context.Context) error { return nil },
-		func(call context.Context) error { cancel(); <-call.Done(); return call.Err() },
-		func(context.Context) error { t.Error("ordinary shutdown declared a failed boot"); return nil })
+		func(call context.Context) error { cancel(); <-call.Done(); return call.Err() })
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -139,7 +139,8 @@ PVE/QEMUは実行しない。終了後は以前のbuild copy、両bundle/store�
 同じsequenceのprepare再送はhigh watermarkで拒否されるため、既存版の選択には専用rollback操作を使う。
 旧runtime終了後、隔離router namespaceだけで独立UDP processがDNS port53を占有する。
 候補のDNS起動失敗から製品が失敗を保存してrebootを要求するまで待つ（製品の既定120秒判定は変更しない）。
-保存状態は読取専用CLIで確認し、失敗対象digest・以前のactive・pending/attemptの解消を照合する。
+期限監視は失敗を返し、PID 1がworkerを停止して設定writerのrelease store lockを解放してから失敗を保存する。
+保存状態は読取専用CLIで確認し、失敗対象digest・元のreadiness期限理由・以前のactive・pending/attemptの解消を照合する。
 独立processを停止して外部競合を解消し、同じ保存状態からPID 1を再起動する。
 以前のruntime、paired startupのrecovered記録、採用revision、更新後に追加したDNS設定/DUIDと
 両IP TCP/UDP/DNSの実回答を確認する。保存選択・設定・署名物の手修復は行わない。

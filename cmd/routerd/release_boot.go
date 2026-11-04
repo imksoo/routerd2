@@ -101,7 +101,7 @@ func bootConfigured(path string, b runtimeconfig.Boot) error {
 	if err != nil {
 		// Early failures before the watcher starts still leave an explicit
 		// rollback record. A completed Confirm/FailBoot legitimately fences it.
-		failure := trial.Fail(context.Background(), "selected userland failed during startup")
+		failure := trial.Fail(context.Background(), err)
 		if !errors.Is(failure, release.ErrStale) {
 			err = errors.Join(err, failure)
 		}

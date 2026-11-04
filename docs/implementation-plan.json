@@ -1811,6 +1811,11 @@
           "installed_config_sha256": "b1f96fd4f6b51f9cee1ff97081cb98439a20dca8cbb672d0d6ee09300a1e0789",
           "remaining": "Kernel recompilation, boot on this kernel, independent-clock full homert appliance/update acceptance, target physical hardware/ONU/NIC and arm64 execution remain unverified. No PVE/QEMU execution in this task."
         }
+      },
+      "trial_failure_owner": {
+        "implementation": "Readiness watcher now returns a typed deadline failure. PID1 drains supervisor workers and then records FailBoot, releasing the configuration writer store lock before selection mutation. Removed the watcher failure callback and obsolete private-test failure state. The existing early-startup boundary still records errors before the watcher exists. Fail classifies the original deadline instead of replacing it with a generic startup reason.",
+        "validation": "2026-11-04 baseline main b08753c plus changes, normal builds3ecfdf4ff83b -> b08753c90ee3. make check-runtime-update exited0 across actual supervisor implementation change. Factory signed catalog with all engines/source/license, independent RP-PPPoE PAP/ISC DHCPv6/Linux LAN, actual upload/stage/prepare/automatic confirm, explicit rollback and failed-candidate automatic selection recovery. Independent UDP process occupied DNS53, default120s trial failed and rebooted. Read-only CLI verified failed digest and original readiness deadline reason, previous active, cleared pending/attempt. After external conflict removal, ordinary PID1 boot restored paired startup/revision/current newer DNS settings/DUID and dual-family DNS UDP/TCP plus TCP/UDP. Watermark2 and normal poweroff/no upstream PD Release passed. make check/race/vet/Python,fmt-check,related Go checks and static3 binaries passed.",
+        "remaining": "Same-kernel PID-namespace reboot qualifies runtime selection and real communication. Physical/kernel/bootloader/power-loss and full homert appliance/independent-clock update remain. No PVE/QEMU, additional PBR or host clock changes."
       }
     },
     {

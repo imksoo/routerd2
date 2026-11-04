@@ -256,7 +256,7 @@ func serveRuntime(b runtimeconfig.Boot, trial *releaseboot.Trial, authority *rel
 		cancel()
 		err = errors.Join(err, <-trialDone)
 		if err != nil {
-			failure := trial.Fail(context.Background(), "selected userland failed during startup")
+			failure := trial.Fail(context.Background(), err)
 			if !errors.Is(failure, release.ErrStale) {
 				err = errors.Join(err, failure)
 			}

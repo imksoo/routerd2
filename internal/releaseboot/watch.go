@@ -33,6 +33,7 @@ type Trial struct {
 }
 
 var errTrialHealthChanged = errors.New("trial health changed during confirmation")
+var errTrialDeadline = errors.New("release readiness deadline exceeded")
 
 type healthWitness struct {
 	key           string
@@ -113,6 +114,8 @@ func (t Trial) witness(ctx context.Context) (healthWitness, error) {
 
 // Watch uses elapsed monotonic time. Context cancellation is ordinary shutdown,
 // leaving a trial unconfirmed for the next boot's bounded retry policy.
+// On failure the caller stops workers before recording Fail, so configuration
+// writers cannot hold the selection lock while failure is committed.
 func (t Trial) Watch(ctx context.Context) error {
 	if t.Store == nil || t.Timeout <= 0 || t.Stable <= 0 || t.Stable >= t.Timeout {
 		return errors.New("invalid release health trial")
@@ -163,10 +166,14 @@ func (t Trial) Watch(ctx context.Context) error {
 			slog.Info("runtime update confirmed", "release", t.Release.ReleaseID, "digest", t.Release.Digest)
 		}
 		return err
-	}, func(ctx context.Context) error { return t.Fail(ctx, "release readiness deadline exceeded") })
+	})
 }
 
-func (t Trial) Fail(ctx context.Context, reason string) error {
+func (t Trial) Fail(ctx context.Context, cause error) error {
+	reason := "selected userland failed during startup"
+	if errors.Is(cause, errTrialDeadline) {
+		reason = errTrialDeadline.Error()
+	}
 	// Recording failure changes only selection. The next BeginBoot qualifies
 	// executable bytes before fallback execution. Bound this journal cleanup.
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -186,7 +193,7 @@ func (t Trial) Fail(ctx context.Context, reason string) error {
 	return err
 }
 
-func watch(ctx context.Context, timeout, stable time.Duration, check, confirm, fail func(context.Context) error) error {
+func watch(ctx context.Context, timeout, stable time.Duration, check, confirm func(context.Context) error) error {
 	deadlineAt := time.Now().Add(timeout)
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
@@ -199,10 +206,7 @@ func watch(ctx context.Context, timeout, stable time.Duration, check, confirm, f
 		case <-ctx.Done():
 			return nil
 		case <-deadline.C:
-			cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			err := fail(cleanup)
-			cancel()
-			return errors.Join(errors.New("release readiness deadline exceeded"), last, err)
+			return errors.Join(errTrialDeadline, last)
 		case <-ticker.C:
 			call, cancel := context.WithTimeout(ctx, time.Second)
 			err := check(call)

@@ -295,6 +295,8 @@ def peer(stage, auth, dhcp6_server):
                         assert daemon.returncode == -signal.SIGHUP, daemon.returncode
                         failed = json.loads(run([str(stage.parent / "routerd"), "release", "status", *selector]))
                         assert failed["last_failure"]["release"]["digest"] == target["digest"]
+                        assert failed["last_failure"]["reason"] == "release readiness deadline exceeded", failed["last_failure"]
+                        print("PASS readiness failure persisted after worker shutdown with its original deadline reason", flush=True)
                         assert failed["active"]["release_id"] == baseline and not failed.get("attempt") and not failed.get("pending")
                         occupied.terminate()
                         occupied.wait(timeout=3)
