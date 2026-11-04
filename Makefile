@@ -14,6 +14,8 @@ DISK_AUTHORIZED_KEY ?=
 DISK_ETC_DIR ?=
 DISK_STATE_DIR ?=
 DISK_GRUB_SOURCE_DIR ?=
+DISK_SIZE_GIB ?= 32
+DISK_DEVICE ?=
 CONTAINER_TAG ?= routerd2:dev
 QEMU_TIMEOUT ?= 90
 QEMU_DAEMON_TIMEOUT ?= 180
@@ -104,6 +106,7 @@ help:
 	  'make apk               Test and build the Alpine package with abuild' \
 	  'make image             Export Alpine kernel/initramfs with matching sources' \
 	  'make disk-image        Create a BIOS/UEFI GPT disk from an existing APK image (root/private mount namespace)' \
+	  'make install-disk      Overwrite DISK_DEVICE with the prepared DISK_DIR/routerd.raw (root)' \
 	  'make qemu-smoke        Boot the image in QEMU; optionally verify SSH' \
 	  'make qemu-ntp          Verify appliance clock correction, LAN time and drift recovery' \
 	  'make qemu-network      Run native network tests in a separate QEMU guest' \
@@ -388,7 +391,12 @@ image: ndpi-modules pppoe-engine dnsmasq-engine conntrack-engine tailscale-engin
 .PHONY: disk-image
 disk-image:
 	@test -n '$(DISK_GRUB_SOURCE_DIR)' || { printf '%s\n' 'Set DISK_GRUB_SOURCE_DIR to authenticated downloaded GRUB source packages'; exit 1; }
-	$(PYTHON) scripts/build-disk-image.py --image-dir $(IMAGE_DIR) --output $(DISK_DIR) --state-device $(DISK_STATE_DEVICE) --grub-source-dir '$(DISK_GRUB_SOURCE_DIR)' $(if $(DISK_CONFIG),--config $(DISK_CONFIG),) $(if $(DISK_AUTHORIZED_KEY),--authorized-key $(DISK_AUTHORIZED_KEY),) $(if $(DISK_ETC_DIR),--etc-dir $(DISK_ETC_DIR),) $(if $(DISK_STATE_DIR),--state-dir "$(DISK_STATE_DIR)",)
+	$(PYTHON) scripts/build-disk-image.py --image-dir $(IMAGE_DIR) --output $(DISK_DIR) --size-gib '$(DISK_SIZE_GIB)' --state-device $(DISK_STATE_DEVICE) --grub-source-dir '$(DISK_GRUB_SOURCE_DIR)' $(if $(DISK_CONFIG),--config $(DISK_CONFIG),) $(if $(DISK_AUTHORIZED_KEY),--authorized-key $(DISK_AUTHORIZED_KEY),) $(if $(DISK_ETC_DIR),--etc-dir $(DISK_ETC_DIR),) $(if $(DISK_STATE_DIR),--state-dir "$(DISK_STATE_DIR)",)
+
+.PHONY: install-disk
+install-disk:
+	@test -n '$(DISK_DEVICE)' || { printf '%s\n' 'Set DISK_DEVICE to the whole disk to overwrite'; exit 1; }
+	$(PYTHON) scripts/install-disk.py --image '$(DISK_DIR)/routerd.raw' --device '$(DISK_DEVICE)'
 
 qemu-smoke:
 	$(PYTHON) scripts/qemu-smoke.py --image-dir $(IMAGE_DIR) --timeout $(QEMU_TIMEOUT) $(if $(QEMU_SSH_KEY),--ssh-key $(QEMU_SSH_KEY),)

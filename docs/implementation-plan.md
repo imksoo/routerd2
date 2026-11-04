@@ -1,5 +1,7 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
+通常ディスクの初回導入を`make install-disk`へ接続した。通常build `0d2b132813a6`から実生成した2 GiB GPTを、同容量/+64 MiBの実loopへ書込み・flush・全byte読み戻し・GPT末尾移動・kernel区画再読込みまで受け入れた。別namespaceのmountによる排他拒否、実SSH keyと区画identityの保持も確認。Linux保守環境・512-byte論理sectorの初回導入であり、実起動/state二回保持・物理媒体・署名whole-OS/A-Bは残る。再実行と結果は[引き継ぎ](pve-codex-handoff.md)へ記録した。
+
 単体全構成のNTP全上流停止・復旧を実HGWと独立chronyd端末で確認した。通常build `6881c720e1a5`、74.06秒の全上流遮断中もLAN時刻取得と両IP DNS/HTTPSを維持し、解除後37.28秒で同じworkerの新しい参照時刻を取得した。既存製品実装で通過し、通常単体gateへ再実行手順を接続した。長時間品質・appliance時計補正と実機/whole-OS更新は残る。条件とcapture確認は[引き継ぎ](pve-codex-handoff.md)へ記録する。
 
 通常disk buildへGRUB対応source・3 packageのcopyright同梱を接続した。基準main `9c639e0` + 本変更、通常image build `9c639e08d492`でimage/disk生成と実read-only内容検査、既存出力の保持確認が通過した。Debian/Ubuntu build hostの認証済みAPT sourceを使用する。実起動・再起動後state・対象実機と署名whole-OS更新は残る。条件と再実行は[引き継ぎ](pve-codex-handoff.md)へ記録した。
@@ -1775,7 +1777,7 @@ runtime取得・prepare・bootでpayloadを検証する責任へ整理した。l
 
 再利用・比較元: routerd2 の既存 boot / release / control 基盤。旧 source の機能復元とは別の製品要件。
 
-実装先の案: `images`, `packaging/alpine`, `internal/boot`, `internal/releaseboot`, `internal/storage`, `installer (新設予定)`。
+実装先の案: `images`, `packaging/alpine`, `internal/boot`, `internal/releaseboot`, `internal/storage`, `scripts/install-disk.py`。
 
 #### DIST-03 — 各クラウドの OS image と provisioning
 

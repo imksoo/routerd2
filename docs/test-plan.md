@@ -289,3 +289,13 @@ DNSの待受は明示IPv4とIPv6 `::`を併記する。割当観測は元のreso
 生成物をread-only loopとして接続し、`sfdisk --verify`と4区画のname/type/size、EFIの`EFI/BOOT/BOOTX64.EFI`に対する`grub-file --is-x86_64-efi`、BIOS coreと`grub-script-check`を確認する。boot filesystemの実UUIDが共通GRUB設定へ使われ、kernel/initramfs/boot文書のdigestがmanifestと一致すること、boot文書のstate参照/認可公開鍵と第4区画の選択host keyのbytes/modeを照合する。`bootloader`のpackage/source対応・archive SHA256、同梱DSC/sourceの元APT downloadとの一致と3 packageのcopyrightを確認する。不要font/localeが配置されていないことも確認する。同じ出力先への再生成が失敗し、既存diskのinode/size/mtimeとmanifest/source bytesが維持されることを確認する。unmount/loop解除後、結果を集約して一時key/image/logを撤去する。
 
 これは実block/filesystemを使う生成内容の確認である。unsigned UEFIはSecure Boot無効が必要で、BIOS/UEFIの実起動、2回以上の起動でのstate保持、対象driver/firmware、停電、署名whole-OS更新・kernel/bootloader A/Bは対象機で別に受け入れる。PVE/QEMUは実行しない。現在のimageはvirtio中心のdriver closureであり、対象NIC/storageは実機情報に合わせて接続・検証する。
+
+## 通常ディスクの初回インストール
+
+[導入手順](../images/README.md#install-the-prepared-disk)の`make install-disk`へ、完成済み通常diskと明示した使い捨てloop deviceを渡す。通常`make image`の後、`DISK_SIZE_GIB=2`、`DISK_STATE_DEVICE=/dev/sda4`、実生成した選択SSH host keyを`DISK_STATE_DIR`へ渡して通常`make disk-image`を使う。署名/信頼の準備はwhole-OS受入へ残し、今回はローカルで準備したimageの導入を確認する。
+
+対象backing fileをimageと同容量、および64 MiB大きい容量でそれぞれ作り、`losetup --find --show --partscan`で接続する。device名のsymlinkを通常Make入口へ渡す。installerの全byte書込み・flush・SHA256読み戻し、GPT検証とkernel再読込みが通過することを確認する。独立した`sfdisk --json`で4区画のstart/size/type/UUID/nameとdisk GUIDを元imageへ照合し、primary headerのbackup LBAが実device末尾であることを確認する。
+
+導入先のboot/EFI/stateをread-onlyでmountし、kernel/initramfs digest、EFI executable、GRUB構文、実SSH key bytes/0600とstate root0700を確認する。別のprivate mount namespaceでこの3 mountを外した上で同じdeviceへの導入を試み、親namespaceのmountが残る間はkernelのEBUSYで書込み前に失敗し、元のkeyが維持されることを確認する。全mount解除後もpartition自体をtargetにすると書込み前に拒否されることを確認する。容量不足および4 KiB論理sectorのloop先でも、書込み前の拒否と元marker/割当blockの保持を確認する。unmount/loop解除後に一時disk/key/logを撤去する。
+
+これは実Linux block/filesystem経路の確認である。物理BIOS/UEFI起動、二回のbootでのstate保持、停電、whole-OS署名/更新・A/Bは対象機で別に受け入れる。追加容量は未割当のまま保持する。PVE/QEMUは実行しない。

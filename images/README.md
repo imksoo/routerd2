@@ -90,7 +90,9 @@ sudo unshare --mount --propagation private make disk-image \
   DISK_AUTHORIZED_KEY=/path/to/operator.pub
 ```
 
-The default disk is 32 GiB. Its GPT partitions are a 1 MiB BIOS boot area,
+The default disk is 32 GiB. `DISK_SIZE_GIB` selects the image size, with a minimum
+of 2 GiB. Choose a size that fits the target's actual byte capacity. Its GPT
+partitions are a 1 MiB BIOS boot area,
 a 128 MiB FAT32 EFI System Partition, a 1 GiB ext4 boot partition, and an ext4
 state partition occupying the remaining space. Both GRUB entrypoints select
 the boot filesystem by UUID and load the same kernel and initramfs. GRUB and
@@ -142,6 +144,38 @@ archive digest. The archive includes its own `metadata.json` package/source map.
 Unused fonts, themes and translations are omitted from the installed GRUB.
 A repeated build targeting an existing disk fails before changing that disk,
 its manifest or source archive.
+
+## Install the prepared disk
+
+Use a separate Linux maintenance environment with Python 3, util-linux and
+mounted `/proc` and `/sys`. Complete the image build and select the target's
+storage drivers and `DISK_STATE_DEVICE` before installation. Use the completed
+local image and identify the whole target disk by its persistent device name.
+The following command overwrites that disk, including its existing state.
+
+```sh
+sudo make install-disk DISK_DIR=dist/disk \
+  DISK_DEVICE=/dev/disk/by-id/REPLACE_WITH_TARGET_DISK
+```
+
+The installer opens the device exclusively through Linux, which prevents
+overwriting mounted disks or partitions even when their mounts belong to another
+namespace. It checks the real byte capacity and logical sector size before
+writing. The current GPT image uses 512-byte logical sectors. Device-name
+symlinks are accepted, and partition targets are rejected.
+
+The installer writes the complete image, flushes it and reads it back to compare
+SHA256. For a larger target it then uses util-linux to move the backup GPT header
+to the final sector. It verifies the resulting GPT and asks the kernel to reread
+the partitions before reporting success. Existing partition sizes and identities
+are retained, so additional capacity remains unallocated. Installation failure
+leaves an incomplete target that must be installed again before use.
+
+This is the offline first-install path for a locally prepared image. Signed
+whole-OS distribution, boot-slot updates and power-loss recovery remain to be
+implemented. Keep the source image's notices and corresponding sources with the
+installation media. Physical boot and persistent state over two boots require
+the target-specific acceptance described above.
 
 
 ## QEMU fixture with the embedded SSH CLI

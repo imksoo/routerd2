@@ -1,5 +1,14 @@
 # routerd2 開発引き継ぎ
 
+## 通常ディスクの初回インストール
+
+基準main `0d2b132` + 本変更、通常image build `0d2b132813a6` / kernel `6.18.60-0-lts`から、通常`make disk-image DISK_SIZE_GIB=2`で実選択SSH key付きGPTを作成した。`make install-disk`を追加し、明示されたwhole block deviceをLinuxの排他openで保持して書込み・flush・全byteのSHA256読み戻しを行う。大容量先では既存util-linuxでbackup GPTを実末尾へ移動し、GPT検証・kernelの区画再読込みを終えて成功を返す。初回導入は別のLinux保守環境から実行する。通常bootへformat/自動検出は追加していない。
+
+実loop deviceの同容量2 GiBと+64 MiBへ、device名のsymlinkを通常Make入口に渡して両方終了0。独立sfdiskとread-only mountでdisk GUID・4区画のidentity/start/size、backup末尾LBA、kernel/initramfs digest・EFI・GRUB、実SSH key bytes/0600とstate root0700を照合した。元disk SHA256は`6842ad5ba545cc3207ad90754339dcdc5aed802bdf3e4228c993e8f64cfc9cb8`。別mount namespaceでmountを隠しても親が区画を使用中ならEBUSYで拒否し、元keyを保持した。partition先・容量不足・4 KiB論理sector先も書込み前に拒否し、後二者のmarker/割当blockを保持した。共有開発hostのflushで数分待機したが、同じ処理のkernel stack/I/O進行を確認して完了まで待った。物理媒体の性能値にはしない。
+
+`make check`（Race/vet/Python）・fmt-check、通常Alpine APKのGo checkと3 static ELF確認、image/disk生成が通過。sourceファイルは完了済みローカルimageを使い、現行GPTの512-byte論理sectorへ対応する。区画サイズは元imageを保持し、余剰容量は未割当。署名whole-OS/boot-slot/A-B・停電復旧、実BIOS/UEFI起動と二回のstate保持、対象NIC/storageは残る。再実行は[導入手順](../images/README.md#install-the-prepared-disk)と[試験計画](test-plan.md#通常ディスクの初回インストール)。確認用loop/mount/一時targetは終了時に撤去済み。image/disk・鍵・APT download・logとtask出力はcommit/push後に撤去する。
+
+
 ## 単体全構成でのNTP全上流停止・復旧
 
 基準main `6881c72` + 実通信手順追加、通常build `6881c720e1a5`、Linux `6.8.0-136-generic`、45-resource単体例・実HGW/ens18・独立LAN chronyd端末2台で確認した。旧routerdのresolveServersとserver/iburst/listen/allow、現行の同じchronydを維持する経路を読んでから、router namespaceのoutputだけでUDP宛先123を遮断した。実counterは5packet、遮断74.06秒の間も両端末のNTP品質判定と両IP DNS/HTTPSが通過。root dispersionは0.002228054秒だった。解除後37.28秒で同じworker PID/generationの実reference_timeが進み、両端末が再度時刻を取得した。captureで上流IPv6 NTP request/replyとLAN応答を照合した。poll周期・独立clientの品質/8秒期限・製品設定は変えていない。
