@@ -1888,10 +1888,15 @@
           ]
         }
       ],
+      "grub_corresponding_sources": {
+        "implementation": "Debian/Ubuntu build host queries the installed BIOS/EFI/tool binary packages and exact source versions. Required DISK_GRUB_SOURCE_DIR contains authenticated APT downloads. Verify DSC source file size/SHA256 and package versions, bundle original source/build recipes/patches plus three installed copyright notices and package/source metadata as grub-sources.tar. Disk manifest records its digest. Omit unused fonts/themes/locales.",
+        "validation": "2026-11-04 baseline9c639e0 plus changes, normal image9c639e08d492/kernel6.18.60-0-lts and disk build exited0. GRUB2.12-1ubuntu7.3 uses grub2 and grub2-unsigned sources. Read-only loop verified GPT, BIOS core, EFI executable, GRUB syntax/actual UUID, kernel/initramfs digests, source bytes against authenticated APT downloads, archive digest and three notices, omitted fonts/locales. Duplicate build preserved disk inode/size/mtime and manifest/source bytes. make check/race/vet/Python,fmt-check and normal image static3 passed.",
+        "remaining": "Debian/Ubuntu build-host packaging profile. Actual boot/persistent state/physical target and signed whole-OS A-B acceptance remain under bios_uefi_disk."
+      },
       "bios_uefi_disk": {
         "implementation": "One GPT disk replaces the disposable BIOS-only MBR layout. Partitions are1MiB BIOS boot,128MiB FAT32 ESP,1GiB ext4 boot and remaining ext4 state. Standard Make path defaults state to /dev/vda4 or explicitly /dev/sda4. Both installed GRUB platforms load the same UUID-selected kernel/initramfs. UEFI uses EFI/BOOT/BOOTX64.EFI with removable/no-nvram and unsigned loader. Mount ownership drains ESP before boot.",
         "validation": "2026-11-04 baseline main9d8231e plus changes, regular make image build9d8231e2f5ce/kernel6.18.60-0-lts and private-namespace make disk-image exited0. Actual GRUB2.12-1ubuntu7.3 installed i386-pc and x86_64-efi. Read-only loop/filesystem inspection verified GPT integrity/four partitions, BIOS core, EFI PE and GRUB syntax/actual boot UUID, installed kernel/initramfs/boot-document digests, configured fourth state partition and authorized key, real disposable selected host-key bytes/mode0600 and state root0700. Trailing inspector metadata display used kernel_version in error; corrected to actual kernel_release and re-executed the checks exit0. make check/race/vet/Python,fmt-check and normal APK Go/static3 ELF gates passed.",
-        "remaining": "Content assembly is demonstrated. Physical BIOS/UEFI boot/two-boot persistence, target drivers/firmware/storage,power loss,signed whole-OS/kernel/bootloader A-B,GRUB redistribution source and arm64 remain. Unsigned UEFI needs Secure Boot disabled. No PVE/QEMU or additional PBR. Recreate disposable disks for the current fourth-partition state layout."
+        "remaining": "Content assembly is demonstrated. Physical BIOS/UEFI boot/two-boot persistence, target drivers/firmware/storage,power loss,signed whole-OS/kernel/bootloader A-B and arm64 remain. Unsigned UEFI needs Secure Boot disabled. No PVE/QEMU or additional PBR. Recreate disposable disks for the current fourth-partition state layout."
       }
     },
     {

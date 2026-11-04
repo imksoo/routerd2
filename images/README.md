@@ -63,14 +63,29 @@ regular image file. The UEFI entrypoint is installed at
 path and `--no-nvram`. The build host's firmware boot entries stay under its
 existing owner. This unsigned UEFI entrypoint requires Secure Boot disabled.
 
-Build requirements are Python 3, GRUB's BIOS and amd64 EFI tools/modules,
-util-linux, dosfstools, e2fsprogs and cpio. Provision the disk as root inside a
-private mount namespace. The image manifest must identify an x86_64 kernel APK.
+The disk builder uses a Debian/Ubuntu build host with Python 3, dpkg/dpkg-query,
+GRUB's BIOS and amd64 EFI tools/modules, util-linux, dosfstools, e2fsprogs and
+cpio. Provision the disk as root inside a private mount namespace. The image
+manifest must identify an x86_64 kernel APK.
+
+Enable authenticated source indexes for the repositories supplying the installed
+GRUB packages. Download their exact corresponding sources into a selected
+directory before building. The EFI and BIOS binaries can have different source
+package names, so query all three installed packages.
 
 ```sh
+GRUB_SOURCE_DIR=/path/to/grub-sources
+mkdir -p "$GRUB_SOURCE_DIR"
+(
+  cd "$GRUB_SOURCE_DIR"
+  apt-get source --download-only --only-source \
+    $(dpkg-query -W -f='${source:Package}=${source:Version}\n' \
+      grub2-common grub-pc-bin grub-efi-amd64-bin | sort -u)
+)
 make image
 sudo unshare --mount --propagation private make disk-image \
   IMAGE_DIR=dist/image DISK_DIR=dist/disk \
+  DISK_GRUB_SOURCE_DIR="$GRUB_SOURCE_DIR" \
   DISK_STATE_DEVICE=/dev/vda4 \
   DISK_AUTHORIZED_KEY=/path/to/operator.pub
 ```
@@ -117,8 +132,16 @@ BIOS/UEFI boot, persistent state over two boots, target drivers, power-loss
 recovery, signed whole-OS updates and kernel/bootloader A/B remain separate
 acceptance work on the authorized target machine.
 
-Keep the source image's license/source notices with the disk, and provide the
-installed GRUB package's license and corresponding source when distributing it.
+Keep the source image's license/source notices and generated `grub-sources.tar`
+with the disk when distributing it. The builder identifies the installed GRUB
+binary packages and their source versions, matches the downloaded `.dsc` files,
+and verifies each source file's size and SHA256 before packaging the original
+source archives, Debian build recipes/patches and installed copyright notices.
+The disk manifest's `bootloader` object records the package versions and source
+archive digest. The archive includes its own `metadata.json` package/source map.
+Unused fonts, themes and translations are omitted from the installed GRUB.
+A repeated build targeting an existing disk fails before changing that disk,
+its manifest or source archive.
 
 
 ## QEMU fixture with the embedded SSH CLI

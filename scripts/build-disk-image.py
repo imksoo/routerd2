@@ -2,6 +2,7 @@
 """Build a BIOS/UEFI GPT disk from the standard routerd kernel and initramfs."""
 
 import argparse
+from email.parser import Parser
 import gzip
 import hashlib
 import importlib.util
@@ -12,6 +13,9 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import tarfile
+
+from engine_sources import add
 
 
 def run(command, **kwargs):
@@ -49,6 +53,64 @@ def provision_state(source, target):
     shutil.copytree(source, target, dirs_exist_ok=True)
 
 
+def collect_grub_sources(source_dir, output):
+    paths = [shutil.which("grub-install"), "/usr/lib/grub/i386-pc/modinfo.sh", "/usr/lib/grub/x86_64-efi/modinfo.sh"]
+    ownership = run(["dpkg-query", "--search", *paths], capture_output=True).stdout
+    owners = sorted({line.rsplit(": ", 1)[0] for line in ownership.splitlines()})
+    fields = "${binary:Package}\t${Version}\t${source:Package}\t${source:Version}\t${Architecture}\n"
+    installed = run(["dpkg-query", "--show", "--showformat=" + fields, *owners], capture_output=True).stdout
+    packages = []
+    for line in installed.splitlines():
+        name, version, source_name, source_version, architecture = line.split("\t")
+        packages.append({"name": name, "version": version, "source_name": source_name,
+                         "source_version": source_version, "architecture": architecture})
+    descriptions = []
+    for path in sorted(source_dir.glob("*.dsc")):
+        raw = path.read_bytes()
+        body = raw.decode().replace("\r\n", "\n")
+        if body.startswith("-----BEGIN PGP SIGNED MESSAGE-----"):
+            body = body.split("\n\n", 1)[1].split("\n-----BEGIN PGP SIGNATURE-----", 1)[0]
+            body = "\n".join(line.removeprefix("- ") for line in body.splitlines())
+        descriptions.append((path, Parser().parsestr(body), raw))
+    metadata = {"version": run(["grub-install", "--version"], capture_output=True).stdout.strip(),
+                "packages": packages, "sources": []}
+    with tarfile.open(output, "w", format=tarfile.USTAR_FORMAT) as archive:
+        for source_name, source_version in sorted({(p["source_name"], p["source_version"]) for p in packages}):
+            for path, description, raw in descriptions:
+                if description.get("Source") != source_name:
+                    continue
+                equal = subprocess.run(["dpkg", "--compare-versions", description.get("Version", ""), "eq", source_version])
+                if equal.returncode == 0:
+                    break
+            else:
+                raise ValueError(f"download the authenticated source package {source_name}={source_version} into {source_dir}")
+            prefix = f"sources/{source_name}/{source_version}/"
+            add(archive, prefix + path.name, raw)
+            checksums = [line for line in description.get("Checksums-Sha256", "").splitlines() if line.strip()]
+            if not checksums:
+                raise ValueError(f"{path.name} has no SHA256 source checksums")
+            for checksum in checksums:
+                expected, size, name = checksum.split()
+                filename = Path(name)
+                if filename.parent != Path(".") or filename.name in ("", ".", ".."):
+                    raise ValueError(f"source filename must stay in the selected directory: {name}")
+                source = source_dir / filename
+                if source.stat().st_size != int(size) or digest(source) != expected.lower():
+                    raise ValueError(f"GRUB source checksum mismatch: {name}")
+                entry = tarfile.TarInfo(prefix + filename.name)
+                entry.size, entry.mode = int(size), 0o444
+                with source.open("rb") as content:
+                    archive.addfile(entry, content)
+            metadata["sources"].append({"name": source_name, "version": source_version, "directory": prefix})
+        for package in packages:
+            name = package["name"].split(":", 1)[0]
+            add(archive, "notices/" + name + "/copyright", (Path("/usr/share/doc") / name / "copyright").read_bytes())
+        add(archive, "metadata.json", (json.dumps(metadata, indent=2, sort_keys=True) + "\n").encode())
+    metadata["sources_file"] = output.name
+    metadata["sources_sha256"] = digest(output)
+    return metadata
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image-dir", type=Path, default=Path("dist/image"))
@@ -59,6 +121,7 @@ def main():
     parser.add_argument("--authorized-key", type=Path)
     parser.add_argument("--etc-dir", type=Path, help="Provision configuration and trust files below /etc")
     parser.add_argument("--state-dir", type=Path, help="Copy a prepared native state directory into the new state partition; stage only selected identities, not the old router state directory")
+    parser.add_argument("--grub-source-dir", type=Path, required=True, help="Authenticated Debian/Ubuntu GRUB source packages downloaded with apt-get source --download-only")
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error("run as root in a private mount namespace (sudo unshare --mount --propagation private)")
@@ -74,7 +137,8 @@ def main():
         parser.error("use the standard APK-derived image")
     if source_manifest["kernel_package"].get("architecture") != "x86_64":
         parser.error("x86 disk requires an amd64/x86_64 image manifest")
-    for tool in ("sfdisk", "losetup", "mkfs.ext4", "mkfs.vfat", "blkid", "mount", "umount", "grub-install", "cpio"):
+    for tool in ("sfdisk", "losetup", "mkfs.ext4", "mkfs.vfat", "blkid", "mount", "umount",
+                 "grub-install", "dpkg-query", "dpkg", "cpio"):
         if shutil.which(tool) is None:
             parser.error(f"missing build tool: {tool}")
     with gzip.open(image / "initramfs.cpio.gz", "rb") as archive:
@@ -88,12 +152,6 @@ def main():
     boot["state_volume"] = {"device": str(device), "wait_timeout_seconds": 10}
     if args.authorized_key:
         boot["ssh"]["authorized_keys"] = args.authorized_key.read_text().strip().splitlines()
-    output.mkdir(parents=True, exist_ok=True)
-    disk = output / "routerd.raw"
-    # Only a newly created regular image is provisioned; existing disks are never accepted.
-    descriptor = os.open(disk, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(descriptor, "wb") as target:
-        target.truncate(args.size_gib * 1024**3)
     spec = importlib.util.spec_from_file_location(
         "mkinitramfs", Path(__file__).resolve().parents[1] / "images/mkinitramfs.py"
     )
@@ -102,6 +160,13 @@ def main():
     work = Path(tempfile.mkdtemp(prefix="routerd2-disk-"))
     mounted = []
     try:
+        bootloader = collect_grub_sources(args.grub_source_dir, work / "grub-sources.tar")
+        output.mkdir(parents=True, exist_ok=True)
+        disk = output / "routerd.raw"
+        # Reserve this image before changing any existing distribution files.
+        descriptor = os.open(disk, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "wb") as target:
+            target.truncate(args.size_gib * 1024**3)
         overlay = work / "overlay"
         if args.etc_dir:
             shutil.copytree(args.etc_dir, overlay / "etc")
@@ -161,8 +226,9 @@ def main():
                 "  initrd /boot/initramfs.cpio.gz\n}\n"
             )
             run(["grub-install", "--target=i386-pc", "--boot-directory=" + str(boot_root / "boot"),
-                 "--no-floppy", loop])
+                 "--directory=/usr/lib/grub/i386-pc", "--fonts=", "--themes=", "--locales=", "--no-floppy", loop])
             run(["grub-install", "--target=x86_64-efi", "--boot-directory=" + str(boot_root / "boot"),
+                 "--directory=/usr/lib/grub/x86_64-efi", "--fonts=", "--themes=", "--locales=",
                  "--efi-directory=" + str(efi_root), "--removable", "--no-nvram", "--no-uefi-secure-boot"])
             installed_initramfs_hash = digest(initramfs)
         finally:
@@ -172,6 +238,7 @@ def main():
                     mounted.pop()
             finally:
                 run(["losetup", "--detach", loop])
+        shutil.copyfile(work / "grub-sources.tar", output / "grub-sources.tar")
     finally:
         # Never recursively remove a filesystem whose unmount failed.
         if not mounted:
@@ -183,7 +250,7 @@ def main():
         "source_initramfs_sha256": digest(image / "initramfs.cpio.gz"),
         "installed_initramfs_sha256": installed_initramfs_hash,
         "disk": disk.name, "size_bytes": disk.stat().st_size,
-        "boot_methods": ["bios-grub", "uefi-x86_64-grub"], "bootloader": run(["grub-install", "--version"], capture_output=True).stdout.strip(),
+        "boot_methods": ["bios-grub", "uefi-x86_64-grub"], "bootloader": bootloader,
         "partition_table": "gpt",
         "partitions": ["BIOS boot", "FAT32 EFI system", "ext4 boot", "ext4 persistent state"],
         "state_volume": boot["state_volume"],

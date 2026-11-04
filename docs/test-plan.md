@@ -278,8 +278,8 @@ DNSの待受は明示IPv4とIPv6 `::`を併記する。割当観測は元のreso
 
 ## 通常ディスクのGPT・BIOS・UEFI配置
 
-`make image DOCKER='sudo -n docker' IMAGE_DIR=dist/image`に続き、private mount namespace内で`make disk-image`を使う。[image手順](../images/README.md#bios-and-uefi-x86-disk)のGRUB両platform・dosfstools等を準備し、一時的なoperator公開鍵と選択したnative SSH host keyを入力する。新規32 GiB sparse imageにはGPTのBIOS boot/FAT32 EFI/ext4 boot/ext4 stateを作り、`DISK_STATE_DEVICE=/dev/vda4`（SCSIは`/dev/sda4`）へ揃える。
+`make image DOCKER='sudo -n docker' IMAGE_DIR=dist/image`に続き、private mount namespace内で`make disk-image`を使う。[image手順](../images/README.md#bios-and-uefi-x86-disk)に従いDebian/Ubuntu hostのGRUB両platform・dosfstools等と認証済みAPT由来の一致する対応sourceを準備する。`DISK_GRUB_SOURCE_DIR`を指定し、一時的なoperator公開鍵と選択したnative SSH host keyを入力する。新規32 GiB sparse imageにはGPTのBIOS boot/FAT32 EFI/ext4 boot/ext4 stateを作り、`DISK_STATE_DEVICE=/dev/vda4`（SCSIは`/dev/sda4`）へ揃える。
 
-生成物をread-only loopとして接続し、`sfdisk --verify`と4区画のname/type/size、EFIの`EFI/BOOT/BOOTX64.EFI`に対する`grub-file --is-x86_64-efi`、BIOS coreと`grub-script-check`を確認する。boot filesystemの実UUIDが共通GRUB設定へ使われ、kernel/initramfs/boot文書のdigestがmanifestと一致すること、boot文書のstate参照/認可公開鍵と第4区画の選択host keyのbytes/modeを照合する。unmount/loop解除後、結果を集約して一時key/image/logを撤去する。
+生成物をread-only loopとして接続し、`sfdisk --verify`と4区画のname/type/size、EFIの`EFI/BOOT/BOOTX64.EFI`に対する`grub-file --is-x86_64-efi`、BIOS coreと`grub-script-check`を確認する。boot filesystemの実UUIDが共通GRUB設定へ使われ、kernel/initramfs/boot文書のdigestがmanifestと一致すること、boot文書のstate参照/認可公開鍵と第4区画の選択host keyのbytes/modeを照合する。`bootloader`のpackage/source対応・archive SHA256、同梱DSC/sourceの元APT downloadとの一致と3 packageのcopyrightを確認する。不要font/localeが配置されていないことも確認する。同じ出力先への再生成が失敗し、既存diskのinode/size/mtimeとmanifest/source bytesが維持されることを確認する。unmount/loop解除後、結果を集約して一時key/image/logを撤去する。
 
 これは実block/filesystemを使う生成内容の確認である。unsigned UEFIはSecure Boot無効が必要で、BIOS/UEFIの実起動、2回以上の起動でのstate保持、対象driver/firmware、停電、署名whole-OS更新・kernel/bootloader A/Bは対象機で別に受け入れる。PVE/QEMUは実行しない。現在のimageはvirtio中心のdriver closureであり、対象NIC/storageは実機情報に合わせて接続・検証する。

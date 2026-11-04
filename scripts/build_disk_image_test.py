@@ -65,7 +65,7 @@ class DiskImageTest(unittest.TestCase):
             }))
             output = image / "output"
             errors = io.StringIO()
-            with patch.object(sys, "argv", ["build-disk-image", "--image-dir", str(image), "--output", str(output)]), \
+            with patch.object(sys, "argv", ["build-disk-image", "--image-dir", str(image), "--output", str(output), "--grub-source-dir", str(image)]), \
                     patch.object(builder.os, "geteuid", return_value=0), contextlib.redirect_stderr(errors):
                 with self.assertRaises(SystemExit):
                     builder.main()

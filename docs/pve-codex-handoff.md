@@ -1,5 +1,12 @@
 # routerd2 開発引き継ぎ
 
+## GRUB対応ソース付き通常disk build
+
+2026-11-04、基準main `9c639e0` + 本変更、通常image build `9c639e08d492` / kernel `6.18.60-0-lts`で、`make image`とprivate mount namespace内の`make disk-image`が終了0。Debian/Ubuntu build hostの実インストールpackageからGRUB `2.12-1ubuntu7.3`の対応sourceを選び、認証済みAPT downloadの`grub2`と`grub2-unsigned`をDSCのsize/SHA256で検証して同梱する。3 binary packageのcopyright、元source・Debian recipe/patchとmetadataを含む`grub-sources.tar`のSHA256は`03ec98ae0d20d60a685b51227622519504f98be359fa7ffba2ec662e5bac8fdd`。
+
+実read-only loop/mountでGPT、BIOS core、EFI executable、GRUB構文/実boot UUID、kernel/initramfs digestを照合した。同梱source bytesは元APT downloadと一致し、不要font/localeは配置されていない。同じ出力先への再生成は既存disk/manifest/sourceを保持して拒否した。`make check`（Race/vet/Python）・fmt-checkと通常imageの3 static ELF確認も通過した。手順は[image手順](../images/README.md#bios-and-uefi-x86-disk)と[試験計画](test-plan.md)。今回の変更は配布内容の組立てで、実BIOS/UEFI boot、2回以上のstate保持、対象NIC/storage、停電、署名whole-OS/kernel/bootloader A/Bとarm64は未検証。生成disk/image・APT一時source・logはcommit/push後に撤去する。
+
+
 更新: 2026-11-04。全体ゴールは継続中。
 
 ## 保存FirewallPolicyのrole許可を接続
