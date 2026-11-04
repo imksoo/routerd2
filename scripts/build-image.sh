@@ -8,6 +8,7 @@ output_dir=
 config_file="$project_dir/images/config-empty.json"
 boot_file="$project_dir/images/boot.json"
 kernel_root=/
+kernel_sources=
 engine_image="$project_dir/dist/pppoe-engine.tar"
 engine_sources="$project_dir/dist/pppoe-sources.tar"
 dhcp_image="$project_dir/dist/dnsmasq-engine.tar"
@@ -28,13 +29,14 @@ while [ "$#" -gt 0 ]; do
     --config) config_file=$2; shift 2 ;;
     --boot) boot_file=$2; shift 2 ;;
     --kernel-root) kernel_root=$2; shift 2 ;;
+    --kernel-sources) kernel_sources=$2; shift 2 ;;
     --engine-image) engine_image=$2; shift 2 ;;
     --engine-sources) engine_sources=$2; shift 2 ;;
     *) printf 'Unknown argument: %s\n' "$1" >&2; exit 2 ;;
   esac
 done
-if [ -z "$output_dir" ] || { [ -z "$package_dir" ] && [ -z "$binary_dir" ]; } || { [ -n "$package_dir" ] && [ -n "$binary_dir" ]; }; then
-  printf '%s\n' 'Usage: build-image.sh (--package-dir DIR | --binary-dir DIR) --output DIR [--config JSON] [--boot JSON] [--kernel-root DIR]' >&2
+if [ -z "$output_dir" ] || [ -z "$kernel_sources" ] || { [ -z "$package_dir" ] && [ -z "$binary_dir" ]; } || { [ -n "$package_dir" ] && [ -n "$binary_dir" ]; }; then
+  printf '%s\n' 'Usage: build-image.sh (--package-dir DIR | --binary-dir DIR) --kernel-sources FILE --output DIR [--config JSON] [--boot JSON] [--kernel-root DIR]' >&2
   exit 2
 fi
 
@@ -43,6 +45,7 @@ trap 'rm -rf "$work_dir"' EXIT HUP INT TERM
 package_root="$work_dir/package"
 rootfs="$work_dir/rootfs"
 mkdir -p "$package_root" "$rootfs" "$output_dir"
+cp "$kernel_sources" "$output_dir/kernel-sources.tar"
 package_file=
 if [ -n "$package_dir" ]; then
   set -- "$package_dir"/routerd2-*.apk
@@ -153,6 +156,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import tarfile
 
 root, output = Path(sys.argv[1]), Path(sys.argv[2])
 boot_path = root / "etc/routerd/boot.json"
@@ -179,10 +183,18 @@ for block in database.read_text().split("\n\n"):
             "architecture": fields["A"],
             "license_expression_from_apk": fields.get("L"),
             "origin": origin, "aports_commit": commit,
-            "source_recipe_url": f"https://github.com/alpinelinux/aports/blob/{commit}/main/{origin}/APKBUILD",
-            "source_recipe_directory_url": f"https://github.com/alpinelinux/aports/tree/{commit}/main/{origin}",
-            "corresponding_source_archive_included": False,
         }
+        with tarfile.open(output / "kernel-sources.tar") as sources:
+            source_package = json.load(sources.extractfile("package.json"))
+        if source_package != kernel_package:
+            raise SystemExit("kernel sources do not match the installed kernel APK")
+        with (output / "kernel-sources.tar").open("rb") as sources:
+            source_digest = hashlib.file_digest(sources, "sha256").hexdigest()
+        kernel_package.update({
+            "source_recipe_url": f"https://gitlab.alpinelinux.org/alpine/aports/-/blob/{commit}/main/{origin}/APKBUILD",
+            "source_recipe_directory_url": f"https://gitlab.alpinelinux.org/alpine/aports/-/tree/{commit}/main/{origin}",
+            "sources_file": "kernel-sources.tar", "sources_sha256": source_digest,
+        })
         break
 if kernel_package is None:
     raise SystemExit("linux-lts package provenance is absent from the kernel root")
@@ -237,6 +249,6 @@ PY
 python3 "$project_dir/images/mkinitramfs.py" "$rootfs" "$output_dir/initramfs.cpio.gz" --epoch "${SOURCE_DATE_EPOCH:-0}"
 (
   cd "$output_dir"
-  sha256sum vmlinuz initramfs.cpio.gz manifest.json pppoe-sources.tar dnsmasq-sources.tar conntrack-sources.tar tailscale-sources.tar chrony-sources.tar ndpi-sources.tar > SHA256SUMS
+  sha256sum vmlinuz initramfs.cpio.gz manifest.json kernel-sources.tar pppoe-sources.tar dnsmasq-sources.tar conntrack-sources.tar tailscale-sources.tar chrony-sources.tar ndpi-sources.tar > SHA256SUMS
 )
 printf 'Built kernel %s and routerd initramfs in %s\n' "$kernel_version" "$output_dir"

@@ -1,5 +1,7 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
+通常image buildにkernel対応ソースの同梱を接続した。基準main `773121c` + 本変更、通常build `773121ce3681`、Alpine linux-lts `6.18.60-r0` / kernel `6.18.60-0-lts` / recipe `97a4e7b01d88cdec22ef3a5d30247628dc14d8bc`で`make image`が終了0。APKの全Go checkと3実行物のstatic link確認、image組立て、出力全体のSHA256、同梱22 sourceのSHA512、installed configの実APKとの一致、元COPYING/GPL-2.0の存在を確認した。 対応source archiveのfile/digestをmanifestへ接続した。独立kernel/時計での全構成起動・更新と対象実機の受入を継続する。条件・digest・再実行は[引き継ぎ](pve-codex-handoff.md)に記載する。
+
 保存homertの転送拒否ログをnative三例の既存NFLOG/履歴/OTLP経路へ接続した。基準main `f5ddd4a` + 設定/runner変更・通常build `f5ddd4a91ace`で、単体全daemon再起動と二台両方向HAの実TCP/UDP拒否・新しい記録/転送が通過。試験の共有L2アドレス重複、OTLP属性の誤った照合と設定読取期限を修正した。直列実行と具体的な結果・残作業は[試験計画](test-plan.md)・[引き継ぎ](pve-codex-handoff.md)へ記載する。次は配布image builderで未同梱のkernel対応sourceと、独立kernel/時計での全構成起動・更新受入を進める。
 
 保存homertのTailscale私設IPv4広告と転送許可を単体・二台例へ接続した。通常build `3f5c5aced7be`で、exit未選択の独立peerからBGP/静的経路/旧LAN/管理へのTCP/UDP、単体全daemon再起動と両方向HAを通過。初回の二台通信で物理WAN側への許可欠落を検出して修正した。NTP品質立上りの5照会timeoutと自然復旧を含む測定値・残作業は[引き継ぎ](pve-codex-handoff.md)へ記載する。

@@ -45,8 +45,12 @@ RUN --mount=type=cache,target=/home/builder/.cache/go-build,uid=1000 \
 FROM scratch AS apk-output
 COPY --from=package-build /out/ /
 
-FROM alpine:${ALPINE_VERSION} AS image-build
+FROM alpine:${ALPINE_VERSION} AS kernel-inputs
 RUN apk add --no-cache linux-lts kmod python3 gzip xz zstd ca-certificates
+COPY scripts/kernel-sources.py scripts/engine_sources.py /src/scripts/
+RUN python3 /src/scripts/kernel-sources.py --root / --output /kernel-sources.tar
+
+FROM kernel-inputs AS image-build
 COPY --from=package-build /out/ /packages/
 COPY images/ /src/images/
 COPY scripts/build-image.sh /src/scripts/build-image.sh
@@ -56,7 +60,7 @@ ARG IMAGE_CONFIG=empty
 ARG SSH_AUTHORIZED_KEY=""
 ENV ROUTERD_RELEASE_ID=$RELEASE_ID SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH SSH_AUTHORIZED_KEY=$SSH_AUTHORIZED_KEY
 RUN case "$IMAGE_CONFIG" in empty|qemu) ;; *) exit 2 ;; esac \
- && sh /src/scripts/build-image.sh --package-dir /packages --output /out \
+ && sh /src/scripts/build-image.sh --package-dir /packages --output /out --kernel-sources /kernel-sources.tar \
       --config "/src/images/config-$IMAGE_CONFIG.json" --boot /src/images/boot.json
 
 FROM scratch AS appliance-output

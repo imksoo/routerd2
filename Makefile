@@ -101,7 +101,7 @@ help:
 	  'make build-linux       Build static linux/amd64 and linux/arm64 binaries' \
 	  'make release-built-test Verify actual amd64/arm64 release bundle identities' \
 	  'make apk               Test and build the Alpine package with abuild' \
-	  'make image             Export Alpine kernel + routerd initramfs' \
+	  'make image             Export Alpine kernel/initramfs with matching sources' \
 	  'make disk-image        Create a BIOS disk from an existing APK image (root/private mount namespace)' \
 	  'make qemu-smoke        Boot the image in QEMU; optionally verify SSH' \
 	  'make qemu-ntp          Verify appliance clock correction, LAN time and drift recovery' \

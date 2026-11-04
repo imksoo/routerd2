@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入計画
 
-更新: 2026-11-03。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
+更新: 2026-11-04。全体範囲は[実装計画](implementation-plan.md)と[34 work package](implementation-plan.json)。実行済み版・結果・限界は[引き継ぎ](pve-codex-handoff.md)へ残す。独立端末を接続しただけで通常通信が成立し、障害・再起動・更新から復旧する製品を完成させる。
 
 ## WireGuard hostname endpointとroaming
 
@@ -252,3 +252,9 @@ DNSの待受は明示IPv4とIPv6 `::`を併記する。割当観測は元のreso
 `python3 scripts/daemon-tests.py bgp-frr --test TestDaemonBGPTwoFRRPeers`を通常build後に実行する。独立FRR/Zebra二peerが許可経路と未許可prefixを広告し、実advertised-routes一覧の件数を製品の受信数と照合する。global import policy後の全local RIBにある受理経路数、peerごとのwithdraw/復旧、`BGPRouter.status.acceptedPrefixes`の参照値によるassert解除/復帰、daemon再起動後の同じ観測とTCP/UDPを確認する。非best/GR保持とローカル生成をFIB件数へ置き換えない。peerによる再広告を考慮し、受信数を設定したnetworkの数に固定しない。
 
 この独立手順は専用namespaceの二つのpeer subnetを使う。実HGW単体例の同一WAN上BGPは別の上記全構成手順で確認する。新規host WAN、PVE/QEMUや追加PBR調査は不要。実行版・結果・未受入範囲は[引き継ぎ](pve-codex-handoff.md)を参照する。
+
+## kernel対応ソースを含む通常配布image
+
+`make image DOCKER='sudo -n docker'`で通常APKのbuild/checkとkernel/initramfsの組立てを行う。kernel入力stageは署名検証されたAlpine linux-ltsのinstalled metadataからrecipe commitを取得し、公式GitLabの該当directory全体とAlpine distfilesの外部sourceを取得する。APKBUILDに記載されたSHA512を照合し、実際にインストールされたkernel configと共に`kernel-sources.tar`へ格納する。組立てはそのpackage/version/architecture/commitをkernel rootと照合し、manifestのfile/digestとSHA256SUMSへ接続する。
+
+出力directoryで`sha256sum -c SHA256SUMS`を実行し、archive内のAPKBUILDにある全sourceのSHA512とinstalled.config、manifestのkernel package/ソースdigestを照合する。元のkernel COPYING/LICENSESは同梱したupstream archiveで確認する。再現は通常image buildを使う。kernelを起動していないbuild確認の範囲と、独立kernel/実機でのboot・時計補正・全構成更新の受入を区別する。今回もPVE/QEMUは実行しない。終了後は組立て用の一時log、確認用archive/image、task用Docker tagを撤去する。

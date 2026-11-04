@@ -1,6 +1,16 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03。全体ゴールは継続中。
+更新: 2026-11-04。全体ゴールは継続中。
+
+## kernel対応ソースを通常imageへ同梱
+
+通常image buildにkernel対応ソースの同梱を接続した。基準main `773121c` + 本変更、通常build `773121ce3681`、Alpine linux-lts `6.18.60-r0` / kernel `6.18.60-0-lts` / recipe `97a4e7b01d88cdec22ef3a5d30247628dc14d8bc`で`make image`が終了0。APKの全Go checkと3実行物のstatic link確認、image組立て、出力全体のSHA256、同梱22 sourceのSHA512、installed configの実APKとの一致、元COPYING/GPL-2.0の存在を確認した。
+
+`kernel-inputs` stageがinstalled APK metadataのcommitを選び、公式GitLabのrecipe directory全体とSHA512-checked外部sourceを集める。実installed configも`kernel-sources.tar`へ収録する。image assemblerはpackage/version/architecture/commit/licenseをkernel rootと照合し、manifestのsources_file/sources_sha256とSHA256SUMSへ結ぶ。旧GitHub recipe URLは該当commitで404だったため、実取得できた公式GitLabを使う。未同梱boolはfile/digestへ置き換えた。開発用assemblerも明示的な`--kernel-sources FILE`を受け取る。
+
+source archive SHA256 `4ba98821d71e9584d908a2f2f9b9a62854e9678d670a3141dd955dece48944e1`。installed config SHA256 `b1f96fd4f6b51f9cee1ff97081cb98439a20dca8cbb672d0d6ee09300a1e0789`は同じ実APKの`/boot/config-6.18.60-0-lts`と一致した。`make check build DOCKER='sudo -n docker'`（Race/vet/Python・通常3実行物）、fmt-checkとshell/Python構文確認も通過。再実行は[試験計画](test-plan.md#kernel対応ソースを含む通常配布image)と[image手順](../images/README.md)に記載する。
+
+今回の受入はAPK/imageのbuildと同梱内容の照合である。kernel再コンパイル、kernel boot、独立時計での全homert appliance起動/更新、対象実機/ONU/NICとarm64実行の受入は継続する。組立て確認用image/archiveとtask用log/tagは結果集約後に撤去する。
 
 ## 保存homertに合わせたDS-Lite内側アドレス
 
