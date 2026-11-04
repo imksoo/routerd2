@@ -119,6 +119,8 @@ resources:
     forward_chain:
       policy: drop
       log: {group: 1, copy_range: 2048, prefix: forward-deny}
+      rules:
+        - {match: {in_interface: mgmt0}, action: accept}
     forward:
     - from: tailscale0
       to: lan0

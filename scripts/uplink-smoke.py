@@ -413,6 +413,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                     "netns", namespace, "type", "macvlan", "mode", "bridge"])
                 run(["ip", "-n", namespace, "address", "add", address + "/24", "dev", peer_interface])
                 run(["ip", "-n", namespace, "link", "set", peer_interface, "up"])
+                run(["ip", "-n", namespace, "route", "add", "10.255.255.0/24", "via", "192.0.2.1", "dev", peer_interface])
                 for prefix, host in bgp_networks:
                     run(["ip", "-n", namespace, "address", "add", host + "/" + prefix.split("/")[1], "dev", "lo"])
                 # FRR drops privileges. Its public test config lives in the
@@ -1217,6 +1218,12 @@ print(*s.getsockname())
             print("PASS multiple conditional suffixes, nested source precedence, WAN-learned DNS answers and all configured public DoH upstream probes", flush=True)
 
         def check_management():
+            run(inside(client, ["ip", "route", "add", "192.0.2.2/32", "via", "10.255.255.1", "dev", "mgmt-peer"]))
+            try:
+                run(inside(client, ["python3", "-c", echo["ECHO_CLIENT"], "192.0.2.2", "10.255.255.2", "10.255.255.2"]))
+            finally:
+                run(inside(client, ["ip", "route", "del", "192.0.2.2/32", "via", "10.255.255.1", "dev", "mgmt-peer"]))
+            print("PASS management-originated TCP/UDP crossed the router to the independent WAN peer with its original source", flush=True)
             for namespace, server in ((router, "127.0.0.1"), (client, "10.255.255.1")):
                 answer = run(inside(namespace, ["dig", "@" + server, "router." + lan_domain, "A", "+short", "+time=3", "+tries=1"]))
                 assert answer.strip() == "198.18.0.1", "loopback/management DNS did not resolve the configured LAN name: " + answer

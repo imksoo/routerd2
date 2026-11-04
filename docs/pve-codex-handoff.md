@@ -2,6 +2,16 @@
 
 更新: 2026-11-04。全体ゴールは継続中。
 
+## 管理網からの新規転送を保存policyへ接続
+
+基準main `39531c6` + 本変更、通常build `39531c64246b`。保存両homertのzone/rule/NATと旧routerdのimplicitFirewallActionを照合し、mgmt roleからの新規転送がnative三例から欠けていることを確認した。変更前設定を実HGW/通常daemonで動かすと、管理端末から独立WAN peerへのTCPが期限切れとなった。既存forward_chain.rulesへmgmt0のacceptを一つ追加し、追加NATや新しいGo実装は不要だった。
+
+通常の単体45-resource `make check-uplink`と、続く各54-resource `make check-uplink-ha`が終了0。単体では実管理端末→独立WAN FRR peerのTCP/UDPと元送信元を全daemon再起動前後で確認した。既存captureの両回でmgmt0 ingress→wan0 egress、TCP SYN/SYN-ACKとUDP往復を照合した。二台では初期a・切替b・逆方向aと再加入後に、独立管理端末→実DHCP leaseのLAN端末へのTCP/UDPと元送信元を確認した。peerの必要な戻り経路を初期設定へ宣言し、確認用host routeはfinallyで撤去する。
+
+両IP Internet/DNS、通常/機器用DHCP、PD/DAD/SLAAC/Information、4 DS-Lite、BGP/Tailscale/NTP、管理SSH/Web、LANからの管理拒否、input/forward NFLOG/OTLP、設定rollbackも通過。単体のPD SIGKILL2.25秒/通常再起動5.89秒、設定timeout30.11秒/control再起動5.89秒、全daemon後の全項目再確認111.65秒、2巡回/自然PD更新0回。HA全項目再確認90.96/74.52秒、公開TCP439応答/maxgap7.96秒・UDP460/15期限超過/maxgap8.51秒、固定WAN TCP468/max7.09秒・UDP467/9期限超過/max8.01秒。TCP各SYN1回・同一socket/NAT tuple保持。設定timeout32.58/32.09秒・confirm3.70/3.68秒。初期NTP照会の8秒期限超過2回と、その後の応答を記録する。
+
+`make check`（Race/vet/Python）・fmt-check、3設定検証と通常3 static実行物が通過。再実行は[試験計画](test-plan.md)の単体/二台手順と管理網の節。全zone/policy field、NTP起動品質、全homert applianceの実機boot/時計補正/更新、MTU全経路と物理ONU/NICの受入は継続する。PVE/QEMU・追加PBR調査は実行していない。owner/namespace/stageは終了時に撤去し、詳細log/captureと重複build出力はcommit/push後に撤去する。
+
 ## 通常x86ディスクをGPT・BIOS/UEFIへ統一
 
 基準main `9d8231e` + 本変更、通常image build `9d8231e2f5ce` / Alpine kernel `6.18.60-0-lts`で、`make image`とprivate namespace内の`make disk-image`が終了0。BIOS-only MBRの試作layoutを置き換え、GPT上のBIOS boot 1 MiB・FAT32 EFI 128 MiB・ext4 boot 1 GiB・残りext4 stateの一つの構成にした。stateの既定は第4区画`/dev/vda4`、SCSIは`/dev/sda4`。両GRUB入口が同じboot UUID/kernel/initramfsを使い、local/serial consoleへ出力する。UEFIはremovable path・no-nvramで生成し、host firmwareのboot entryは変更しない。

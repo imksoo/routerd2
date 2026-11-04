@@ -489,6 +489,12 @@ def owner(stage, uplink, retention_check):
                 assert status["ready"], "management SSH reported a router unavailable"
             node = elected()
             address = "10.255.255.2" if node == "a" else "10.255.255.3"
+            run(inside("admin", ["ip", "route", "add", client_address + "/32", "via", address, "dev", "mgmt0"]))
+            try:
+                run(inside("admin", ["python3", "-c", echo["ECHO_CLIENT"], client_address, "10.255.255.254", "10.255.255.254"]))
+            finally:
+                run(inside("admin", ["ip", "route", "del", client_address + "/32", "via", address, "dev", "mgmt0"]))
+            print("PASS HA management-originated TCP/UDP reached the real LAN lease with its original source via", node, flush=True)
             for target, server in ((node, "127.0.0.1"), ("admin", address)):
                 assert run(inside(target, ["dig", "@"+server, "router." + lan_domain, "A", "+short", "+time=3", "+tries=1"])).strip() == "198.18.0.1"
             answer = run(inside("admin", ["dig", "@"+address, "available.split.test", "A", "+short", "+time=3", "+tries=1"]))

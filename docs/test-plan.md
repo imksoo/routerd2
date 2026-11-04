@@ -56,6 +56,14 @@ WAN/tailnet captureは各最大8MB、PD captureはudp546と実行時間で限定
 
 二段DNSのpacket確認: 上記ownerの`location.json`と実leaseを読み、同じprivate mount内のrouter namespaceで`tcpdump -l -n -vv -i lo -c 8 'udp port 53'`を最大5秒捕捉する。client namespaceから実leaseへbindした`dig -b <実lease> @198.18.0.1 observed-two-stage.split.test A +nocookie +time=3 +tries=1`を送る。同じ名前/IDのLAN回答と127.0.0.1:53のquery/replyを照合してcaptureを止める。新しい名前を用い、LAN cacheだけの回答でcore転送を確認したことにしない。raw captureは保存しない。
 
+## 管理網からの新規転送
+
+保存homertのmgmt roleは他zoneへの新規転送を許可する。三つのnative例は既存`forward_chain.rules`の`in_interface: mgmt0`で表現し、NATは保存どおりLAN送信元を対象にする。通常の単体/二台Make手順で、管理端末発の実IPv4 TCP/UDPとpeerが観測した元の送信元を確認する。
+
+単体では既存管理peerと独立WAN FRR peerを使う。独立WAN peerの初期設定に管理網への戻り経路を宣言し、管理peerにWAN peer宛のhost routeを管理gateway経由で一時設定する。単体再起動後にも往復を確認し、既存の有界WAN captureでmgmt0 ingress/wan0 egressと応答を照合する。
+
+二台では独立管理端末から現用nodeを経由し、実DHCP leaseのLAN echo serverへ接続する。初期と両方向切替後でTCP/UDP・元送信元を確認する。各確認のhost routeはfinallyで撤去し、管理SSH/Web/DNSとLANからの管理console拒否も同時に維持する。全zone/policy項目の照合は継続する。
+
 ## HA基盤の再実行
 
 `make check-ha-state DOCKER='sudo -n docker'`は独立Linux namespace/PID1の二台、VRRP/共有WAN・LAN identity、conntrackd FTFW、相互認証TLSのDHCP同期を確認する既存手順。追加PVE/QEMUやPBR/二WANflagsは使わない。現在は全二台profileの実通信を優先し、基盤だけの合格を全体へ転用しない。TCPは再接続しないsocket、UDPも同一socketで継続し、DHCP端末は実割当/更新を確認する。TCP SYN、NAT tuple、DHCP Request/ACK、同期交通を照合する。明示したliberal modeを適用し、packet欠落と復旧を実測する。短い返信期限を全環境の性能条件へ読み替えない。
