@@ -2,17 +2,17 @@
 
 更新: 2026-11-04。全体ゴールは継続中。
 
-## homertの入力拒否方針を接続
+## 現行homert入力方針とTailscale hostname接続
 
-保存homertのuntrust→self既定dropをnative三例へ接続した。必要なloopback/ICMPv6・LAN/管理/Tailscale・HA同期と、WANのDHCP client/BGP/DS-Lite/Tailscaleを明示許可し、input終端拒否も既存NFLOG/履歴/OTLPへ渡す。旧routerdのimplicitFirewallAction・InternalFirewallHolesと両保存設定を照合した。
+保存homertのuntrust→self既定dropとlogDenyをnative三例へ接続済み。今回はTailscaleの制御URLを`https://control.tailnet.test:8443`、bootstrap DNSを独立peerの`198.51.100.1`へ変更し、通常engineの名前解決・TLSから接続する。旧routerdのTailscaleUpArgsと、native LocalAPI/engineのresolver・CA経路を照合した。保存homertのTailscaleはloginServer省略による公開controlのhostnameを使う。今回の独立Headscaleは公開controlの資格とは分ける。
 
-基準main `58efa10` + 設定/runner変更、通常build `58efa1037cd6`。単体45-resourceの通常`make check-uplink`が終了0。独立WAN FRRから明示WAN addressへのICMP echoは拒否され、新しいinput-denyの実NFLOG履歴と独立CollectorへのOTLP到達を照合した。転送拒否も同時に確認した。両IP Internet/DNS、通常/機器用DHCP、DAD/SLAAC/Information、4 DS-Lite、BGP/Tailscale/NTP/管理/運用と全daemon再起動が通過。PD SIGKILL2.39秒/通常再起動5.88秒、設定timeout30.10秒/control再起動5.95秒、全daemon後の全項目再確認111.46秒、2巡回/自然PD更新0回。実HGWのDHCPv6 Advertiseは送信元49153→宛先546で到着しており、この入力方針でもPDを取得した。
+基準main `3ecfdf4` + 設定/runner変更、通常build `3ecfdf4ff83b`、Linux `6.8.0-136-generic`、実HGW/ens18と独立LAN端末・FRR/chronyd/Headscale/Tailscale/Collector。単体45-resourceの通常`make check-uplink`が終了0。製品underlayから独立dnsmasqへのhostname A照会と回答、Tailscaleの全広告subnet・両IP端末通信/exit、両IP Internet/DNS、通常/機器用DHCP、DAD/SLAAC/Information、4 DS-Lite、BGP/NTP/管理/運用、input/forward拒否のNFLOG/OTLP、設定rollbackを確認した。PD SIGKILL2.61秒/通常再起動6.26秒、設定timeout30.58秒/control再起動6.16秒、全daemon後の全項目再確認111.72秒。同じnode identityで通信復旧、2巡回/自然PD更新0回。
 
-その後に同じbuild・各54-resourceの`make check-uplink-ha`が終了0。初期a・切替後b・逆方向aで入力拒否・転送拒否のNFLOG履歴/OTLP、通常通信、既存leaseと停止中の新規端末、設定timeout/confirmとWAN/VRRP/BGP worker継続を確認した。全項目再確認89.71/73.26秒。公開TCP443応答/maxgap7.90秒、UDP459応答/15期限超過/maxgap8.51秒。固定WAN TCP453/max13.98秒、UDP466/9期限超過/max8.01秒。TCP各SYN1回・同一socket/NAT tupleを保持。設定timeout32.91/32.84秒・confirm3.95/4.04秒、新規DHCP名公開0.96/0.71秒。NTP照会timeoutは0回。
+続いて各54-resourceの`make check-uplink-ha`が終了0。両nodeの実underlay送信元からhostname A照会を確認し、初期a・切替後b・逆方向aでsubnet/端末通信、既存leaseと停止中の新規端末、各機能と再加入を確認した。全項目再確認61.55/73.75秒。公開TCP359応答/maxgap15.36秒、UDP393応答/18期限超過/maxgap10.52秒。固定WAN TCP380/max13.81秒、UDP400/11期限超過/max9.51秒。TCP各SYN1回・同一socket/NAT tupleを保持。設定timeout31.67/32.22秒・confirm各3.74秒、新規DHCP名公開0.72/1.17秒。初期NTP照会は8秒期限超過6回があり、その後と各引継ぎ後は応答した。全項目の再確認時間と転送断時間を分ける。
 
-補助の1500-byte DF probeはMTU1454のICMP Frag Neededを受け取った。WANのIPv6 fragment captureは0 packetで、今回のprobeはfragment往復の受入に数えない。MTU/DFの全経路確認は継続する。`make check`（Race/vet/Python）、fmt-check、3設定検証と通常3実行物のstatic link確認は通過。再実行は[試験計画](test-plan.md)の直列単体/二台手順。owner/process/namespace/stageは撤去済み。
+`make check`（Race/vet/Python）、fmt-check、3設定検証と通常3実行物のstatic link確認は通過。再実行は[試験計画](test-plan.md)の直列単体/二台手順。owner/process/namespace/stageは撤去済み。前回の1500-byte DF probeはMTU1454のICMP Frag Needed、WAN IPv6 fragment captureは0 packetであり、MTU/DF全経路の受入は残る。
 
-実機boot・時計補正・全構成更新には、routerd2専用に起動/再起動できる隔離実行先とWAN/LAN/管理interfaceの情報が必要。現在のnwadmin03の管理接続・時計を維持し、実行先情報を確認しながら独立する実装を継続する。対象ONU/NIC・物理二台・長時間品質は継続する。
+実機boot・時計補正・全構成更新には、routerd2専用に起動/再起動できる隔離実行先とWAN/LAN/管理interfaceの情報が必要。nwadmin03の管理接続・時計を維持し、独立する実装を継続する。公開Tailscale controlと実サイトidentity、対象ONU/NIC・物理二台・長時間品質は継続する。
 
 ## kernel対応ソースを通常imageへ同梱
 

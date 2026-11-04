@@ -1,6 +1,6 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
-保存homertのuntrust→self既定dropをnative三例へ接続した。必要なloopback/ICMPv6・LAN/管理/Tailscale・HA同期と、WANのDHCP client/BGP/DS-Lite/Tailscaleを明示許可し、input終端拒否も既存NFLOG/履歴/OTLPへ渡す。旧routerdのimplicitFirewallAction・InternalFirewallHolesと両保存設定を照合した。 通常build `58efa1037cd6`で単体全daemon再起動・二台両方向HAと、WAN入力拒否/実NFLOG/OTLPを通過。1500-byte DF probeのMTU1454応答はfragment往復の受入と区別して記録した。実機boot/時計補正/全構成更新の隔離実行先を確認しながら残作業を進める。結果と再実行は[引き継ぎ](pve-codex-handoff.md)へ記載する。
+保存homertの入力拒否方針に続き、native三例のTailscale制御URLをhostnameと明示bootstrap DNSへ接続した。通常build `3ecfdf4ff83b`で実HGW・独立Headscale/端末との単体全daemon再起動・両方向HAが終了0。両nodeの実DNS照会とsubnet/exit通信を確認した。初期NTP照会の8秒期限超過6回と自然復旧、TCP/UDPの切替間隔を含む結果は[引き継ぎ](pve-codex-handoff.md)へ記録する。公開control・実サイトidentity、独立実機のboot/時計補正/全構成更新とMTU全経路の受入を継続する。
 
 通常image buildにkernel対応ソースの同梱を接続した。基準main `773121c` + 本変更、通常build `773121ce3681`、Alpine linux-lts `6.18.60-r0` / kernel `6.18.60-0-lts` / recipe `97a4e7b01d88cdec22ef3a5d30247628dc14d8bc`で`make image`が終了0。APKの全Go checkと3実行物のstatic link確認、image組立て、出力全体のSHA256、同梱22 sourceのSHA512、installed configの実APKとの一致、元COPYING/GPL-2.0の存在を確認した。 対応source archiveのfile/digestをmanifestへ接続した。独立kernel/時計での全構成起動・更新と対象実機の受入を継続する。条件・digest・再実行は[引き継ぎ](pve-codex-handoff.md)に記載する。
 

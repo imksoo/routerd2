@@ -204,7 +204,9 @@ def owner(stage, uplink, retention_check):
         for index,node in enumerate(("a", "b")):
             run(["openssl", "req", "-x509", "-newkey", "ed25519", "-nodes", "-days", "1", "-keyout", str(private / ("node-" + node + ".key")), "-out", str(private / ("node-" + node + ".crt")), "-subj", "/CN=" + node, "-addext", "subjectAltName=IP:169.254.42." + str(index+2), "-addext", "extendedKeyUsage=serverAuth,clientAuth"])
         cert,key = stage / "control.crt", stage / "control.key"
-        run(["openssl", "req", "-config", "/dev/null", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-keyout", str(key), "-out", str(cert), "-subj", "/CN=routerd-ha", "-addext", "subjectAltName=IP:198.51.100.1"])
+        run(["openssl", "req", "-config", "/dev/null", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-keyout", str(key), "-out", str(cert), "-subj", "/CN=routerd-ha", "-addext", "subjectAltName=IP:198.51.100.1,DNS:control.tailnet.test"])
+        start("tail", ["dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null", "--no-resolv", "--no-hosts", "--user=root", "--bind-interfaces", "--listen-address=198.51.100.1", "--address=/control.tailnet.test/198.51.100.1", "--log-queries", "--log-facility=-"], "tailnet-bootstrap-dns")
+        wait(lambda: run(inside("tail", ["dig", "@198.51.100.1", "control.tailnet.test", "A", "+short", "+time=1", "+tries=1"])).strip() == "198.51.100.1")
         roots = Path("/etc/ssl/certs/ca-certificates.crt")
         trusted = stage / "roots.pem"
         trusted.write_bytes(roots.read_bytes() + cert.read_bytes())
@@ -457,6 +459,9 @@ def owner(stage, uplink, retention_check):
         tailnet_ids = {}
         def check_tailnet():
             node = elected()
+            bootstrap_queries = (stage / "tailnet-bootstrap-dns.log").read_text()
+            bootstrap_source = "198.51.100.2" if node == "a" else "198.51.100.3"
+            assert "query[A] control.tailnet.test from " + bootstrap_source in bootstrap_queries, "elected product did not resolve its control hostname through bootstrap DNS"
             snapshot = tailnet_snapshot(node)
             assert snapshot.get("backend_state") == "Running", "elected tailnet node is not running"
             assert snapshot["node_id"] == tailnet_ids.setdefault(node, snapshot["node_id"]), "tailnet identity changed after daemon restart"

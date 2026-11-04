@@ -494,7 +494,9 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             run(["ip", "-n", remote, "link", "set", "underlay0", "up"])
             peerbin = stage / "tailnet"
             cert, key = peerbin / "cert.pem", peerbin / "key.pem"
-            run(["openssl", "req", "-config", "/dev/null", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-keyout", str(key), "-out", str(cert), "-subj", "/CN=routerd-uplink", "-addext", "subjectAltName=IP:" + control_address])
+            run(["openssl", "req", "-config", "/dev/null", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-keyout", str(key), "-out", str(cert), "-subj", "/CN=routerd-uplink", "-addext", "subjectAltName=IP:" + control_address + ",DNS:control.tailnet.test"])
+            start(remote, ["dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null", "--no-resolv", "--no-hosts", "--user=root", "--bind-interfaces", "--listen-address=" + control_address, "--address=/control.tailnet.test/" + control_address, "--log-queries", "--log-facility=-"], "tailnet-bootstrap-dns")
+            wait(lambda: run(inside(remote, ["dig", "@" + control_address, "control.tailnet.test", "A", "+short", "+time=1", "+tries=1"])).strip() == control_address)
             hsconfig = peerbin / "headscale.json"
             hsconfig.write_text(json.dumps({
                 "server_url": "https://" + control_address + ":8443", "listen_addr": control_address + ":8443",
@@ -530,7 +532,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                     {"id": "tailnet-underlay", "interface": {"name": "peer0"}},
                     {"id": "tailnet-underlay-ip", "address": {"interface": "peer0", "cidr": "192.0.2.2/24"}},
                     {"id": "tailnet", "service": {"name": "tailnet", "tailscale": {
-                        "interface": "tailscale0", "server_url": "https://192.0.2.1:8443", "hostname": "hgw-router",
+                        "interface": "tailscale0", "server_url": "https://control.tailnet.test:8443", "bootstrap_dns": [control_address], "hostname": "hgw-router",
                         "auth_key_file": str(authfile), "control_ca_file": str(cert),
                         "advertise_routes": ["198.18.0.0/16"], "advertise_exit_node": True,
                     }}},
@@ -1022,6 +1024,9 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
                     wait(lambda: "READY" in (stage / (name + ".log")).read_text())
 
             def check_tailnet():
+                bootstrap_queries = (stage / "tailnet-bootstrap-dns.log").read_text()
+                bootstrap_source = "198.51.100.2" if config_path is not None else "192.0.2.2"
+                assert "query[A] control.tailnet.test from " + bootstrap_source in bootstrap_queries, "product did not resolve its control hostname through bootstrap DNS"
                 assert tailnet_observation().get("node_id") == tailnet_identity, "router restart changed tailnet identity"
                 run(inside(remote, peer_cli + ["set", "--exit-node="]))
                 def subnet_routes_ready():
