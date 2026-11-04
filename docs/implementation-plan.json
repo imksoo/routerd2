@@ -11356,14 +11356,14 @@
     "physical_target_profile": "homert02/03 are identified PVE guests with4vCPU/4GiB, three VirtIO NICs and VirtIO/SCSI disks. Matching isolated PVE product boot/recovery was exercised; actual WAN/LAN attachment, clean installation from a preconverted native configuration, measured load and any additional hardware/architecture qualification remain open.",
     "validation_reporting": "Use docs/test-plan.md for the concise current gate state. Detailed historical checkpoint ledgers are not acceptance authority; keep only current result, limits and repeatable procedure. Never claim unrun gates or partial homert profiles complete.",
     "current_acceptance": {
-      "as_of_utc": "2026-11-03T16:14:35Z",
+      "as_of_utc": "2026-11-04T05:10:44Z",
       "homert_source": "User-provided read-only working copies at chatty.lain.local:~/homert02; the current homert02 and homert03 files each contain 110 resources with matching kind counts. Do not publish configuration values or secrets.",
       "completed_gates": [
         "Go runtime checkpoint842c47e passed make check and final runtimeplan Race. This unchanged Go code plus the bundle producer passed normal build, test-tools/race/vet and actual publisher/receiver operations.",
         "Earlier checkpoints passed isolated Alpine/PID1 PVE single-node networking and signed update/rollback gates; these are not acceptance of the current full profile. PVE/QEMU is excluded from current work.",
         "Earlier checkpoints passed actual supervisor/control/network/Health two-WAN PBR failover/recovery with independent peers, TCP/UDP and captures. This is not qualification of the latest full homert profile; no additional PBR investigation is planned."
       ],
-      "current_changes": "Native local-zone sources now select the saved IPv4 reverse suffix and use the existing static/live-lease PTR receive path. The existing archive check is reused for the single profile and each promoted HA owner; no new WAN NIC, upstream candidate or protocol engine was added. Confirmation checks observe actual health for the same pending revision within the original30-second trial; neither the product rejection conditions nor trial deadline were relaxed.",
+      "current_changes": "Reuse immutable digest-named worker definitions instead of rewriting/fsyncing every retained instance during source edits and instance changes. The same actual paired full-profile trial now passed exit0 with both configuration transactions, both handoffs and unchanged original TCP/UDP/NAT identity. Existing native zones also declare saved shared/node DNS aliases. Corrected real-WAN node-unicast reception and separated fixed DNS/NTP peers from the DHCP client.",
       "open_work_packages": 34,
       "unqualified_profiles": [
         "homert-single full input",
@@ -11373,7 +11373,7 @@
         "Kubernetes",
         "SAM/federation full path"
       ],
-      "tested_source_head": "7649acd plus native reverse-zone source and real-client/archive runner changes; normal build7649acd44e52; product Go unchanged",
+      "tested_source_head": "1174b46 plus immutable worker definition reuse, native DNS aliases, real-WAN fixture corrections and route error context; normal build1174b46cea9f",
       "native_examples": {
         "examples/single-router-dslite-dhcp-dns.yaml": 45,
         "examples/homert02-native.yaml": 54,
@@ -11566,6 +11566,15 @@
         "limits": "Discrete before/after observations in shared-clock host mode with clock adjustment disabled. All-source outage/holdover, long-run time quality, appliance clock discipline, full110-resource intent, natural renewal on this profile, target ONU/NIC/hardware/performance and all34 packages remain open.",
         "procedure": "make check-uplink DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18 UPLINK_WAN_MAC=02:72:6f:75:74:03 UPLINK_CONFIG=examples/single-router-dslite-dhcp-dns.yaml UPLINK_SECONDS=20 UPLINK_FULL_RESTART=1 UPLINK_TAILNET=1 UPLINK_WAN_OUTAGE=0; then python3 scripts/uplink-ha.py --uplink ens18",
         "supporting_checks": "make race vet test-tools36; Python syntax; three static normal-build executables; validation of single/homert02/homert03 native examples"
+      },
+      "latest_dns_alias_gate": {
+        "status": "single DNS aliases/restart passed before definition reuse; paired full profile passed after definition reuse",
+        "single": "Normal full profile, real HGW/ens18, independent clients, both-family UDP/TCP A/AAAA and configured IPv4 PTR, whole-daemon restart passed exit0. PD kill2.95s/restart5.83s, config timeout30.80s/control restart5.13s, whole-profile recheck111.56s,2rounds/0natural PD renewal.",
+        "observed_fixture_failure": "A single shared-MAC macvlan did not deliver real-HGW replies to per-node MACs. Small actual-WAN bridge/direct comparison isolated the loss. Registered receivers plus destination-MAC tc ingress delivered HGW DNS replies from both actual node WAN addresses. A direct nested-macvlan alternative was removed after observing Linux parent flattening.",
+        "open": "Identify the module that stopped once on a Linux netlink dump interruption and correct the responsible receive path as needed. Prior route refresh ownership mismatch did not recur in diagnostic/fixed executions; no timer cause is claimed. Single full-daemon restart after definition reuse, complete site intent, physical boot/clock adjustment and whole-OS updates remain open.",
+        "procedure": "docs/test-plan.md; docs/pve-codex-handoff.md",
+        "paired": "Normal build1174b46cea9f plus definition reuse passed exit0. Both standby NTP sources synchronized; no8s NTP query timeout. Config timeout31.51/31.13s and confirm/restore1.43/1.59s retained WAN/VRRP/BGP workers. Full handoff rechecks64.68/78.52s; TCP379responses/maxgap15.18s, UDP404/missed16/maxgap10.52s; fixed-WAN TCP400/max13.82s and UDP410/missed10/max9.51s. Both TCP connections had1SYN and unchanged NAT tuples. New clients and rejoin passed in both directions.",
+        "definition_reuse": "ApplyConfig preparation and changed instance sets both call writeBinding. Its digest-named atomic definitions are immutable, so existing files are reused without adding cache state. New files retain atomic persistence. Same before/after paired trial preserved original deadlines/results; no traffic reconnect or timeout relaxation."
       }
     }
   },

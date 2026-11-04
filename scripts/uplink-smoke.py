@@ -34,7 +34,7 @@ def run(args, timeout=12):
     return result.stdout
 
 
-def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_restart, tailnet, config_path, retention_check):
+def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_restart, tailnet, config_path, retention_check, ntp_outage):
     def stop(*_):
         raise KeyboardInterrupt()
 
@@ -993,7 +993,13 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
                     for address, name in (("198.18.0.1", "router"), ("198.18.0.11", "storage")):
                         answer = run(inside(client, ["dig", "@" + server, "-x", address, "+short", "+time=3", "+tries=1", transport]))
                         assert answer.strip().rstrip(".").lower() == name + "." + lan_domain, (address, answer)
-            print("PASS static and real DHCP-derived PTR over IPv4/IPv6 UDP/TCP", flush=True)
+                    node_record = core["zones"][0]["spec"]["records"][1]
+                    name = node_record["hostname"] + "." + lan_domain
+                    answer = run(inside(client, ["dig", "@" + server, name, "A", "+short", "+time=3", "+tries=1", transport]))
+                    assert ipaddress.ip_address(answer.strip()) == ipaddress.ip_address(node_record["ipv4"]), answer
+                    answer = run(inside(client, ["dig", "@" + server, name, "AAAA", "+short", "+time=3", "+tries=1", transport]))
+                    assert ipaddress.ip_address(answer.strip()) == router_dns, answer
+            print("PASS shared router and node-local DNS aliases plus static/DHCP PTR over IPv4/IPv6 UDP/TCP", flush=True)
 
         wait_dns()
         if config_path is not None:
@@ -1437,7 +1443,7 @@ print(*s.getsockname())
             )
             assert selected[0]["dev"] == "dslite0", "IPv4 traffic bypassed the AFTR"
 
-        if config_path is not None:
+        if ntp_outage:
             time_worker = next(m for m in query("supervisor.sock", "/v1/status")["modules"] if m["name"] == "service.time")
             ntp_packets = start(router, ["tcpdump", "--immediate-mode", "-Z", "root", "-U", "-n", "-i", "any",
                 "-c", "100", "-w", str(stage / "ntp-outage.pcap"), "udp port 123"], "ntp-outage-capture")
@@ -1478,6 +1484,7 @@ print(*s.getsockname())
             packets = run(["tcpdump", "-nn", "-r", str(stage / "ntp-outage.pcap"), "-c", "12"])
             print("Observed NTP packets", packets, flush=True)
             print("PASS NTP upstream recovered with a newer real reference on the same worker; seconds", round(time.monotonic() - restored_at, 2), flush=True)
+        if config_path is not None:
             # Disable the candidate LAN cache as well as changing the core zone:
             # both applications and rollback must be visible to the same client.
             for recovery in ("timeout", "restart"):
@@ -1870,6 +1877,7 @@ def main():
     parser.add_argument("--wan-outage", action="store_true", help="Blackhole this isolated router WAN and verify recovery")
     parser.add_argument("--full-restart", action="store_true", help="Restart the entire router with the same state and clients")
     parser.add_argument("--tailnet", action="store_true", help="Add independent Headscale/Tailscale with a fixed private underlay; exercise automatic LAN and real WAN exit together")
+    parser.add_argument("--ntp-outage", action="store_true", help="Check all upstream NTP loss and holdover in the native profile")
     parser.add_argument("--retention-check", action="store_true", help="Check real history archive failure/recovery after normal communication trials")
     parser.add_argument("--inside", type=Path)
     args = parser.parse_args()
@@ -1881,10 +1889,12 @@ def main():
         parser.error("--dns-upstream belongs to the generated fixture; the native profile owns DNS intent")
     if not args.config and not args.aftr:
         parser.error("--aftr is required by the generated fixture")
+    if args.ntp_outage and not args.config:
+        parser.error("--ntp-outage uses the native profile time service")
     if args.retention_check and not args.config:
         parser.error("--retention-check uses the native profile datasets")
     if args.inside:
-        owner(args.inside, args.uplink, args.aftr, args.seconds, args.dns_upstream, args.wan_mac, args.wan_outage, args.full_restart, args.tailnet, args.config, args.retention_check)
+        owner(args.inside, args.uplink, args.aftr, args.seconds, args.dns_upstream, args.wan_mac, args.wan_outage, args.full_restart, args.tailnet, args.config, args.retention_check, args.ntp_outage)
         return
     root = [] if os.geteuid() == 0 else ["sudo", "-n"]
     persistent = args.state_dir.resolve() if args.state_dir else None
@@ -1955,6 +1965,8 @@ def main():
             command.append("--tailnet")
         if args.retention_check:
             command.append("--retention-check")
+        if args.ntp_outage:
+            command.append("--ntp-outage")
         subprocess.run(
             command,
             check=True,

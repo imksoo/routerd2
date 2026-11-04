@@ -1,5 +1,8 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
+設定適用のたびに不変の全worker定義を再書込みしていた経路を、既存digest fileの再利用へ変更した。変更前は設定変更中の現用喪失と二方向目の既存TCP timeoutを実通信で検出した。同じ通常buildの修正版で全二台手順が終了0、両nodeの設定timeout/confirm、両方向の同一TCP/UDP・NAT tupleと新規端末/再加入が通過した。保存DNSの共有名/node名も既存zoneへ接続し、単体再起動前後と二台各引継ぎで実回答を確認した。WAN試験接続のnode固有MAC応答欠落と固定peerのDHCP依存も修正した。全サイト・実機/時計補正・whole-OS更新、単発netlink中断の識別は継続する。条件・測定値は[引き継ぎ](pve-codex-handoff.md)へ記録する。
+
+
 対象機向けboot文書を通常`make image IMAGE_BOOT=...`へ接続し、disk生成が元のstateデバイス・待ち時間を固定値へ上書きする問題を修正した。通常build `de95e2e8d053`で選択driverの実依存closureとcache反映、NVMe参照保持、明示SATA変更時の30秒保持、既定profileのimage/disk生成を確認した。対象機でのload/通信・実boot/state保持・whole-OS署名/A-Bを継続する。条件は[引き継ぎ](pve-codex-handoff.md)へ記録した。
 
 通常ディスクの初回導入を`make install-disk`へ接続した。通常build `0d2b132813a6`から実生成した2 GiB GPTを、同容量/+64 MiBの実loopへ書込み・flush・全byte読み戻し・GPT末尾移動・kernel区画再読込みまで受け入れた。別namespaceのmountによる排他拒否、実SSH keyと区画identityの保持も確認。Linux保守環境・512-byte論理sectorの初回導入であり、実起動/state二回保持・物理媒体・署名whole-OS/A-Bは残る。再実行と結果は[引き継ぎ](pve-codex-handoff.md)へ記録した。

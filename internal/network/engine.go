@@ -968,7 +968,7 @@ func (p *apply) refreshRoutes(wanted map[string]Route) error {
 		update := refresh{index: i, oldTimer: saved.KernelExpiry}
 		for _, observed := range live[key] {
 			if !routeMatches(observed, saved) {
-				return p.failure("route refresh ownership", errors.New("route changed outside routerd2"))
+				return p.failure("route refresh ownership", fmt.Errorf("route %s table %d metric %d differs from owned state: observed=%+v saved=%+v", next.Destination, routeTable(next), next.Metric, observed, saved))
 			}
 			update.found = true
 			// A previous ACK may have been lost. Preserve the current readback

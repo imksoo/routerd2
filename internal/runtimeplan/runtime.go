@@ -558,11 +558,18 @@ func (r *Runtime) prepare(plan protocolPlan) error {
 }
 
 func (r *Runtime) writeBinding(bound binding) error {
-	dir := filepath.Join(r.dir, "instances", bound.instance.Name)
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	path := filepath.Join(r.dir, "instances", bound.instance.Name, bound.digest+".json")
+	// Digest-named definitions are immutable and published atomically. Rewriting
+	// every retained worker delays live protocol effects during a source edit.
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	return config.AtomicWrite(filepath.Join(dir, bound.digest+".json"), bound.encoded)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	return config.AtomicWrite(path, bound.encoded)
 }
 
 func (r *Runtime) writeBindings(bindings map[string]binding) error {

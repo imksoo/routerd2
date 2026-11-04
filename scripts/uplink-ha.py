@@ -74,7 +74,7 @@ def owner(stage, uplink, retention_check):
     run(["mount", "-t", "tmpfs", "-o", "mode=755", "tmpfs", "/var/lib/dhcpcd"])
     namespaces, children = [], []
     prefix = "r2fh-" + str(os.getpid())
-    names = {key: prefix + "-" + key for key in ("wire", "a", "b", "client", "admin", "gateway", "tail", "bgp0", "bgp1")}
+    names = {key: prefix + "-" + key for key in ("wire", "a", "b", "client", "time", "admin", "gateway", "tail", "bgp0", "bgp1")}
     def inside(key, command):
         return ["ip", "netns", "exec", names[key]] + command
     def start(key, command, name):
@@ -120,10 +120,21 @@ def owner(stage, uplink, retention_check):
         for node in ("a", "b"):
             for device, bridge in (("lan0", "lan"), ("wan0", "wan"), ("mgmt0", "mgmt"), ("sync0", "sync"), ("peer0", "tail")):
                 connect(node, device, bridge)
+            # The common macvlan receives the shared WAN MAC. Register each
+            # node MAC too, and deliver its unicast frames to its actual port.
+            # Other frames continue through the common bridge attachment.
+            address = json.loads(run(inside(node, ["ip", "-j", "link", "show", "wan0"])))[0]["address"]
+            receiver = node + "-wan-rx"
+            run(["ip", "link", "add", "link", uplink, "name", receiver, "netns", names["wire"], "type", "macvlan", "mode", "private"])
+            run(inside("wire", ["sysctl", "-qw", "net.ipv6.conf." + receiver + ".disable_ipv6=1"]))
+            run(inside("wire", ["ip", "link", "set", receiver, "address", address, "up"]))
+            run(inside("wire", ["tc", "qdisc", "add", "dev", receiver, "clsact"]))
+            run(inside("wire", ["tc", "filter", "add", "dev", receiver, "ingress", "protocol", "all", "flower", "dst_mac", address, "action", "mirred", "egress", "redirect", "dev", node + "-wan0"]))
         connect("client", "client0", "lan", "02:00:00:00:00:03")
         start("client", ["tcpdump", "-n", "-l", "-v", "-e", "-i", "client0", "-c", "80", "icmp6 and (ip6[40] == 134 or ip6[40] == 136)"], "client-ra")
         connect("admin", "mgmt0", "mgmt")
-        run(inside("client", ["ip", "address", "add", "198.18.0.254/32", "dev", "lo"]))
+        connect("time", "eth0", "lan")
+        run(inside("time", ["ip", "address", "add", "198.18.0.254/16", "dev", "eth0"]))
         run(inside("admin", ["ip", "address", "add", "10.255.255.254/24", "dev", "mgmt0"]))
         connect("gateway", "lan0", "lan")
         run(inside("gateway", ["ip", "address", "add", "198.19.0.253/16", "dev", "lan0"]))
@@ -139,7 +150,7 @@ def owner(stage, uplink, retention_check):
         nat = stage / "gateway.nft"
         nat.write_text('table ip gateway {\n chain nat {\n type nat hook postrouting priority srcnat;\n ip saddr { 198.18.0.0/16, 198.19.0.0/16 } oifname "wan0" masquerade\n }\n}\n')
         run(inside("gateway", ["nft", "-f", str(nat)]))
-        for key, address, port, answer in (("gateway", "198.19.0.253", 53, None), ("client", "198.18.0.254", 5353, "192.0.2.77"), ("client", "198.18.0.254", 5354, "192.0.2.78")):
+        for key, address, port, answer in (("gateway", "198.19.0.253", 53, None), ("time", "198.18.0.254", 5353, "192.0.2.77"), ("time", "198.18.0.254", 5354, "192.0.2.78")):
             command = ["dnsmasq", "--keep-in-foreground", "--pid-file=", "--conf-file=/dev/null", "--no-hosts", "--no-resolv", "--bind-interfaces", "--listen-address=" + address, "--port=" + str(port)]
             command += ["--address=/#/" + answer] if answer else ["--server=1.1.1.1"]
             peer = start(key, command, "dns-" + str(port))
@@ -195,7 +206,7 @@ def owner(stage, uplink, retention_check):
         chrony = [str(loader), "--library-path", str(ntp / "lib") + ":" + str(ntp / "usr/lib"), str(ntp / "usr/sbin/chronyd")]
         conf = stage / "chrony.conf"
         conf.write_text(f"local stratum 8\nbindaddress 198.18.0.254\nallow 198.18.0.0/16\ncmdport 0\nbindcmdaddress {stage}/ntp.sock\npidfile {stage}/ntp.pid\ndriftfile {stage}/ntp.drift\n")
-        start("client", chrony + ["-d", "-x", "-u", "root", "-f", str(conf)], "ntp-peer")
+        start("time", chrony + ["-d", "-x", "-u", "root", "-f", str(conf)], "ntp-peer")
         ntp_client = stage / "ntp-client.conf"
         ntp_client.write_text(f"server 198.18.0.1 iburst maxsamples 1\nport 0\ncmdport 0\npidfile {stage}/ntp-client.pid\n")
         connect("tail", "eth0", "tail")
@@ -256,6 +267,7 @@ def owner(stage, uplink, retention_check):
             path.write_text(json.dumps(boot))
             daemons[node] = start(node, [str(stage / "routerd"), "boot", "--file", str(path)], "router-" + node)
             start(node, ["tcpdump", "-n", "-Z", "root", "-l", "-i", "any", "-c", "80", "tcp port 18080 or udp port 18081"], "tail-flow-"+node)
+            start(node, ["tcpdump", "-n", "-Z", "root", "-U", "-i", "any", "-C", "1", "-W", "2", "-w", str(stage / ("ntp-" + node + ".pcap")), "udp port 123"], "ntp-capture-"+node)
         (stage / "location.json").write_text(json.dumps({"owner_pid": os.getpid(), "namespaces": names, "stage": str(stage)}))
         print("Full native HA owner", os.getpid(), "stage", stage, flush=True)
         def elected():
@@ -292,6 +304,18 @@ def owner(stage, uplink, retention_check):
         def advertised_dns():
             advertised = re.findall(r"rdnss option[^\n]* lifetime (\d+)s, addr: ([0-9a-f:]+)", (stage / "client-ra.log").read_text())
             return next((str(ipaddress.ip_address(address)) for seconds,address in reversed(advertised) if int(seconds) > 0), None)
+        def check_time(node, configuration):
+            try:
+                run(inside("client", chrony + ["-Q", "-t", "8", "-u", "root", "-f", str(configuration)]), 12)
+            except RuntimeError:
+                for socket, path in (("control.sock", "/v1/services/service.time"), ("supervisor.sock", "/v1/status")):
+                    observation = subprocess.run(["curl", "--max-time", "3", "-sS", "--unix-socket", str(stage / node / "run" / socket), "http://localhost" + path], capture_output=True, text=True)
+                    print("NTP failed query", node, configuration.name, path, observation.returncode, observation.stdout.strip(), flush=True)
+                for packet in sorted(stage.glob("ntp-" + node + ".pcap*")):
+                    wire = subprocess.run(["tcpdump", "-nn", "-vv", "-r", str(packet), "udp port 123"], capture_output=True, text=True)
+                    print("NTP failed-query packets", node, packet.name, wire.returncode, "\n".join(wire.stdout.splitlines()[-50:]), flush=True)
+                raise
+
         def traffic():
             address,gateway,dns = lease.read_text().split()
             assert gateway==dns=="198.18.0.1", (gateway,dns)
@@ -312,8 +336,15 @@ def owner(stage, uplink, retention_check):
                     for target, hostname in (("198.18.0.1", "router"), (address, "ha-client")):
                         answer = run(inside("client", ["dig", "@" + server, "-x", target, "+short", "+time=3", "+tries=1", transport]))
                         assert answer.strip().rstrip(".").lower() == (hostname + "." + lan_domain).lower(), (target, answer)
-            print("PASS HA static and real DHCP-derived PTR over IPv4/IPv6 UDP/TCP", flush=True)
-            run(inside("client", chrony + ["-Q", "-t", "8", "-u", "root", "-f", str(ntp_client)]), 12)
+                    node_record = dns_core[elected()]["zones"][0]["spec"]["records"][1]
+                    name = node_record["hostname"] + "." + lan_domain
+                    for qtype, expected in (("A", node_record["ipv4"]), ("AAAA", dns6)):
+                        answer = run(inside("client", ["dig", "@" + server, name, qtype, "+short", "+time=3", "+tries=1", transport]))
+                        assert ipaddress.ip_address(answer.strip()) == ipaddress.ip_address(expected), answer
+                    answer = run(inside("client", ["dig", "@" + server, "-x", node_record["ipv4"], "+short", "+time=3", "+tries=1", transport]))
+                    assert answer.strip().rstrip(".").lower() == name.lower(), answer
+            print("PASS HA shared router and node-local DNS aliases plus static/DHCP PTR over IPv4/IPv6 UDP/TCP", flush=True)
+            check_time(elected(), ntp_client)
             print("PASS HA client NTP response", flush=True)
             node = elected()
             expected_hop = "192.0.2.10" if node == "a" else "192.0.2.11"
@@ -376,7 +407,7 @@ def owner(stage, uplink, retention_check):
             ntp_destination = next(a for a in membership["public-ntp"]["addresses"] if ipaddress.ip_address(a).version == 4)
             redirected_ntp = stage / "redirected-ntp.conf"
             redirected_ntp.write_text("server " + ntp_destination + " iburst maxsamples 1\nport 0\ncmdport 0\n")
-            run(inside("client", chrony + ["-Q", "-t", "8", "-u", "root", "-f", str(redirected_ntp)]), 12)
+            check_time(node, redirected_ntp)
             source = json.loads(run(inside("client", ["ip", "-j", "route", "get", ntp_destination])))[0]["prefsrc"]
             translated = run(inside(node, ["conntrack", "-L", "-f", "ipv4", "-p", "udp", "--orig-src", source, "--orig-dst", ntp_destination, "--dport", "123"]))
             assert re.search(r"\bsrc=198\.18\.0\.1\b", translated), translated

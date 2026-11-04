@@ -48,7 +48,7 @@ homert integration and target hardware. A previous appliance boot with ordinary
 link-local DAD repeatedly restarted RA/DHCPv6 workers; repeat that boot without
 NoDAD remains an acceptance item.
 
-The normal native single-router `make check-uplink` also blocks all router-originated
+The native single-router `make check-uplink UPLINK_NTP_OUTAGE=1` blocks all router-originated
 UDP/123 upstream requests after real synchronization. It confirms actual drops,
 LAN client acceptance during holdover, IPv4/IPv6 DNS and HTTPS, then a newer
 chronyd reference on the same worker after restoring traffic. Polling and client

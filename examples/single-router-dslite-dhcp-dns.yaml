@@ -354,6 +354,9 @@ resources:
                 - hostname: router
                   ipv4: 198.18.0.1
                   ipv6From: {resource: IPv6DelegatedAddress/wan-pd/lan, field: address}
+                - hostname: node
+                  ipv4: 198.18.0.1
+                  ipv6From: {resource: IPv6DelegatedAddress/wan-pd/lan, field: address}
               dhcpDerived:
                 sources: [DHCPv4Server/lan-leases]
   - id: service/dns

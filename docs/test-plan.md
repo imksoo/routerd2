@@ -82,11 +82,11 @@ WAN/tailnet captureは各最大8MB、PD captureはudp546と実行時間で限定
 
 二台の非公開DNS設定を使う場合は`UPLINK_HA_CONFIG_A=/private/node-a.json UPLINK_HA_CONFIG_B=/private/node-b.json`を指定する。直接runnerを実行する場合は`--config-a`・`--config-b`を使う。設定は既存の隔離interface/benchmarkアドレスを維持し、private suffix・upstream・NextDNSのURLだけを保存設定から接続する。試験は設定内のlocal zoneと全HTTPS上流を読み、DHCP検索domain・PTR・管理照会・新規端末の名前解決と各DoHのHealthyを確認する。
 
-`make check-uplink-ha DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18`で通常buildと設定検証後に実行する。まず実HGWのRA/PD、共有WAN/LAN IPv6 identity、VRRPの準備完了後公開、実DHCP端末の両IP HTTPS・UDP/TCP DNS、現用daemon停止後の引継ぎを通す。FRR2台、DNS、chronyd、Headscale、syslog/Collectorを独立peerとして配置する。独立peerの配置だけでは各経路の受入としない。
+`make check-uplink-ha DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18`で通常buildと設定検証後に実行する。まず実HGWのRA/PD、共有WAN/LAN IPv6 identity、VRRPの準備完了後公開、実DHCP端末の両IP HTTPS・UDP/TCP DNS、現用daemon停止後の引継ぎを通す。FRR2台、DNS、chronyd、Headscale、syslog/Collectorを独立peerとして配置する。固定DNS/chronyd peerはDHCP端末と別namespaceの198.18.0.254/16で先に起動し、端末の未取得/再取得に依存させない。独立peerの配置だけでは各経路の受入としない。
 
 二台Tailscaleは現用権に合わせて有効化し、nodeごとの保持鍵を維持する。独立Headscaleの明示policyで試験userのLAN/exit広告を事前許可する（[公式route設定](https://headscale.net/stable/ref/routes/)）。独立端末はLAN経路を手動で切り替えず、制御サーバーが選んだPrimaryRoutesと実TCP/UDPを照合する。両方向の停止/再加入後もLAN→peer両IP・peer→LAN IPv4を確認する。exitは最後に現用nodeを明示選択して両IP HTTPS/UDP DNSを確認し、同一exit node IDの自動切替とは扱わない。両nodeへのSSH鍵認証/保持host key、現用側のloopback/管理DNS・Web履歴とLANからの管理拒否も確認する。
 
-隔離: private mountと専用namespace/bridgeを用い、ens18へ専用macvlanで接続する。共有WAN MACは`02:00:5e:00:01:43`、静的gateway用HGW接続は`02:72:6f:75:74:06`。自然更新ownerのMAC/protocol/stateへ触れない。hostの管理address/default route/時計は変更しない。各実行は最大600秒、peer/productのstdoutと状態はprivate stageのみとし、終了時にprocess/namespace/key/stageを撤去する。失敗の原因と必要な修正は簡潔に残す。
+隔離: private mountと専用namespace/bridgeを用い、ens18へ専用macvlanで接続する。共通接続は共有WAN MACを受ける。各node固有MACも受信専用macvlanへ登録し、iproute2のtc ingressでそのMAC宛の実Ethernet frameだけを対応するWANポートへ渡す。共有接続だけではnode固有MAC宛の上流応答が落ちるためで、hostの管理interfaceや経路は変更しない。共有WAN MACは`02:00:5e:00:01:43`、静的gateway用HGW接続は`02:72:6f:75:74:06`。自然更新ownerのMAC/protocol/stateへ触れない。hostの管理address/default route/時計は変更しない。各実行は最大600秒、peer/productのstdoutと状態はprivate stageのみとし、終了時にprocess/namespace/key/stageを撤去する。失敗の原因と必要な修正は簡潔に残す。
 
 再実行手順: 同じ設定で現用停止→待機側への復旧→旧現用の再加入を両方向へ進める。独立Python標準ライブラリのclientから公開HTTPSへTCP接続を一度だけ張り、公開DNSへ同じUDP socketで送信し続ける。TCPの再接続を禁止し、両nodeの実conntrack reply tupleとclient captureのSYNを照合する。UDPは1秒の返信期限で欠落と最大応答間隔を記録する。これは無損失条件ではない。DUID/IAID/prefixと同期済みDHCP leaseの実Renew/ACK、再加入後の非preemptも確認する。 OUI端末1台と特定MAC端末2台も別namespaceで実割当し、配布された特別gateway/DNSだけで公開通信を行う。通常・特別端末のlease全てが待機側へ同期した後に停止し、両方向の引継ぎで実Renew/ACK・同一割当・通信を確認する。続いて実Release/再取得でsticky割当の保持と新しい現用機のfingerprintを確認する。dnsmasqの通常Renew通知には要求options等がなく、fingerprint同期もないため、Renewだけで新しい現用機に識別記録ができることを前提にしない。新しい公開通信のnDPI計数/SNI、管理拒否履歴、現用node識別付きのfresh syslog/OTLP logs/metrics/tracesは記録時刻で過去の結果と分ける。
 
@@ -127,9 +127,13 @@ rootで`nsenter --mount=/proc/<owner_pid>/ns/mnt ip netns exec <router>`内のWA
 3. **全34 work package。** SYS（OS/capability/time/worker障害/watchdog）、NET（PPPoE/link/VRF/VXLAN/DHCPv6 stateful/relay/DNS/BGP/BFD/WireGuard）、CORE/OPS（transaction/lifecycle/event/dynamic config/plugin/API/CLI/Web/logging/retention/DPI）、HA/EXT（同期/IPsec/Tailscale）、CLOUD（provider/federation/SAM）、DIST（signed runtime/boot/更新/A-B/実機/arm64/cloud image/Kubernetes）を各packageの受入条件で実peerへ接続する。一つの不具合で独立作業を止めない。
 4. **QUAL。** 全field/default/lifecycle/status/eventと明示的置換、各配布先の通信・障害復旧・性能・更新rollbackを照合する。対象ONU/NIC/providerが使えなければ最小の不足setupと未受入範囲を残す。本番変更/課金は実際のauthorization内で行い、全条件が実証されるまで全体完成を宣言しない。
 
+## 共有ルーター名とノード自身のDNS名
+
+保存homertの二つの静的DNS名に合わせ、単体例はrouter/node、二台例はrouterと各node-a/node-bを宣言する。共有名のIPv4はVIP、ノード名のIPv4は各nodeの静的LANアドレスを使い、IPv6は同じPD由来のLANアドレスへ結ぶ。単体の通常起動/全daemon再起動、二台の両方向引継ぎ/再加入で、独立LAN端末から両IP UDP/TCPのA/AAAAと、設定対象であるIPv4 PTRを照合する。共有IPv6を持つaliasの正引きを両方維持する。共有IPv4のPTRは先に宣言した共有名を保つ。比較には設定済み静的IPv4と実観測IPv6を使う。
+
 ## 単体全構成のNTP全上流停止・復旧
 
-通常の単体`make check-uplink`はNTP同期と独立LAN端末2台の時刻取得後、router namespaceのoutputだけでUDP宛先123を遮断する。実nft counterの増加で上流照会の遮断を確認し、その後30秒以上のholdover中に同じ独立chronydの品質判定でLAN応答を確認する。両IPのDNS UDP/TCP・HTTPSも確認する。起動時の未同期と、取得済みの時刻を保つholdoverを区別し、遮断直後の未同期化は要求しない。
+通常の単体`make check-uplink`はNTP同期と独立LAN端末2台の時刻取得を確認する。`UPLINK_NTP_OUTAGE=1`を付けた場合、その後、router namespaceのoutputだけでUDP宛先123を遮断する。実nft counterの増加で上流照会の遮断を確認し、その後30秒以上のholdover中に同じ独立chronydの品質判定でLAN応答を確認する。両IPのDNS UDP/TCP・HTTPSも確認する。起動時の未同期と、取得済みの時刻を保つholdoverを区別し、遮断直後の未同期化は要求しない。
 
 遮断をfinallyで撤去し、chronydの実reference_timeが遮断中の値より進み、同じworker PID/generationで再取得することを確認する。自然のpoll周期を変えず、遮断packet待ちと復旧待ちは各150秒を上限とする。LANへの時刻応答・上流request/replyを最大100packetのcaptureで確認し、終了時に撤去する。host時計補正は無効のまま、製品設定・共有hostのroute/clockは変更しない。この短いholdover確認と、長時間品質・appliance時計補正・対象実機を区別する。
 

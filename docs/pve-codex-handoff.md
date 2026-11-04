@@ -1,5 +1,17 @@
 # routerd2 開発引き継ぎ
 
+## 設定再適用の書込み削減と保存DNSの二つの名前
+
+基準main `1174b46` + 本変更、通常build `1174b46cea9f`、Linux `6.8.0-136-generic`。ApplyConfigとinstance set変更が、内容digestで命名した不変の全worker定義を毎回atomic write/fsyncしていた。旧routerdのwriteFileIfChangedと現行callerを照合し、writeBindingで既存の同digest fileを再利用する。新しい定義のatomic writeは維持する。変更前の実通信ではDNS設定の適用/restore中に現用が待機へ移り、別実行の二方向目では元のTCPが60秒のread期限を超えた。期限や判定を緩めず、重複書込みを除いた版で同じ全二台手順が終了0となった。
+
+実HGW/ens18・各54-resource・独立LAN端末/FRR/chronyd/Headscale/Collectorの実行で、両nodeの設定timeout31.51/31.13秒・confirm/元設定復帰1.43/1.59秒が通過。DNS変更でWAN/VRRP/BGP workerを維持した。両方向引継ぎの全項目再確認64.68/78.52秒は転送断時間ではない。公開TCP379応答/maxgap15.18秒・UDP404/16期限超過/maxgap10.52秒、固定WAN TCP400/max13.82秒・UDP410/10期限超過/max9.51秒。TCP各SYN1回、同じsocket/NAT tuple/PD identityを保持した。旧現用停止中の新規端末は両方向で実DHCP/SLAAC/Information・両IP UDP/TCP DNS/HTTPSを利用し、名前公開0.72/1.16秒、再加入時の同期と非preemptも通過した。NTP照会timeoutは0回。netlink dumpの中断を示すworker停止が1件あり、通信は復旧した。原因moduleの識別と必要な受信処理の修正は継続する。
+
+保存両homertのDNSZoneを再読し、既存native zoneへ共有名とnode自身の名前を宣言した。単体はrouter/node、二台はrouter/node-aまたはnode-b。各静的IPv4と同じPD由来IPv6へ結ぶ。新DNS engineや変換層は追加していない。単体の通常全構成は書込み削減前の同buildで終了0、両IP UDP/TCPのA/AAAA・設定対象のIPv4 PTRと全daemon再起動後の同じ回答/通信を確認した。PD SIGKILL2.95秒/通常再起動5.83秒、設定timeout30.80秒/control再起動5.13秒、全daemon後の全項目再確認111.56秒、2巡回/自然PD更新0回。有界captureでLAN TCP AAAAとcore転送を照合した。変更後の二台でも初期・両方向引継ぎ・再加入後に同じDNS名を確認した。
+
+試験WANの共通macvlanは共有MACだけを登録し、node固有MAC宛のHGW DNS応答を落としていた。通常DADを使う同じnode MACの実HGW比較で、bridge経由は失敗、直接登録したmacvlanは成功した。入れ子macvlanの親をLinuxが外側namespaceへまとめる直接接続案は撤去した。元のveth/bridge配置を保ち、node固有MACを受信専用macvlanへ登録し、tc ingressで宛先MACが一致する実frameを対応WANポートへ渡す。両nodeの実WAN IPv6からHGW DNSの回答とtc counter増加を確認した。固定DNS/NTP peerもDHCP端末から別namespaceへ分け、取得前から到達するようにした。両nodeの待機中NTP同期を確認し、hostの管理address/default route/時計は変更していない。
+
+`make check`（Race/vet/Python）・fmt-check、通常buildと3 static ELFを確認した。通常の単体NTP同期/端末応答は維持し、全源停止は対象変更時に`UPLINK_NTP_OUTAGE=1`で再実行する。今回この遮断は再実行していない。設定書込み削減後の単体全daemon再起動、全サイト意図・実機/時計補正・whole-OS更新はこの二台gateへまとめない。書込み削減前に一度出た経路refresh所有判定エラーは診断版/修正版では再現せず、timerを原因と断定していない。既存errorへ対象経路・観測値・保存値を追加した。再実行は[試験計画](test-plan.md)の通常単体/二台手順。終了時にprocess/namespace/key/stageは撤去済み。詳細logと重複build出力はcommit/push後に撤去する。全体ゴールは継続中。
+
 ## 対象機boot文書の選択とstate指定保持
 
 基準main `de95e2e` + 本変更、通常image build `de95e2e8d053` / kernel `6.18.60-0-lts`。通常APK経路の`make image IMAGE_BOOT=<context内のboot文書>`へ接続し、同じ入力をmodule closure・initramfs・manifestへ渡す。修正前のdisk builderは元imageのstate指定を`/dev/vda4`・10秒へ固定上書きしていた。現在は元のstate_volumeと待ち時間を保持し、明示したDISK_STATE_DEVICEだけを変更する。state未指定imageの既定は従来の`/dev/vda4`・10秒である。

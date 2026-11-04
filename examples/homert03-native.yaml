@@ -748,6 +748,11 @@ resources:
             ipv6From:
               resource: IPv6DelegatedAddress/wan-pd/lan
               field: address
+          - hostname: node-b
+            ipv4: 198.18.0.3
+            ipv6From:
+              resource: IPv6DelegatedAddress/wan-pd/lan
+              field: address
           dhcpDerived:
             sources:
             - DHCPv4Server/lan-leases
