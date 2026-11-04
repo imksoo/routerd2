@@ -109,7 +109,6 @@ resources:
       - {match: {in_interface: vip0}, action: accept}
       - {match: {in_interface: lan6-ha}, action: accept}
       - {match: {in_interface: mgmt0}, action: accept}
-      - {match: {in_interface: sync0}, action: accept}
       - {match: {in_interface: tailscale0}, action: accept}
       - {match: {in_interface: wan0, protocol: udp, destination_ports: [{start: 68}, {start: 546}]}, action: accept}
       - {match: {in_interface: wan-ha, protocol: udp, destination_ports: [{start: 68}, {start: 546}]}, action: accept}
@@ -507,8 +506,8 @@ resources:
       ha:
         owner: lan-ha
         replication:
-          listen_address: 169.254.42.3:8444
-          peer_address: 169.254.42.2:8444
+          listen_address: 198.18.0.3:8444
+          peer_address: 198.18.0.2:8444
           certificate_file: /run/routerd-ha/node-b.crt
           private_key_file: /run/routerd-ha/node-b.key
           peer_certificate_file: /run/routerd-ha/node-a.crt
@@ -615,8 +614,8 @@ resources:
       ha:
         owner: lan-ha
         replication:
-          listen_address: 169.254.42.3:8443
-          peer_address: 169.254.42.2:8443
+          listen_address: 198.18.0.3:8443
+          peer_address: 198.18.0.2:8443
           certificate_file: /run/routerd-ha/node-b.crt
           private_key_file: /run/routerd-ha/node-b.key
           peer_certificate_file: /run/routerd-ha/node-a.crt
@@ -1175,19 +1174,9 @@ resources:
         interval_seconds: 86400
         vacuum: true
         syslog: [{address: "192.0.2.2:5514", facility: local6, tag: routerd2, min_level: info}]
-- id: interface/sync0
-  interface:
-    name: sync0
-- id: address/sync
-  depends_on:
-  - interface/sync0
-  address:
-    interface: sync0
-    cidr: 169.254.42.3/16
 - id: service/lan-ha
   depends_on:
   - address/lan
-  - address/sync
   service:
     name: lan-ha
     vrrp:
@@ -1203,7 +1192,7 @@ resources:
       accept_mode: true
       advert_interval_centiseconds: 100
       addresses:
-      - 198.18.0.1/16
+      - 198.18.0.1/32
       graceful_activation:
         timeout: 45s
         ready_when:
@@ -1212,9 +1201,9 @@ resources:
           - fact: service.lan-ra.sent
           - fact: resource.upstream-selection.applied
       conntrack_sync:
-        interface: sync0
-        local_address: 169.254.42.3
-        peer_address: 169.254.42.2
+        interface: lan0
+        local_address: 198.18.0.3
+        peer_address: 198.18.0.2
 - id: link/wan-ha
   when:
     fact: service.lan-ha.elected

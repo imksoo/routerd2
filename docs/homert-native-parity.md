@@ -4,7 +4,7 @@
 
 2026-11-03にhomert02/03設定を再読し、resource種別・参照関係と利用する通信経路を確認した。各設定は110 resourcesで、全kind countと抽出できた型付き依存関係は一致した。以前の109件からの差はDNSForwarderが1件増えたことだった。両方にIPv6 host-traffic policy route（table 120）がある。設定値、アドレス、identity、credential、鍵はこのリポジトリへ保存していない。
 
-[homert02の例](../examples/homert02-native.yaml)と[homert03の例](../examples/homert03-native.yaml)は、文書用アドレスを使ったResourceProgramの例である。各54 resourcesで、DHCP、DNS、PD、RA、DS-Lite、BGP/NTP/Tailscale、管理・履歴とVRRP/lease replicationを含む。実HGW・隔離Linux二台・独立端末との両方向引継ぎは受入済みで、実行版と範囲は[引き継ぎ](pve-codex-handoff.md)へ集約する。実サイトの110 resourcesすべての意図と物理機器の受入は継続する。旧routerdの[`DHCPv6ServerLeaseSync`契約](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/docs/how-to/dhcp-lease-sync.md)はstateful DHCPv6 address poolのlease state同期用である。保存設定のLAN DHCPv6 serverはstatelessでpoolを持たないため、この同期機能は現行homertの単体・HA動作に必要なstateを表していない。
+[homert02の例](../examples/homert02-native.yaml)と[homert03の例](../examples/homert03-native.yaml)は、文書用アドレスを使ったResourceProgramの例である。各52 resourcesで、DHCP、DNS、PD、RA、DS-Lite、BGP/NTP/Tailscale、管理・履歴とVRRP/lease replicationを含む。実HGW・隔離Linux二台・独立端末との両方向引継ぎは受入済みで、実行版と範囲は[引き継ぎ](pve-codex-handoff.md)へ集約する。実サイトの110 resourcesすべての意図と物理機器の受入は継続する。旧routerdの[`DHCPv6ServerLeaseSync`契約](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/docs/how-to/dhcp-lease-sync.md)はstateful DHCPv6 address poolのlease state同期用である。保存設定のLAN DHCPv6 serverはstatelessでpoolを持たないため、この同期機能は現行homertの単体・HA動作に必要なstateを表していない。
 
 ## 機能対応
 
@@ -45,4 +45,4 @@
 
 ## 検証の範囲
 
-単体45-resource・二台各54-resourceの実daemon/kernel、実HGWと独立端末/peerによる通信・復旧を実行済み。実行版ごとの範囲は[試験計画](test-plan.md)と[引き継ぎ](pve-codex-handoff.md)を参照する。単体の自然PD更新と二台の既存socket/新規端末の受入も分けて記録する。全110-resource意図、全34 work package、対象ONU/NIC・物理二台・性能と全配布先の完成を継続する。
+単体45-resource・二台各52-resourceの実daemon/kernel、実HGWと独立端末/peerによる通信・復旧を実行済み。実行版ごとの範囲は[試験計画](test-plan.md)と[引き継ぎ](pve-codex-handoff.md)を参照する。単体の自然PD更新と二台の既存socket/新規端末の受入も分けて記録する。全110-resource意図、全34 work package、対象ONU/NIC・物理二台・性能と全配布先の完成を継続する。

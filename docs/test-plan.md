@@ -78,11 +78,11 @@ WAN/tailnet captureは各最大8MB、PD captureはudp546と実行時間で限定
 
 ## 実HGWへ接続した二台profileの統合
 
-次の実行対象は`examples/homert02-native.yaml`と`examples/homert03-native.yaml`の全機能二台profile。各54 resourcesへ二段DNSを接続し、下記の初期通信・両方向の切替/再加入を実行済み。従来の14-resource例やHA基盤gateの合格を転用しない。既存のDS-Lite群120→別DS-Lite80→LAN静的gateway60をそのまま用い、PPPoEやens20を新設しない。
+次の実行対象は`examples/homert02-native.yaml`と`examples/homert03-native.yaml`の全機能二台profile。各52 resourcesへ二段DNSを接続し、下記の初期通信・両方向の切替/再加入を実行済み。従来の14-resource例やHA基盤gateの合格を転用しない。既存のDS-Lite群120→別DS-Lite80→LAN静的gateway60をそのまま用い、PPPoEやens20を新設しない。
 
 二台の非公開DNS設定を使う場合は`UPLINK_HA_CONFIG_A=/private/node-a.json UPLINK_HA_CONFIG_B=/private/node-b.json`を指定する。直接runnerを実行する場合は`--config-a`・`--config-b`を使う。設定は既存の隔離interface/benchmarkアドレスを維持し、private suffix・upstream・NextDNSのURLだけを保存設定から接続する。試験は設定内のlocal zoneと全HTTPS上流を読み、DHCP検索domain・PTR・管理照会・新規端末の名前解決と各DoHのHealthyを確認する。
 
-`make check-uplink-ha DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18`で通常buildと設定検証後に実行する。まず実HGWのRA/PD、共有WAN/LAN IPv6 identity、VRRPの準備完了後公開、実DHCP端末の両IP HTTPS・UDP/TCP DNS、現用daemon停止後の引継ぎを通す。FRR2台、DNS、chronyd、Headscale、syslog/Collectorを独立peerとして配置する。固定DNS/chronyd peerはDHCP端末と別namespaceの198.18.0.254/16で先に起動し、端末の未取得/再取得に依存させない。独立peerの配置だけでは各経路の受入としない。
+`make check-uplink-ha DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18`で通常buildと設定検証後に実行する。まず実HGWのRA/PD、共有WAN/LAN IPv6 identity、VRRPの準備完了後公開、実DHCP端末の両IP HTTPS・UDP/TCP DNS、現用daemon停止後の引継ぎを通す。FRR2台、DNS、chronyd、Headscale、syslog/Collectorを独立peerとして配置する。固定DNS/chronyd peerはDHCP端末と別namespaceの198.18.0.254/16で先に起動し、端末の未取得/再取得に依存させない。保存homertと同様、LAN共有VIPは/32、各nodeの通常LANは/16とする。DHCP lease/PDの相互TLSとconntrackdは同じlan0のnode addressを使い、専用sync0や同期subnetは要求しない。独立peerの配置だけでは各経路の受入としない。
 
 二台Tailscaleは現用権に合わせて有効化し、nodeごとの保持鍵を維持する。独立Headscaleの明示policyで試験userのLAN/exit広告を事前許可する（[公式route設定](https://headscale.net/stable/ref/routes/)）。独立端末はLAN経路を手動で切り替えず、制御サーバーが選んだPrimaryRoutesと実TCP/UDPを照合する。両方向の停止/再加入後もLAN→peer両IP・peer→LAN IPv4を確認する。exitは最後に現用nodeを明示選択して両IP HTTPS/UDP DNSを確認し、同一exit node IDの自動切替とは扱わない。両nodeへのSSH鍵認証/保持host key、現用側のloopback/管理DNS・Web履歴とLANからの管理拒否も確認する。
 
@@ -238,7 +238,7 @@ blackholeは実clientからTCP/UDPを送り、timeout、kernel blackhole route�
 
 ## 二台構成への単体受入機能の接続
 
-`make check-uplink-ha DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18`を使う。各54-resourceの二台例には、通常/機器用LANの二つの/16、保存NAT除外、管理/WAN内SNAT、個別静的経路、WAN共有BGP、公開DNS/NTP転送を接続する。専用BGP NICや追加WANは使わない。上流の既存順位120→80→60と60秒hysteresisは変更しない。
+`make check-uplink-ha DOCKER='sudo -n docker' UPLINK_INTERFACE=ens18`を使う。各52-resourceの二台例には、通常/機器用LANの二つの/16、保存NAT除外、管理/WAN内SNAT、個別静的経路、WAN共有BGP、公開DNS/NTP転送を接続する。専用BGP NICや追加WANは使わない。上流の既存順位120→80→60と60秒hysteresisは変更しない。
 独立FRR2台の4私設prefixをwan0の具体的なnext hopで転送し、peer観測sourceとTCP/UDPを照合する。管理peerはLAN clientと別namespaceへ置き、製品を迂回した自己通信でNATを判定しない。公開DNS/NTPは実membershipの宛先でローカル回答を確認する。
 現用daemon停止/再加入を両方向に行い、上記通信、両LANのDHCP mask/gateway/DNS・Renew/Release/再取得、共有PD identity、管理/Tailscale/運用記録を確認する。継続TCPは1.1.1.1:443、UDPは転送集合外の9.9.9.10:53を用い、同一socketとNAT tuple/mark、TCP SYN、応答間隔を照合する。UDP宛先が実membership外であることを確認し、ローカルDNS転送を上流UDP継続と数えない。build済み同一版で確認側を修正した場合は`python3 scripts/uplink-ha.py --uplink ens18`で再実行できる。
 

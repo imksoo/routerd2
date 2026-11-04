@@ -1,5 +1,8 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
+保存homertのLAN VIP /32と既存LAN上の同期へ二台例を合わせ、不要な専用sync0/subnetを撤去した。各52-resource・通常build `c90405d38157`の既存実行物で全二台手順が終了0。LAN上の実同期capture、両nodeの設定変更/rollback、両方向の既存TCP/UDP・NAT情報保持、新規端末と再加入を確認した。新しいGo engineやtest frameworkは加えていない。保存全設定のnative接続は継続し、条件と残作業は[引き継ぎ](pve-codex-handoff.md)へ集約する。
+
+
 main `c90405d`の書込み削減後、通常build `c90405d38157`の単体全構成/全daemon再起動も終了0となった。両IP DNS/Internetと既存の全機能、設定timeout/control復旧、PD kill/再起動を確認した。停止元を識別できるよう既存logへmodule/PIDを追加したが、単発netlink中断自体は再現しておらず受信修正は未完了。次は保存両110-resourceの全意図をprivateなnative設定へ接続する。数値・条件と未受入範囲は[引き継ぎ](pve-codex-handoff.md)へ記録する。
 
 

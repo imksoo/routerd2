@@ -11356,14 +11356,14 @@
     "physical_target_profile": "homert02/03 are identified PVE guests with4vCPU/4GiB, three VirtIO NICs and VirtIO/SCSI disks. Matching isolated PVE product boot/recovery was exercised; actual WAN/LAN attachment, clean installation from a preconverted native configuration, measured load and any additional hardware/architecture qualification remain open.",
     "validation_reporting": "Use docs/test-plan.md for the concise current gate state. Detailed historical checkpoint ledgers are not acceptance authority; keep only current result, limits and repeatable procedure. Never claim unrun gates or partial homert profiles complete.",
     "current_acceptance": {
-      "as_of_utc": "2026-11-04T05:21:08Z",
+      "as_of_utc": "2026-11-04T05:34:15Z",
       "homert_source": "User-provided read-only working copies at chatty.lain.local:~/homert02; the current homert02 and homert03 files each contain 110 resources with matching kind counts. Do not publish configuration values or secrets.",
       "completed_gates": [
         "Go runtime checkpoint842c47e passed make check and final runtimeplan Race. This unchanged Go code plus the bundle producer passed normal build, test-tools/race/vet and actual publisher/receiver operations.",
         "Earlier checkpoints passed isolated Alpine/PID1 PVE single-node networking and signed update/rollback gates; these are not acceptance of the current full profile. PVE/QEMU is excluded from current work.",
         "Earlier checkpoints passed actual supervisor/control/network/Health two-WAN PBR failover/recovery with independent peers, TCP/UDP and captures. This is not qualification of the latest full homert profile; no additional PBR investigation is planned."
       ],
-      "current_changes": "Definition reuse passed normal full paired handoffs and a subsequent single full-daemon restart. Existing fallback stop logs now retain module/PID context. Saved homert02/03 spec.resources each contain110 resources; the next work is to connect complete actual site intent to private native configurations, reusing supported paths such as WebConsole links rather than creating new engines.",
+      "current_changes": "Match saved homert LAN VIP/32 and existing-LAN synchronization. Remove dedicated sync0, sync addresses, firewall allowance and two fixture ports/bridge. Keep authenticated lease/PD replication and conntrackd on node LAN addresses. Actual full paired communication and both original TCP/UDP handoffs passed using unchanged normal product binaries; no new Go engine or test framework.",
       "open_work_packages": 34,
       "unqualified_profiles": [
         "homert-single full input",
@@ -11373,11 +11373,11 @@
         "Kubernetes",
         "SAM/federation full path"
       ],
-      "tested_source_head": "c90405d plus module/PID context on fallback worker-stop logs; normal buildc90405d38157",
+      "tested_source_head": "bdc7a72 plus LAN VIP/32 and existing-LAN HA configuration; unchanged normal buildc90405d38157",
       "native_examples": {
         "examples/single-router-dslite-dhcp-dns.yaml": 45,
-        "examples/homert02-native.yaml": 54,
-        "examples/homert03-native.yaml": 54,
+        "examples/homert02-native.yaml": 52,
+        "examples/homert03-native.yaml": 52,
         "full_homert_profile": "not present; the examples do not represent the complete current 110-resource intent"
       },
       "latest_native_profile_gate": {
@@ -11575,6 +11575,16 @@
         "procedure": "docs/test-plan.md; docs/pve-codex-handoff.md",
         "paired": "Normal build1174b46cea9f plus definition reuse passed exit0. Both standby NTP sources synchronized; no8s NTP query timeout. Config timeout31.51/31.13s and confirm/restore1.43/1.59s retained WAN/VRRP/BGP workers. Full handoff rechecks64.68/78.52s; TCP379responses/maxgap15.18s, UDP404/missed16/maxgap10.52s; fixed-WAN TCP400/max13.82s and UDP410/missed10/max9.51s. Both TCP connections had1SYN and unchanged NAT tuples. New clients and rejoin passed in both directions.",
         "definition_reuse": "ApplyConfig preparation and changed instance sets both call writeBinding. Its digest-named atomic definitions are immutable, so existing files are reused without adding cache state. New files retain atomic persistence. Same before/after paired trial preserved original deadlines/results; no traffic reconnect or timeout relaxation."
+      },
+      "latest_homert_lan_layout_gate": {
+        "status": "passed exit0; both handoffs and original connections",
+        "source": "Saved homert02/03 each have110 resources. LAN VirtualAddress mode vrrp is/32; node LAN prefixes are/16; conntrackd interface is the existing LAN. Old routerd CIDR application and continuous conntrackd ownership were read.",
+        "setup": "52resources per native node; actual HGW/ens18, normal buildc90405d38157, independent Linux clients/FRR/chronyd/Headscale/Collector; host management/routes/clock unchanged.",
+        "observed": "Actual vip0/32 and client route through lan0; bounded lan0 capture showed UDP3780 bidirectionally and TCP8443/8444. Config timeout31.03/30.83s and confirm/restore1.98/1.75s retained WAN/VRRP/BGP workers. Handoff full rechecks62.48/75.60s; new DNS name publication0.26/0.72s.",
+        "continuity": "Public TCP367responses/maxgap15.56s; UDP390/missed17/maxgap9.52s. Fixed WAN TCP385/maxgap13.64s; UDP398/missed10/maxgap8.01s. Both TCP1SYN, same original sockets/NAT tuples/PD identity, new clients and nonpreempt rejoin passed. No NTP8s query timeout.",
+        "checks": "Existing normal Go/static build reused; both changed configurations validated; fmt-check and actual changed Python owner/certificates passed. No Go change or new test code. VIP-only earlier run was deliberately stopped to combine LAN synchronization and is not a full pass.",
+        "remaining": "Complete actual site intent/native configuration, direct target boot/clock correction, whole-OS updates and broader product work remain open.",
+        "procedure": "docs/test-plan.md; docs/pve-codex-handoff.md"
       }
     }
   },

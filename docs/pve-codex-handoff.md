@@ -1,5 +1,14 @@
 # routerd2 開発引き継ぎ
 
+## 保存homertと同じLAN共有/32とLAN同期
+
+基準main `bdc7a72`、通常build `c90405d38157`の既存実行物を再利用。保存両110-resourceを再読し、VRRPのLAN共有IPv4が/32、通常/機器用LANが各/16、conntrackdが既存LANを使うことを確認した。旧routerdの指定CIDRをそのままip addrへ渡す経路、常時conntrackdを所有する経路も照合した。二台例のVIPを/32へ合わせ、DHCP lease/PDの相互TLSとconntrackdを各nodeのlan0 addressへ移した。不要なsync0/address、input許可、fixtureのveth2本/bridgeを撤去し、例は各52 resourcesとなった。証明書SANも同じLAN addressへ更新し、相互認証を維持する。
+
+通常DAD・実HGW/ens18・独立端末/FRR/chronyd/Headscale/Collectorで全二台手順が終了0。実kernelのvip0に/32、端末への経路はlan0を確認した。lan0の有界captureでUDP3780の両方向とTCP8443/8444を確認し、実lease/PD同期、既存/新規端末の両IP DNS/Internet、設定変更、両方向引継ぎ/再加入を通過した。設定timeout31.03/30.83秒・confirm/復帰1.98/1.75秒でWAN/VRRP/BGP PIDを維持。新規DHCP名公開0.26/0.72秒、全項目再確認62.48/75.60秒（転送断時間ではない）。公開TCP367応答/maxgap15.56秒・UDP390/17期限超過/maxgap9.52秒、固定WAN TCP385/max13.64秒・UDP398/10期限超過/maxgap8.01秒。TCP各SYN1回・同じsocket/NAT tuple/PD identityを保持し、NTP照会timeoutは0回だった。
+
+Goの変更や新しいtest codeは追加せず、現行の通常static build/既存Go checkを再利用した。変更した2設定の通常validatorとfmt-check、変更後の実Python owner/証明書/製品processを確認した。先行したVIP /32だけの実行は初期DHCP/DNS/通信とkernel値を確認した後、LAN同期を同じ変更へまとめるためownerを明示停止した。全手順の合格には数えない。共有hostの管理経路/時計は変更せず、終わったowner/process/namespace/key/stageは撤去済み。二つの一時logはcommit/push後に撤去する。これは保存サイト意図の接続であり、全実サイト設定/実機/時計補正/whole-OS更新は継続する。
+
+
 ## 書込み削減後の単体再起動と停止元の識別
 
 main `c90405d` + 停止logへのmodule/PID追加、通常build `c90405d38157`。実HGW/ens18・45-resource単体・独立LAN端末/FRR/chronyd/Headscale/Collectorで、既存の通常手順（20秒・full restart・tailnet）が終了0。書込み削減後の全daemon再起動を通し、両DNS名の両IP UDP/TCP、通常/機器用DHCP・Information/SLAAC、両IP Internet・4 DS-Lite・BGP/NTP/Tailscale、管理/履歴/転送拒否を再確認した。設定timeout30.58秒/control再起動5.50秒、PD SIGKILL2.58秒/通常再起動4.95秒、全daemon後の全項目再確認110.99秒（転送断時間ではない）、2巡回/自然PD更新0回。NTP全源停止は再実行していない。

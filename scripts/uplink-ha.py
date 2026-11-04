@@ -108,7 +108,7 @@ def owner(stage, uplink, retention_check):
             run(["ip", "netns", "add", names[key]])
             namespaces.append(names[key])
             run(inside(key, ["ip", "link", "set", "lo", "up"]))
-        for bridge in ("lan", "wan", "mgmt", "sync", "tail"):
+        for bridge in ("lan", "wan", "mgmt", "tail"):
             run(inside("wire", ["ip", "link", "add", bridge, "type", "bridge"]))
             run(inside("wire", ["ip", "link", "set", bridge, "up"]))
         # Receive the shared WAN MAC once at the physical attachment. The
@@ -118,7 +118,7 @@ def owner(stage, uplink, retention_check):
         run(inside("wire", ["ip", "link", "set", "uplink", "address", "02:00:5e:00:01:43", "master", "wan", "up"]))
         run(inside("wire", ["bridge", "fdb", "del", "02:00:5e:00:01:43", "dev", "uplink", "master"]))
         for node in ("a", "b"):
-            for device, bridge in (("lan0", "lan"), ("wan0", "wan"), ("mgmt0", "mgmt"), ("sync0", "sync"), ("peer0", "tail")):
+            for device, bridge in (("lan0", "lan"), ("wan0", "wan"), ("mgmt0", "mgmt"), ("peer0", "tail")):
                 connect(node, device, bridge)
             # The common macvlan receives the shared WAN MAC. Register each
             # node MAC too, and deliver its unicast frames to its actual port.
@@ -214,7 +214,7 @@ def owner(stage, uplink, retention_check):
         private = Path("/run/routerd-ha")
         private.mkdir(mode=0o700)
         for index,node in enumerate(("a", "b")):
-            run(["openssl", "req", "-x509", "-newkey", "ed25519", "-nodes", "-days", "1", "-keyout", str(private / ("node-" + node + ".key")), "-out", str(private / ("node-" + node + ".crt")), "-subj", "/CN=" + node, "-addext", "subjectAltName=IP:169.254.42." + str(index+2), "-addext", "extendedKeyUsage=serverAuth,clientAuth"])
+            run(["openssl", "req", "-x509", "-newkey", "ed25519", "-nodes", "-days", "1", "-keyout", str(private / ("node-" + node + ".key")), "-out", str(private / ("node-" + node + ".crt")), "-subj", "/CN=" + node, "-addext", "subjectAltName=IP:198.18.0." + str(index+2), "-addext", "extendedKeyUsage=serverAuth,clientAuth"])
         cert,key = stage / "control.crt", stage / "control.key"
         run(["openssl", "req", "-config", "/dev/null", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-keyout", str(key), "-out", str(cert), "-subj", "/CN=routerd-ha", "-addext", "subjectAltName=IP:198.51.100.1,DNS:control.tailnet.test"])
         start("tail", ["dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null", "--no-resolv", "--no-hosts", "--user=root", "--bind-interfaces", "--listen-address=198.51.100.1", "--address=/control.tailnet.test/198.51.100.1", "--log-queries", "--log-facility=-"], "tailnet-bootstrap-dns")
