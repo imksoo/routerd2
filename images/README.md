@@ -54,82 +54,71 @@ x86_64 using virtio networking. Native amd64 and arm64 routerd binaries and OCI
 images are built separately; the arm64 appliance boot path and physical NIC
 drivers are not yet validated.
 
-## BIOS disk for existing x86 PVE machines
+## BIOS and UEFI x86 disk
 
-`make image` still produces the kernel and initramfs. `make disk-image`
-places those standard APK-derived artifacts on a BIOS-bootable raw disk using
-the installed GRUB `i386-pc` implementation. It creates a new file only; it
-does not install onto an existing host device or modify an existing VM.
+`make disk-image` places the standard APK-derived kernel and initramfs on one
+GPT disk with both GRUB `i386-pc` and `x86_64-efi` entrypoints. It creates a new
+regular image file. The UEFI entrypoint is installed at
+`EFI/BOOT/BOOTX64.EFI` on the EFI System Partition, using GRUB's removable-media
+path and `--no-nvram`. The build host's firmware boot entries stay under its
+existing owner. This unsigned UEFI entrypoint requires Secure Boot disabled.
 
-Build requirements are Python 3, GRUB's BIOS installation tools, util-linux,
-e2fsprogs and cpio. Run the provisioning step as root inside a private mount
-namespace. The image manifest must identify an x86_64 kernel package.
-This path does not add UEFI, Secure Boot, arm64 firmware support or kernel A/B
-updates.
+Build requirements are Python 3, GRUB's BIOS and amd64 EFI tools/modules,
+util-linux, dosfstools, e2fsprogs and cpio. Provision the disk as root inside a
+private mount namespace. The image manifest must identify an x86_64 kernel APK.
 
 ```sh
-make image IMAGE_CONFIG=qemu
+make image
 sudo unshare --mount --propagation private make disk-image \
-  IMAGE_DIR=dist/image DISK_DIR=dist/disk-virtio \
-  DISK_STATE_DEVICE=/dev/vda2 \
+  IMAGE_DIR=dist/image DISK_DIR=dist/disk \
+  DISK_STATE_DEVICE=/dev/vda4 \
   DISK_AUTHORIZED_KEY=/path/to/operator.pub
 ```
 
-The default disk is 32 GiB with an MBR partition table, a 1 GiB ext4 boot
-partition, and an ext4 state partition occupying the remaining space.
-The generated boot document selects the second partition through the existing
-`state_volume` contract. GRUB loads the kernel and initramfs from the first
-partition; routerd remains PID 1 and mounts the state partition before opening
-configuration, SSH identity and release state. The generated file is mode 0600
-because its embedded configuration may contain private values.
+The default disk is 32 GiB. Its GPT partitions are a 1 MiB BIOS boot area,
+a 128 MiB FAT32 EFI System Partition, a 1 GiB ext4 boot partition, and an ext4
+state partition occupying the remaining space. Both GRUB entrypoints select
+the boot filesystem by UUID and load the same kernel and initramfs. GRUB and
+the kernel provide local and serial console output.
 
-Use `DISK_STATE_DEVICE=/dev/sda2` for the first VirtIO SCSI disk. The source
-image includes `virtio_scsi` and `sd_mod`; VirtIO block uses `/dev/vda2`.
-The device path is explicit: this builder does not discover or adopt other
-disks. Attach the resulting `routerd.raw` as the boot disk using the selected
-bus. Optional `DISK_CONFIG=/path/to/config.json` replaces only the embedded
-configuration. `DISK_AUTHORIZED_KEY` takes an OpenSSH public-key file, never
-a private key. Without these overrides the source image configuration and
-authorized keys are retained.
+The boot document selects the fourth partition through `state_volume`.
+Use `/dev/vda4` for VirtIO block or `/dev/sda4` for the first SCSI disk, with
+the bus and image drivers selected for the target machine. The source image
+includes `virtio_scsi` and `sd_mod`. Routerd remains PID 1 and mounts state
+before opening configuration, SSH identity and release state. The generated
+image is mode 0600 because its embedded configuration may contain private values.
 
-`DISK_ETC_DIR=/path/to/provisioned-etc` copies operator configuration and trust
-files below `/etc`, retaining their file permissions. Use this for HA peer
-certificates, private keys, a Tailscale enrollment file, or a custom CA bundle.
-The directory layout mirrors `/etc` (for example `routerd/ha/node.key`).
-The builder then writes its boot document and applies `DISK_CONFIG`, if given.
-Keep this input and the resulting disk private; neither belongs in a public
-release artifact. This provisions files during image creation, without guest
-shell commands or a second runtime owner.
+`DISK_CONFIG=/path/to/config.json` selects embedded configuration.
+`DISK_AUTHORIZED_KEY=/path/to/operator.pub` selects OpenSSH public keys.
+The source image configuration and authorized keys are used when these inputs
+are omitted. `DISK_ETC_DIR=/path/to/provisioned-etc` adds operator configuration
+and trust files below `/etc`, preserving permissions. Its layout mirrors
+`/etc`, for example `routerd/ha/node.key`. The builder then writes its boot
+document and applies `DISK_CONFIG`. Keep private inputs and the generated disk
+outside public release artifacts.
 
-`DISK_STATE_DIR=/path/to/selected-state` provisions an explicitly prepared native
-state tree into the new ext4 state partition before the first boot. Paths are
-relative to the boot document's `state_dir`: for example, place the selected
-OpenSSH host key at `ssh_host_ed25519_key`. File and directory modes are kept;
-regular files are copied as root. Select only the identities needed for this
-installation, using the existing [SSH identity](../internal/management/README.md)
-and [Tailscale saved identity](../internal/protocol/tailscale/README.md) contracts.
-Do not point this input at an entire old router state directory. Symbolic links
-and special files are rejected, so a staged link cannot pull in an unselected
-secret. These files are placed only in the state partition, not the initramfs.
-This option neither converts an old format nor writes an existing disk.
+`DISK_STATE_DIR=/path/to/selected-state` provisions an explicitly prepared
+native state tree into the fourth partition before first boot. Paths are
+relative to `state_dir`, for example `ssh_host_ed25519_key`. Select the needed
+identities using the [SSH identity](../internal/management/README.md) and
+[Tailscale saved identity](../internal/protocol/tailscale/README.md) contracts.
+Files and directory modes are retained. The input accepts regular files and
+directories, and copies the selected files only into persistent state.
 
-The existing smoke check can boot the disk without QEMU's `-kernel` or
-`-initrd` shortcuts:
+The current disk layout replaces the disposable BIOS-only MBR development
+layout. Recreate development disks with the fourth partition configured as
+state. Verify generated content in a private mount namespace by attaching the
+new file read-only with `losetup --find --show --read-only --partscan` and
+mounting partition 2 as FAT and partition 3 as ext4. Check `BOOTX64.EFI` with
+`grub-file --is-x86_64-efi`, the GRUB configuration with `grub-script-check`,
+and compare installed kernel/initramfs hashes with the generated manifest.
+Detach the loop device after unmounting. These checks establish disk contents.
+BIOS/UEFI boot, persistent state over two boots, target drivers, power-loss
+recovery, signed whole-OS updates and kernel/bootloader A/B remain separate
+acceptance work on the authorized target machine.
 
-```sh
-sudo python3 scripts/qemu-smoke.py --image-dir dist/image \
-  --disk dist/disk-virtio/routerd.raw --disk-bus virtio \
-  --ssh-key /path/to/operator --timeout 120
-```
-
-For SCSI, build a separate disk with `/dev/sda2` and select
-`--disk-bus scsi`. These disk checks use the BIOS/i440fx machine, four CPUs
-and 4 GiB RAM. They verify the real PID 1, authenticated management, network
-application and worker restart, then request normal poweroff. They do not
-qualify physical storage, production load, an installer or unattended upgrades
-of the boot partition. Keep the source image's license/source notices with the
-disk, and provide the installed GRUB package's license and corresponding source
-when distributing it.
+Keep the source image's license/source notices with the disk, and provide the
+installed GRUB package's license and corresponding source when distributing it.
 
 
 ## QEMU fixture with the embedded SSH CLI
@@ -360,7 +349,7 @@ deployment simply by building this OCI image.
 
 ## Current persistence and boot limits
 
-The kernel/initramfs artifact boots directly; the BIOS disk builder above also
+The kernel/initramfs artifact boots directly; the BIOS/UEFI disk builder above also
 places it on a new bootable disk. The default boot document
 has no state volume, so its state directory is in RAM and generated SSH host keys
 and other state are lost on reboot. A custom boot document can select an existing

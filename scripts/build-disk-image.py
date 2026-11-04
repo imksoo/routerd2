@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a BIOS disk from the standard routerd kernel and initramfs."""
+"""Build a BIOS/UEFI GPT disk from the standard routerd kernel and initramfs."""
 
 import argparse
 import gzip
@@ -54,7 +54,7 @@ def main():
     parser.add_argument("--image-dir", type=Path, default=Path("dist/image"))
     parser.add_argument("--output", type=Path, default=Path("dist/disk"))
     parser.add_argument("--size-gib", type=int, default=32)
-    parser.add_argument("--state-device", default="/dev/vda2")
+    parser.add_argument("--state-device", default="/dev/vda4")
     parser.add_argument("--config", type=Path)
     parser.add_argument("--authorized-key", type=Path)
     parser.add_argument("--etc-dir", type=Path, help="Provision configuration and trust files below /etc")
@@ -73,8 +73,8 @@ def main():
     if source_manifest.get("input_type") != "apk":
         parser.error("use the standard APK-derived image")
     if source_manifest["kernel_package"].get("architecture") != "x86_64":
-        parser.error("BIOS disk requires an amd64/x86_64 image manifest")
-    for tool in ("sfdisk", "losetup", "mkfs.ext4", "mount", "umount", "grub-install", "cpio"):
+        parser.error("x86 disk requires an amd64/x86_64 image manifest")
+    for tool in ("sfdisk", "losetup", "mkfs.ext4", "mkfs.vfat", "blkid", "mount", "umount", "grub-install", "cpio"):
         if shutil.which(tool) is None:
             parser.error(f"missing build tool: {tool}")
     with gzip.open(image / "initramfs.cpio.gz", "rb") as archive:
@@ -100,7 +100,7 @@ def main():
     mkinitramfs = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mkinitramfs)
     work = Path(tempfile.mkdtemp(prefix="routerd2-disk-"))
-    mounted = None
+    mounted = []
     try:
         overlay = work / "overlay"
         if args.etc_dir:
@@ -116,25 +116,36 @@ def main():
         shutil.copytree(overlay, root, dirs_exist_ok=True)
         merged_initramfs = work / "initramfs.cpio.gz"
         mkinitramfs.write_archive(root, merged_initramfs, 0)
-        run(["sfdisk", str(disk)], input="label: dos\nstart=2048,size=2097152,type=83,bootable\ntype=83\n",
+        run(["sfdisk", str(disk)], input=(
+            "label: gpt\n"
+            "start=2048,size=2048,type=21686148-6449-6E6F-744E-656564454649,name=routerd-bios\n"
+            "size=262144,type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B,name=routerd-efi\n"
+            "size=2097152,type=0FC63DAF-8483-4772-8E79-3D69D8477DE4,name=routerd-boot\n"
+            "type=0FC63DAF-8483-4772-8E79-3D69D8477DE4,name=routerd-state\n"),
             stdout=subprocess.DEVNULL)
         loop = run(["losetup", "--find", "--show", "--partscan", str(disk)],
                    capture_output=True).stdout.strip()
         try:
             boot_root = work / "boot-volume"
             boot_root.mkdir()
-            run(["mkfs.ext4", "-q", "-F", "-L", "routerd-boot", loop + "p1"])
-            run(["mkfs.ext4", "-q", "-F", "-L", "routerd-state", loop + "p2"])
+            run(["mkfs.vfat", "-F", "32", "-n", "ROUTERD-EFI", loop + "p2"])
+            run(["mkfs.ext4", "-q", "-F", "-L", "routerd-boot", loop + "p3"])
+            run(["mkfs.ext4", "-q", "-F", "-L", "routerd-state", loop + "p4"])
+            boot_uuid = run(["blkid", "-s", "UUID", "-o", "value", loop + "p3"], capture_output=True).stdout.strip()
             if args.state_dir:
                 state_root = work / "state-volume"
                 state_root.mkdir()
-                run(["mount", "-o", "nosuid,nodev", loop + "p2", str(state_root)])
-                mounted = state_root
+                run(["mount", "-o", "nosuid,nodev", loop + "p4", str(state_root)])
+                mounted.append(state_root)
                 provision_state(args.state_dir, state_root)
                 run(["umount", str(state_root)])
-                mounted = None
-            run(["mount", "-o", "nosuid,nodev", loop + "p1", str(boot_root)])
-            mounted = boot_root
+                mounted.pop()
+            run(["mount", "-o", "nosuid,nodev", loop + "p3", str(boot_root)])
+            mounted.append(boot_root)
+            efi_root = boot_root / "boot/efi"
+            efi_root.mkdir(parents=True)
+            run(["mount", "-o", "nosuid,nodev", loop + "p2", str(efi_root)])
+            mounted.append(efi_root)
             grub = boot_root / "boot/grub"
             grub.mkdir(parents=True)
             shutil.copyfile(image / "vmlinuz", boot_root / "boot/vmlinuz")
@@ -142,21 +153,23 @@ def main():
             shutil.copyfile(merged_initramfs, initramfs)
             (grub / "grub.cfg").write_text(
                 "serial --unit=0 --speed=115200\n"
-                "terminal_input serial\nterminal_output serial\n"
+                "terminal_input console serial\nterminal_output console serial\n"
                 "set timeout=0\nset default=0\n"
                 "menuentry 'routerd2' {\n"
-                "  set root=(hd0,msdos1)\n"
-                "  linux /boot/vmlinuz console=ttyS0,115200 panic=-1\n"
+                f"  search --no-floppy --fs-uuid --set=root {boot_uuid}\n"
+                "  linux /boot/vmlinuz console=tty0 console=ttyS0,115200 panic=-1\n"
                 "  initrd /boot/initramfs.cpio.gz\n}\n"
             )
             run(["grub-install", "--target=i386-pc", "--boot-directory=" + str(boot_root / "boot"),
                  "--no-floppy", loop])
+            run(["grub-install", "--target=x86_64-efi", "--boot-directory=" + str(boot_root / "boot"),
+                 "--efi-directory=" + str(efi_root), "--removable", "--no-nvram", "--no-uefi-secure-boot"])
             installed_initramfs_hash = digest(initramfs)
         finally:
             try:
-                if mounted:
-                    run(["umount", str(mounted)])
-                    mounted = None
+                for mount_point in reversed(mounted):
+                    run(["umount", str(mount_point)])
+                    mounted.pop()
             finally:
                 run(["losetup", "--detach", loop])
     finally:
@@ -170,8 +183,9 @@ def main():
         "source_initramfs_sha256": digest(image / "initramfs.cpio.gz"),
         "installed_initramfs_sha256": installed_initramfs_hash,
         "disk": disk.name, "size_bytes": disk.stat().st_size,
-        "boot_method": "bios-grub", "bootloader": run(["grub-install", "--version"], capture_output=True).stdout.strip(),
-        "partitions": ["ext4 boot", "ext4 persistent state"],
+        "boot_methods": ["bios-grub", "uefi-x86_64-grub"], "bootloader": run(["grub-install", "--version"], capture_output=True).stdout.strip(),
+        "partition_table": "gpt",
+        "partitions": ["BIOS boot", "FAT32 EFI system", "ext4 boot", "ext4 persistent state"],
         "state_volume": boot["state_volume"],
         "initial_state_provisioned": args.state_dir is not None,
         "boot_config_sha256": hashlib.sha256(json.dumps(boot, indent=2).encode() + b"\n").hexdigest(),
@@ -180,7 +194,7 @@ def main():
         "bootloader_ab_updates": False,
     }
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    print(f"Built BIOS disk {disk} with persistent state {device}")
+    print(f"Built BIOS/UEFI disk {disk} with persistent state {device}")
 
 
 if __name__ == "__main__":

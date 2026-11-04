@@ -1,6 +1,6 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
-署名候補のreadiness期限監視から失敗保存を外し、実worker停止後にPID 1が元の期限理由で保存する形へ整理した。通常build `3ecfdf4ff83b` → `b08753c90ee3`の実装変更を跨ぐ署名更新・明示rollback・DNS待受競合による候補失敗と旧版復帰が、独立RP-PPPoE/ISC/LAN端末との両IP DNS/TCP/UDPを含めて終了0。詳細と範囲は[引き継ぎ](pve-codex-handoff.md)へ記録する。全homert applianceの起動/時計補正/更新と対象実機、NTP起動品質、MTU全経路の受入を継続する。
+通常x86ディスクをBIOS-only MBRからGPTのBIOS/UEFI共通構成へ置き換えた。通常image `9d8231e2f5ce`・kernel `6.18.60-0-lts`と両GRUB install、実block/filesystem上のUEFI PE・BIOS core・共通boot UUID・kernel/initramfs・第4区画state/SSH identityの配置確認が通過。state既定は`/dev/vda4`へ揃えた。実BIOS/UEFI起動、対象driverと複数回bootでのstate、署名whole-OS更新とA/Bは継続する。結果・再実行と他の残項目は[引き継ぎ](pve-codex-handoff.md)へ記録する。
 
 通常image buildにkernel対応ソースの同梱を接続した。基準main `773121c` + 本変更、通常build `773121ce3681`、Alpine linux-lts `6.18.60-r0` / kernel `6.18.60-0-lts` / recipe `97a4e7b01d88cdec22ef3a5d30247628dc14d8bc`で`make image`が終了0。APKの全Go checkと3実行物のstatic link確認、image組立て、出力全体のSHA256、同梱22 sourceのSHA512、installed configの実APKとの一致、元COPYING/GPL-2.0の存在を確認した。 対応source archiveのfile/digestをmanifestへ接続した。独立kernel/時計での全構成起動・更新と対象実機の受入を継続する。条件・digest・再実行は[引き継ぎ](pve-codex-handoff.md)に記載する。
 

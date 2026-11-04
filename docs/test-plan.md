@@ -259,3 +259,11 @@ DNSの待受は明示IPv4とIPv6 `::`を併記する。割当観測は元のreso
 `make image DOCKER='sudo -n docker'`で通常APKのbuild/checkとkernel/initramfsの組立てを行う。kernel入力stageは署名検証されたAlpine linux-ltsのinstalled metadataからrecipe commitを取得し、公式GitLabの該当directory全体とAlpine distfilesの外部sourceを取得する。APKBUILDに記載されたSHA512を照合し、実際にインストールされたkernel configと共に`kernel-sources.tar`へ格納する。組立てはそのpackage/version/architecture/commitをkernel rootと照合し、manifestのfile/digestとSHA256SUMSへ接続する。
 
 出力directoryで`sha256sum -c SHA256SUMS`を実行し、archive内のAPKBUILDにある全sourceのSHA512とinstalled.config、manifestのkernel package/ソースdigestを照合する。元のkernel COPYING/LICENSESは同梱したupstream archiveで確認する。再現は通常image buildを使う。kernelを起動していないbuild確認の範囲と、独立kernel/実機でのboot・時計補正・全構成更新の受入を区別する。今回もPVE/QEMUは実行しない。終了後は組立て用の一時log、確認用archive/image、task用Docker tagを撤去する。
+
+## 通常ディスクのGPT・BIOS・UEFI配置
+
+`make image DOCKER='sudo -n docker' IMAGE_DIR=dist/image`に続き、private mount namespace内で`make disk-image`を使う。[image手順](../images/README.md#bios-and-uefi-x86-disk)のGRUB両platform・dosfstools等を準備し、一時的なoperator公開鍵と選択したnative SSH host keyを入力する。新規32 GiB sparse imageにはGPTのBIOS boot/FAT32 EFI/ext4 boot/ext4 stateを作り、`DISK_STATE_DEVICE=/dev/vda4`（SCSIは`/dev/sda4`）へ揃える。
+
+生成物をread-only loopとして接続し、`sfdisk --verify`と4区画のname/type/size、EFIの`EFI/BOOT/BOOTX64.EFI`に対する`grub-file --is-x86_64-efi`、BIOS coreと`grub-script-check`を確認する。boot filesystemの実UUIDが共通GRUB設定へ使われ、kernel/initramfs/boot文書のdigestがmanifestと一致すること、boot文書のstate参照/認可公開鍵と第4区画の選択host keyのbytes/modeを照合する。unmount/loop解除後、結果を集約して一時key/image/logを撤去する。
+
+これは実block/filesystemを使う生成内容の確認である。unsigned UEFIはSecure Boot無効が必要で、BIOS/UEFIの実起動、2回以上の起動でのstate保持、対象driver/firmware、停電、署名whole-OS更新・kernel/bootloader A/Bは対象機で別に受け入れる。PVE/QEMUは実行しない。現在のimageはvirtio中心のdriver closureであり、対象NIC/storageは実機情報に合わせて接続・検証する。

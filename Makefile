@@ -8,7 +8,7 @@ ALPINE_VERSION ?= 3.24.3
 IMAGE_CONFIG ?= empty
 IMAGE_DIR ?= dist/image
 DISK_DIR ?= dist/disk
-DISK_STATE_DEVICE ?= /dev/vda2
+DISK_STATE_DEVICE ?= /dev/vda4
 DISK_CONFIG ?=
 DISK_AUTHORIZED_KEY ?=
 DISK_ETC_DIR ?=
@@ -102,7 +102,7 @@ help:
 	  'make release-built-test Verify actual amd64/arm64 release bundle identities' \
 	  'make apk               Test and build the Alpine package with abuild' \
 	  'make image             Export Alpine kernel/initramfs with matching sources' \
-	  'make disk-image        Create a BIOS disk from an existing APK image (root/private mount namespace)' \
+	  'make disk-image        Create a BIOS/UEFI GPT disk from an existing APK image (root/private mount namespace)' \
 	  'make qemu-smoke        Boot the image in QEMU; optionally verify SSH' \
 	  'make qemu-ntp          Verify appliance clock correction, LAN time and drift recovery' \
 	  'make qemu-network      Run native network tests in a separate QEMU guest' \

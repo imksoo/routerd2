@@ -2,6 +2,14 @@
 
 更新: 2026-11-04。全体ゴールは継続中。
 
+## 通常x86ディスクをGPT・BIOS/UEFIへ統一
+
+基準main `9d8231e` + 本変更、通常image build `9d8231e2f5ce` / Alpine kernel `6.18.60-0-lts`で、`make image`とprivate namespace内の`make disk-image`が終了0。BIOS-only MBRの試作layoutを置き換え、GPT上のBIOS boot 1 MiB・FAT32 EFI 128 MiB・ext4 boot 1 GiB・残りext4 stateの一つの構成にした。stateの既定は第4区画`/dev/vda4`、SCSIは`/dev/sda4`。両GRUB入口が同じboot UUID/kernel/initramfsを使い、local/serial consoleへ出力する。UEFIはremovable path・no-nvramで生成し、host firmwareのboot entryは変更しない。
+
+GRUB `2.12-1ubuntu7.3`のi386-pc/x86_64-efi installが両方終了0。生成した32 GiB sparse diskを実read-only loop/mountで開き、GPT整合性、4区画、BIOS core、UEFI PE、GRUB構文と実UUID参照、installed kernel/initramfs/boot文書digestを照合した。実生成したdisposable SSH host keyのbytes/0600とstate root0700、認可公開鍵とstate参照も通過。EFI SHA256 `6e60caf9c9eadb16e61930c87f25aedd804ac5bca7621b4d1ef8d44e432c43c6`。検査末尾の表示だけでkernel_versionを参照したrunner誤りをkernel_releaseへ直し、同じ内容検査を終了0で再確認した。
+
+`make check`（Race/vet/Python）・fmt-checkと通常APKのGo check/3 static ELF確認が通過。再実行は[試験計画](test-plan.md)と[image手順](../images/README.md#bios-and-uefi-x86-disk)。unsigned UEFIはSecure Boot無効が必要。これはdisk内容の受入で、実BIOS/UEFI boot、2回以上のstate保持、物理NIC/storage、停電、署名whole-OS更新・kernel/bootloader A/Bとarm64は残る。PVE/QEMU・追加PBR調査は実行していない。一時disk/image/key/logとtask build出力は結果集約・commit/push後に撤去する。
+
 ## 現行homert入力方針とTailscale hostname接続
 
 保存homertのuntrust→self既定dropとlogDenyをnative三例へ接続済み。今回はTailscaleの制御URLを`https://control.tailnet.test:8443`、bootstrap DNSを独立peerの`198.51.100.1`へ変更し、通常engineの名前解決・TLSから接続する。旧routerdのTailscaleUpArgsと、native LocalAPI/engineのresolver・CA経路を照合した。保存homertのTailscaleはloginServer省略による公開controlのhostnameを使う。今回の独立Headscaleは公開controlの資格とは分ける。

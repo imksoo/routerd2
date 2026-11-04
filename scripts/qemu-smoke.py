@@ -25,7 +25,7 @@ def main():
     parser.add_argument("--ssh-key", type=Path)
     parser.add_argument("--ssh-host-key", type=Path, help="Expected host public key, pinned before the first SSH connection")
     parser.add_argument("--qemu", default="qemu-system-x86_64")
-    parser.add_argument("--disk", type=Path, help="boot a generated BIOS disk instead of kernel/initramfs")
+    parser.add_argument("--disk", type=Path, help="boot the generated disk through its BIOS entry instead of kernel/initramfs")
     parser.add_argument("--disk-bus", choices=("virtio", "scsi"), default="virtio")
     args = parser.parse_args()
     image = args.image_dir.resolve()
