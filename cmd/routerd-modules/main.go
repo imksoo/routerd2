@@ -36,7 +36,7 @@ import (
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 	if err := run(os.Args[1:]); err != nil {
-		slog.Error("worker stopped", "error", err)
+		slog.Error("worker stopped", "module", os.Getenv(worker.ModuleNameEnv), "pid", os.Getpid(), "error", err)
 		os.Exit(1)
 	}
 }

@@ -1,5 +1,14 @@
 # routerd2 開発引き継ぎ
 
+## 書込み削減後の単体再起動と停止元の識別
+
+main `c90405d` + 停止logへのmodule/PID追加、通常build `c90405d38157`。実HGW/ens18・45-resource単体・独立LAN端末/FRR/chronyd/Headscale/Collectorで、既存の通常手順（20秒・full restart・tailnet）が終了0。書込み削減後の全daemon再起動を通し、両DNS名の両IP UDP/TCP、通常/機器用DHCP・Information/SLAAC、両IP Internet・4 DS-Lite・BGP/NTP/Tailscale、管理/履歴/転送拒否を再確認した。設定timeout30.58秒/control再起動5.50秒、PD SIGKILL2.58秒/通常再起動4.95秒、全daemon後の全項目再確認110.99秒（転送断時間ではない）、2巡回/自然PD更新0回。NTP全源停止は再実行していない。
+
+前回のnetlink中断は、workerが終了して個別logging handlerを閉じた後の汎用停止logだったためmoduleを特定できなかった。既存fallback logへsupervisorが渡すmodule名と実PIDを追加した。今回この中断は再現しておらず、受信処理の修正完了とは扱わない。変更箇所のRace/vet・fmt-checkと通常build、3 static ELFを確認した。機能変更`c90405d`の全`make check`は直前の二台確認で通過している。保存両設定も再読し、spec.resourcesに各110件、WebConsole links各2件などのfield構成を確認した。次は全サイト意図をprivateなnative設定へ接続する。既存のtyped WebConsoleはlinksを実装済みで、新しいengineは必要ない。
+
+前回checkpointの詳細log14件・重複native出力・専用Docker tagとレビュー済み26 cache（2.429GB）は撤去済み。共有dependency cacheと通常のbin/source/notice/peerは保持し、distは633MB、root空き約95GBだった。今回のprivate stage/process/namespace/keyは終了時に撤去した。新しい一時log/重複出力はcommit/push後に撤去する。対象実機/時計補正、実サイト全意図、whole-OS更新と全体ゴールは継続中。
+
+
 ## 設定再適用の書込み削減と保存DNSの二つの名前
 
 基準main `1174b46` + 本変更、通常build `1174b46cea9f`、Linux `6.8.0-136-generic`。ApplyConfigとinstance set変更が、内容digestで命名した不変の全worker定義を毎回atomic write/fsyncしていた。旧routerdのwriteFileIfChangedと現行callerを照合し、writeBindingで既存の同digest fileを再利用する。新しい定義のatomic writeは維持する。変更前の実通信ではDNS設定の適用/restore中に現用が待機へ移り、別実行の二方向目では元のTCPが60秒のread期限を超えた。期限や判定を緩めず、重複書込みを除いた版で同じ全二台手順が終了0となった。

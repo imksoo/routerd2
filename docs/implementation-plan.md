@@ -1,5 +1,8 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
+main `c90405d`の書込み削減後、通常build `c90405d38157`の単体全構成/全daemon再起動も終了0となった。両IP DNS/Internetと既存の全機能、設定timeout/control復旧、PD kill/再起動を確認した。停止元を識別できるよう既存logへmodule/PIDを追加したが、単発netlink中断自体は再現しておらず受信修正は未完了。次は保存両110-resourceの全意図をprivateなnative設定へ接続する。数値・条件と未受入範囲は[引き継ぎ](pve-codex-handoff.md)へ記録する。
+
+
 設定適用のたびに不変の全worker定義を再書込みしていた経路を、既存digest fileの再利用へ変更した。変更前は設定変更中の現用喪失と二方向目の既存TCP timeoutを実通信で検出した。同じ通常buildの修正版で全二台手順が終了0、両nodeの設定timeout/confirm、両方向の同一TCP/UDP・NAT tupleと新規端末/再加入が通過した。保存DNSの共有名/node名も既存zoneへ接続し、単体再起動前後と二台各引継ぎで実回答を確認した。WAN試験接続のnode固有MAC応答欠落と固定peerのDHCP依存も修正した。全サイト・実機/時計補正・whole-OS更新、単発netlink中断の識別は継続する。条件・測定値は[引き継ぎ](pve-codex-handoff.md)へ記録する。
 
 
