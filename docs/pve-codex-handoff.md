@@ -2,6 +2,18 @@
 
 更新: 2026-11-04。全体ゴールは継続中。
 
+## homertの入力拒否方針を接続
+
+保存homertのuntrust→self既定dropをnative三例へ接続した。必要なloopback/ICMPv6・LAN/管理/Tailscale・HA同期と、WANのDHCP client/BGP/DS-Lite/Tailscaleを明示許可し、input終端拒否も既存NFLOG/履歴/OTLPへ渡す。旧routerdのimplicitFirewallAction・InternalFirewallHolesと両保存設定を照合した。
+
+基準main `58efa10` + 設定/runner変更、通常build `58efa1037cd6`。単体45-resourceの通常`make check-uplink`が終了0。独立WAN FRRから明示WAN addressへのICMP echoは拒否され、新しいinput-denyの実NFLOG履歴と独立CollectorへのOTLP到達を照合した。転送拒否も同時に確認した。両IP Internet/DNS、通常/機器用DHCP、DAD/SLAAC/Information、4 DS-Lite、BGP/Tailscale/NTP/管理/運用と全daemon再起動が通過。PD SIGKILL2.39秒/通常再起動5.88秒、設定timeout30.10秒/control再起動5.95秒、全daemon後の全項目再確認111.46秒、2巡回/自然PD更新0回。実HGWのDHCPv6 Advertiseは送信元49153→宛先546で到着しており、この入力方針でもPDを取得した。
+
+その後に同じbuild・各54-resourceの`make check-uplink-ha`が終了0。初期a・切替後b・逆方向aで入力拒否・転送拒否のNFLOG履歴/OTLP、通常通信、既存leaseと停止中の新規端末、設定timeout/confirmとWAN/VRRP/BGP worker継続を確認した。全項目再確認89.71/73.26秒。公開TCP443応答/maxgap7.90秒、UDP459応答/15期限超過/maxgap8.51秒。固定WAN TCP453/max13.98秒、UDP466/9期限超過/max8.01秒。TCP各SYN1回・同一socket/NAT tupleを保持。設定timeout32.91/32.84秒・confirm3.95/4.04秒、新規DHCP名公開0.96/0.71秒。NTP照会timeoutは0回。
+
+補助の1500-byte DF probeはMTU1454のICMP Frag Neededを受け取った。WANのIPv6 fragment captureは0 packetで、今回のprobeはfragment往復の受入に数えない。MTU/DFの全経路確認は継続する。`make check`（Race/vet/Python）、fmt-check、3設定検証と通常3実行物のstatic link確認は通過。再実行は[試験計画](test-plan.md)の直列単体/二台手順。owner/process/namespace/stageは撤去済み。
+
+実機boot・時計補正・全構成更新には、routerd2専用に起動/再起動できる隔離実行先とWAN/LAN/管理interfaceの情報が必要。現在のnwadmin03の管理接続・時計を維持し、実行先情報を確認しながら独立する実装を継続する。対象ONU/NIC・物理二台・長時間品質は継続する。
+
 ## kernel対応ソースを通常imageへ同梱
 
 通常image buildにkernel対応ソースの同梱を接続した。基準main `773121c` + 本変更、通常build `773121ce3681`、Alpine linux-lts `6.18.60-r0` / kernel `6.18.60-0-lts` / recipe `97a4e7b01d88cdec22ef3a5d30247628dc14d8bc`で`make image`が終了0。APKの全Go checkと3実行物のstatic link確認、image組立て、出力全体のSHA256、同梱22 sourceのSHA512、installed configの実APKとの一致、元COPYING/GPL-2.0の存在を確認した。

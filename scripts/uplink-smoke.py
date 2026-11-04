@@ -1239,6 +1239,15 @@ print(*s.getsockname())
         def check_operations():
             since = time.time_ns()
             peer_namespace, peer_address, _ = bgp_peers[0]
+            denied_input = subprocess.run(inside(peer_namespace, ["ping", "-n", "-c", "1", "-W", "1", "192.0.2.1"]), capture_output=True)
+            assert denied_input.returncode == 1, "WAN echo request bypassed the input policy"
+            def recorded_input_denial():
+                rows = query("control.sock", "/v1/services/service.packets/firewall-history?action=drop&limit=100")["entries"] or []
+                return any(datetime.fromisoformat(r["ts"].replace("Z", "+00:00")).timestamp() >= since/1e9
+                    and r.get("srcAddress") == peer_address and r.get("dstAddress") == "192.0.2.1"
+                    and r["protocol"].lower() == "icmp" and r.get("ruleName") == "input-deny" for r in rows)
+            wait(recorded_input_denial)
+            print("PASS unsolicited WAN echo request was dropped by the router input policy and recorded through NFLOG", flush=True)
             run(inside(peer_namespace, ["python3", "-c", echo["BLOCKED_CLIENT"], str(auto_address)]))
             def recorded_forward_denials():
                 rows = query("control.sock", "/v1/services/service.packets/firewall-history?action=drop&limit=100")["entries"] or []
@@ -1269,10 +1278,11 @@ print(*s.getsockname())
                 return (any(int(record.get("timeUnixNano", 0)) >= since and record.get("body", {}).get("stringValue") == "health probe completed" for record in logs)
                     and any(metric.get("name") == "routerd.healthcheck.probes" and any(int(point.get("timeUnixNano", 0)) >= since for point in metric.get("sum", {}).get("dataPoints", [])) for metric in metrics)
                     and any(span.get("name") == "healthcheck.probe" and int(span.get("startTimeUnixNano", 0)) >= since for span in spans)
-                    and any(int(record.get("timeUnixNano", 0)) >= since and record.get("body", {}).get("stringValue") == "firewall packet"
+                    and all(any(int(record.get("timeUnixNano", 0)) >= since and record.get("body", {}).get("stringValue") == "firewall packet"
                         and any(a["key"] == "routerd.attributes"
-                            and {"key": "rule", "value": {"stringValue": "forward-deny"}} in a["value"]["kvlistValue"]["values"]
-                            for a in record.get("attributes", [])) for record in logs))
+                            and {"key": "rule", "value": {"stringValue": rule}} in a["value"]["kvlistValue"]["values"]
+                            for a in record.get("attributes", [])) for record in logs)
+                        for rule in ("input-deny", "forward-deny")))
             wait(signals_received)
             print("PASS public peer traffic has measured counters, native nDPI classification and TLS SNI; LAN denial persisted; actual product syslog and OTLP logs/metrics/traces reached independent receivers", flush=True)
 

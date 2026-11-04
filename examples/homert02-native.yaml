@@ -82,7 +82,8 @@ resources:
   firewall:
     flow_observation_group: 2
     input:
-      policy: accept
+      policy: drop
+      log: {group: 1, copy_range: 2048, prefix: input-deny}
       rules:
       - match:
           in_interface: mgmt0
@@ -102,18 +103,19 @@ resources:
           group: 1
           copy_range: 2048
           prefix: management-deny
-      - match:
-          in_interface: wan-ha
-          protocol: udp
-          destination_ports:
-          - start: 53
-        action: drop
-      - match:
-          in_interface: wan-ha
-          protocol: tcp
-          destination_ports:
-          - start: 53
-        action: drop
+      - {match: {in_interface: lo}, action: accept}
+      - {match: {protocol: icmpv6}, action: accept}
+      - {match: {in_interface: lan0}, action: accept}
+      - {match: {in_interface: vip0}, action: accept}
+      - {match: {in_interface: lan6-ha}, action: accept}
+      - {match: {in_interface: mgmt0}, action: accept}
+      - {match: {in_interface: sync0}, action: accept}
+      - {match: {in_interface: tailscale0}, action: accept}
+      - {match: {in_interface: wan0, protocol: udp, destination_ports: [{start: 68}, {start: 546}]}, action: accept}
+      - {match: {in_interface: wan-ha, protocol: udp, destination_ports: [{start: 68}, {start: 546}]}, action: accept}
+      - {match: {in_interface: wan0, protocol: tcp, destination_ports: [{start: 179}]}, action: accept}
+      - {match: {in_interface: wan-ha, family: 6, protocol: ipip}, action: accept}
+      - {match: {protocol: udp, destination_ports: [{start: 41641}]}, action: accept}
     forward_chain:
       policy: drop
       log: {group: 1, copy_range: 2048, prefix: forward-deny}

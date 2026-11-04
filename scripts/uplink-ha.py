@@ -514,6 +514,15 @@ def owner(stage, uplink, retention_check):
                 rows = api(node, "control.sock", "/v1/services/service.packets/firewall-history?action=drop&limit=100")["entries"] or []
                 return any(fresh(r["ts"]) and r.get("srcAddress") == client_address and r.get("dstPort") == 8080 and r.get("inIface") in ("lan0", "vip0") for r in rows)
             wait(recorded_drop)
+            wan_address = "192.0.2.10" if node == "a" else "192.0.2.11"
+            denied_input = subprocess.run(inside("bgp0", ["ping", "-n", "-c", "1", "-W", "1", wan_address]), capture_output=True)
+            assert denied_input.returncode == 1, "WAN echo request bypassed the input policy"
+            def recorded_input_denial():
+                rows = api(node, "control.sock", "/v1/services/service.packets/firewall-history?action=drop&limit=100")["entries"] or []
+                return any(fresh(r["ts"]) and r.get("srcAddress") == "192.0.2.2" and r.get("dstAddress") == wan_address
+                    and r["protocol"].lower() == "icmp" and r.get("ruleName") == "input-deny" for r in rows)
+            wait(recorded_input_denial)
+            print("PASS HA unsolicited WAN echo request was dropped by the router input policy and recorded through NFLOG via", node, flush=True)
             run(inside("bgp0", ["python3", "-c", echo["BLOCKED_CLIENT"], client_address]))
             forward_interface = json.loads(run(inside(node, ["ip", "-j", "route", "get", client_address])))[0]["dev"]
             def recorded_forward_denials():
@@ -549,10 +558,11 @@ def owner(stage, uplink, retention_check):
                 return (any(int(r.get("timeUnixNano", 0)) >= since and r.get("body", {}).get("stringValue") == "health probe completed" for r in logs)
                     and any(m.get("name") == "routerd.healthcheck.probes" and any(int(p.get("timeUnixNano", 0)) >= since for p in m.get("sum", {}).get("dataPoints", [])) for m in metrics)
                     and any(s.get("name") == "healthcheck.probe" and int(s.get("startTimeUnixNano", 0)) >= since for s in spans)
-                    and any(int(r.get("timeUnixNano", 0)) >= since and r.get("body", {}).get("stringValue") == "firewall packet"
+                    and all(any(int(r.get("timeUnixNano", 0)) >= since and r.get("body", {}).get("stringValue") == "firewall packet"
                         and any(a["key"] == "routerd.attributes"
-                            and {"key": "rule", "value": {"stringValue": "forward-deny"}} in a["value"]["kvlistValue"]["values"]
-                            for a in r.get("attributes", [])) for r in logs))
+                            and {"key": "rule", "value": {"stringValue": rule}} in a["value"]["kvlistValue"]["values"]
+                            for a in r.get("attributes", [])) for r in logs)
+                        for rule in ("input-deny", "forward-deny")))
             wait(received_otlp)
             print("PASS HA fresh native nDPI counters/TLS SNI, firewall history, syslog and OTLP logs/metrics/traces from", label, flush=True)
         check_operations()
