@@ -1,5 +1,8 @@
 # homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
+旧routerdのHealth既定値とtickerによる監視周期を取り込み、三つのnative例を保存homertの時間/判定条件へ合わせた。通常build `5d94df720549` + 本変更で単体全daemon再起動後の全機能確認は終了0。同じbuildの二台両方向引継ぎ・元のTCP/UDP接続・新規端末と再加入も終了0。起動時の旧MAC隣接情報によるWAN peer通信遅延は未特定として残す。準備完了前のconfig API照会は既存runnerの順序を修正した。条件・数値・残作業は[引き継ぎ](pve-codex-handoff.md)へ記載する。
+
+
 保存homertのLAN VIP /32と既存LAN上の同期へ二台例を合わせ、不要な専用sync0/subnetを撤去した。各52-resource・通常build `c90405d38157`の既存実行物で全二台手順が終了0。LAN上の実同期capture、両nodeの設定変更/rollback、両方向の既存TCP/UDP・NAT情報保持、新規端末と再加入を確認した。新しいGo engineやtest frameworkは加えていない。保存全設定のnative接続は継続し、条件と残作業は[引き継ぎ](pve-codex-handoff.md)へ集約する。
 
 

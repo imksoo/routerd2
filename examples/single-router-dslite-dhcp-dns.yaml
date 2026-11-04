@@ -548,10 +548,10 @@ resources:
         target: 1.1.1.1
         protocol: tcp
         port: 443
-        interval_ms: 1000
-        timeout_ms: 700
-        healthy_threshold: 2
-        unhealthy_threshold: 3
+        interval_ms: 3000
+        timeout_ms: 2000
+        healthy_threshold: 1
+        unhealthy_threshold: 1
   - id: service/health-dslite1
     depends_on: [service/internet1]
     service:
@@ -563,10 +563,10 @@ resources:
         target: 1.1.1.1
         protocol: tcp
         port: 443
-        interval_ms: 1000
-        timeout_ms: 700
-        healthy_threshold: 2
-        unhealthy_threshold: 3
+        interval_ms: 3000
+        timeout_ms: 2000
+        healthy_threshold: 1
+        unhealthy_threshold: 1
   - id: service/health-dslite2
     depends_on: [service/internet2]
     service:
@@ -578,10 +578,10 @@ resources:
         target: 1.1.1.1
         protocol: tcp
         port: 443
-        interval_ms: 1000
-        timeout_ms: 700
-        healthy_threshold: 2
-        unhealthy_threshold: 3
+        interval_ms: 3000
+        timeout_ms: 2000
+        healthy_threshold: 1
+        unhealthy_threshold: 1
   - id: service/health-dslite3
     depends_on: [service/internet3]
     service:
@@ -593,10 +593,10 @@ resources:
         target: 1.1.1.1
         protocol: tcp
         port: 443
-        interval_ms: 1000
-        timeout_ms: 700
-        healthy_threshold: 2
-        unhealthy_threshold: 3
+        interval_ms: 3000
+        timeout_ms: 2000
+        healthy_threshold: 1
+        unhealthy_threshold: 1
   - id: service/health-static
     depends_on: [address/lan]
     service:
@@ -608,9 +608,9 @@ resources:
         target: 1.1.1.1
         protocol: tcp
         port: 443
-        interval_ms: 1000
-        timeout_ms: 700
-        healthy_threshold: 2
+        interval_ms: 30000
+        timeout_ms: 3000
+        healthy_threshold: 1
         unhealthy_threshold: 3
   - id: service/remote-log
     service:

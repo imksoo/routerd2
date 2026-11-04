@@ -1052,10 +1052,10 @@ resources:
       target: 1.1.1.1
       protocol: tcp
       port: 443
-      interval_ms: 1000
-      timeout_ms: 700
-      healthy_threshold: 2
-      unhealthy_threshold: 3
+      interval_ms: 3000
+      timeout_ms: 2000
+      healthy_threshold: 1
+      unhealthy_threshold: 1
   when:
     fact: service.lan-ha.elected
 - id: service/health-dslite1
@@ -1070,10 +1070,10 @@ resources:
       target: 1.1.1.1
       protocol: tcp
       port: 443
-      interval_ms: 1000
-      timeout_ms: 700
-      healthy_threshold: 2
-      unhealthy_threshold: 3
+      interval_ms: 3000
+      timeout_ms: 2000
+      healthy_threshold: 1
+      unhealthy_threshold: 1
   when:
     fact: service.lan-ha.elected
 - id: service/health-dslite2
@@ -1088,10 +1088,10 @@ resources:
       target: 1.1.1.1
       protocol: tcp
       port: 443
-      interval_ms: 1000
-      timeout_ms: 700
-      healthy_threshold: 2
-      unhealthy_threshold: 3
+      interval_ms: 3000
+      timeout_ms: 2000
+      healthy_threshold: 1
+      unhealthy_threshold: 1
   when:
     fact: service.lan-ha.elected
 - id: service/health-dslite3
@@ -1106,10 +1106,10 @@ resources:
       target: 1.1.1.1
       protocol: tcp
       port: 443
-      interval_ms: 1000
-      timeout_ms: 700
-      healthy_threshold: 2
-      unhealthy_threshold: 3
+      interval_ms: 3000
+      timeout_ms: 2000
+      healthy_threshold: 1
+      unhealthy_threshold: 1
   when:
     fact: service.lan-ha.elected
 - id: service/health-static
@@ -1124,9 +1124,9 @@ resources:
       target: 1.1.1.1
       protocol: tcp
       port: 443
-      interval_ms: 1000
-      timeout_ms: 700
-      healthy_threshold: 2
+      interval_ms: 30000
+      timeout_ms: 3000
+      healthy_threshold: 1
       unhealthy_threshold: 3
   when:
     fact: service.lan-ha.elected

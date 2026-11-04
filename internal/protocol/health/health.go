@@ -44,10 +44,10 @@ func Normalize(c Config) Config {
 		c.Protocol = "icmp"
 	}
 	if c.IntervalMillis == 0 {
-		c.IntervalMillis = 1000
+		c.IntervalMillis = 30000
 	}
 	if c.TimeoutMillis == 0 {
-		c.TimeoutMillis = 1000
+		c.TimeoutMillis = 3000
 	}
 	if c.HealthyThreshold == 0 {
 		c.HealthyThreshold = 1
@@ -215,7 +215,7 @@ func RunWithProbe(ctx context.Context, raw Config, effects Effects, ready func()
 		defer cancel()
 		_ = publish(stop, true, nil)
 	}()
-	for {
+	probeOnce := func() error {
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -245,12 +245,21 @@ func RunWithProbe(ctx context.Context, raw Config, effects Effects, ready func()
 		if err := publish(ctx, false, &evaluation.Event); err != nil {
 			return fmt.Errorf("health publication: %w", err)
 		}
-		timer := time.NewTimer(time.Duration(c.IntervalMillis) * time.Millisecond)
+		return nil
+	}
+	if err := probeOnce(); err != nil {
+		return err
+	}
+	ticker := time.NewTicker(time.Duration(c.IntervalMillis) * time.Millisecond)
+	defer ticker.Stop()
+	for {
 		select {
 		case <-ctx.Done():
-			timer.Stop()
 			return nil
-		case <-timer.C:
+		case <-ticker.C:
+			if err := probeOnce(); err != nil {
+				return err
+			}
 		}
 	}
 }

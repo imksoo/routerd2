@@ -11356,14 +11356,14 @@
     "physical_target_profile": "homert02/03 are identified PVE guests with4vCPU/4GiB, three VirtIO NICs and VirtIO/SCSI disks. Matching isolated PVE product boot/recovery was exercised; actual WAN/LAN attachment, clean installation from a preconverted native configuration, measured load and any additional hardware/architecture qualification remain open.",
     "validation_reporting": "Use docs/test-plan.md for the concise current gate state. Detailed historical checkpoint ledgers are not acceptance authority; keep only current result, limits and repeatable procedure. Never claim unrun gates or partial homert profiles complete.",
     "current_acceptance": {
-      "as_of_utc": "2026-11-04T05:34:15Z",
+      "as_of_utc": "2026-11-04T06:07:21Z",
       "homert_source": "User-provided read-only working copies at chatty.lain.local:~/homert02; the current homert02 and homert03 files each contain 110 resources with matching kind counts. Do not publish configuration values or secrets.",
       "completed_gates": [
         "Go runtime checkpoint842c47e passed make check and final runtimeplan Race. This unchanged Go code plus the bundle producer passed normal build, test-tools/race/vet and actual publisher/receiver operations.",
         "Earlier checkpoints passed isolated Alpine/PID1 PVE single-node networking and signed update/rollback gates; these are not acceptance of the current full profile. PVE/QEMU is excluded from current work.",
         "Earlier checkpoints passed actual supervisor/control/network/Health two-WAN PBR failover/recovery with independent peers, TCP/UDP and captures. This is not qualification of the latest full homert profile; no additional PBR investigation is planned."
       ],
-      "current_changes": "Match saved homert LAN VIP/32 and existing-LAN synchronization. Remove dedicated sync0, sync addresses, firewall allowance and two fixture ports/bridge. Keep authenticated lease/PD replication and conntrackd on node LAN addresses. Actual full paired communication and both original TCP/UDP handoffs passed using unchanged normal product binaries; no new Go engine or test framework.",
+      "current_changes": "Reuse routerd Health defaults and initial-probe/ticker cadence; align three native examples to saved DS-Lite3s/2s/1/1 and static30s/3s/1/3. Single full restart and both paired handoffs passed actual HGW communication with existing clients and peers. Correct runner startup observation order without changing deadlines. Full private site intent mapping continues.",
       "open_work_packages": 34,
       "unqualified_profiles": [
         "homert-single full input",
@@ -11585,6 +11585,16 @@
         "checks": "Existing normal Go/static build reused; both changed configurations validated; fmt-check and actual changed Python owner/certificates passed. No Go change or new test code. VIP-only earlier run was deliberately stopped to combine LAN synchronization and is not a full pass.",
         "remaining": "Complete actual site intent/native configuration, direct target boot/clock correction, whole-OS updates and broader product work remain open.",
         "procedure": "docs/test-plan.md; docs/pve-codex-handoff.md"
+      },
+      "latest_health_cadence_gate": {
+        "status": "passed exit0 single and paired; startup neighbor delay remains unexplained",
+        "source": "main5d94df7 plus Health patch; normal Makefile build5d94df720549. Compared actual routerd cmd/routerd-healthcheck/main.go defaults and scheduling.",
+        "single": "Actual HGW/ens18;45resources; independent clients/FRR/chronyd/Headscale/Collector. Health history approx3s/30s, Healthy; config timeout30.62s/control restart5.28s, PD SIGKILL2.70s/graceful4.88s; whole-daemon full recheck111.34s,2rounds/no natural renewal. All existing profile functions passed.",
+        "paired": "52resources each; config timeout31.29/31.05s and confirm/restore1.31/1.65s; both original TCP sockets/NAT tuples/PD identity retained. Full rechecks62.77/76.55s, new DHCP name0.49/1.16s, new clients and nonpreempt rejoin passed.",
+        "continuity": "Public TCP365/maxgap15.59s, UDP390/missed18/maxgap10.52s; fixed WAN TCP390/maxgap13.85s, UDP394/missed12/maxgap11.01s. TCP1SYN each. Full recheck durations are not forwarding outage durations.",
+        "limits": "First single runner queried config before readiness and timed out; corrected query order and reran with unchanged deadlines. Initial paired WAN peer replies used stale prior single MAC until natural neighbor update around85s; packets and neighbor observed, origin not identified, no manual repair. No physical target/ONU/NIC qualification, NTP outage rerun, whole-OS update or complete110resource intent acceptance.",
+        "checks": "make check Race/vet/Python; Health Race/vet; fmt-check; three config validators; normal build and three static ELF artifacts.",
+        "cleanup": "Owned stages/processes/namespaces removed by runners. Detailed logs, duplicate native export and own reviewed build cache are removed after main push. Private96KB saved source retained only until complete native mapping is checked; no private values published."
       }
     }
   },

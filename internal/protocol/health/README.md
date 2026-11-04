@@ -7,6 +7,10 @@ ICMP uses a bound raw socket and validates the peer, echo ID, sequence and rando
 payload. DNS probes query example.com through the specified DNS server; HTTP
 retains the pinned reachability contract (2xx–4xx).
 
+Probe defaults match routerd: a 30-second interval, 3-second timeout, one
+healthy result and three failures. After the initial probe, one ticker owns
+the cadence; probe and publication duration do not add another interval.
+
 The pinned `healthcheck.ApplyResult` supplies Passing/Healthy/Failing/Unhealthy
 thresholds and history. Output history is bounded to 20 entries. The `.active`
 fact follows the existing egress readiness contract: Healthy and pre-threshold

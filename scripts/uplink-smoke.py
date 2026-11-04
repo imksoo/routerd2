@@ -612,8 +612,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             if not (stage / "run/control.sock").exists():
                 return False
             return (
-                query("control.sock", "/v1/config")["healthy"]
-                and query("supervisor.sock", "/v1/status")["ready"]
+                query("supervisor.sock", "/v1/status")["ready"]
+                and query("control.sock", "/v1/config")["healthy"]
             )
 
         wait(ready, 120)

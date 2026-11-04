@@ -1,5 +1,18 @@
 # routerd2 開発引き継ぎ
 
+## 保存homertのHealth設定と旧workerの監視周期
+
+基準main `5d94df7` + Health変更、通常Makefile build `5d94df720549`。旧routerdの`cmd/routerd-healthcheck/main.go`を照合し、既定30秒間隔/3秒timeout・成功1回/失敗3回へ合わせた。probe完了後に毎回intervalを追加していたloopを、旧workerと同じ初回probe＋単一tickerへ変更した。三つのnative例の4 DS-Liteは保存設定の3秒/2秒/各1回、静的gatewayは旧既定を明示する。新しいengineやtest frameworkは追加していない。
+
+実HGW/ens18・45-resource単体・独立LAN端末/FRR/chronyd/Headscale/Collectorで、既存の20秒/full restart/tailnet手順が終了0。実worker履歴のDS-Liteは約3秒、静的gatewayは約30秒でHealthyを維持した。両IP Internet/DNS/DoH、DHCP/Information/SLAAC、4 DS-Lite、NAT/静的経路/BGP/NTP/Tailscale、管理・nDPI/履歴/syslog/OTLPと全daemon再起動後の再確認が通過した。設定timeout30.62秒/control再起動5.28秒、PD SIGKILL2.70秒/通常再起動4.88秒、全daemon後の全項目再確認111.34秒（転送断時間ではない）、2巡回/自然PD更新0回。NTP全源停止・自然Renewは今回再実行していない。
+
+最初の単体実行は準備完了前のconfig APIを照会して4秒timeoutとなった。初回Reconcileが持つconfig lockを待たせていたため、supervisorの準備完了を先に確認するよう既存runnerの照会順を修正し、同じ期限で再実行した。最初の実行は製品通信の合否には数えない。`make check`（Race/vet/Python）、Health単体Race/vet、fmt-check、通常buildと3 static ELFは通過した。同じbuildの各52-resource二台手順も終了0。設定timeout31.29/31.05秒・confirm/復帰1.31/1.65秒、両方向の全項目再確認62.77/76.55秒（転送断時間ではない）、新規DHCP名公開0.49/1.16秒。公開TCP365応答/maxgap15.59秒・UDP390/18期限超過/maxgap10.52秒、固定WAN TCP390/max13.85秒・UDP394/12期限超過/max11.01秒。各TCPのSYNは1回、同じsocket/NAT tuple/PD identityを維持し、新規端末と非preempt再加入も通過した。
+
+二台初期のWAN peer→gateway通信は約85秒まで再試行した。実captureでSYNはgatewayへ到達し、SYN/ACKが前の単体MACへ向かうこと、gatewayの隣接情報も旧MACだったことを確認した。その後は共有WAN MACへ自然更新して通過し、手動flushや固定neighborは加えていない。古いMACが再学習された由来は未特定であり、隣接情報の立上り遅延として残す。新しい製品受信不具合と断定しない。
+
+保存両110-resourceの全native設定は未完成。例に未接続のHGW直通監視、管理interfaceの外部bootstrap、全private DNSなどを引き続き接続する。再読用の保存設定2件はprivateな`/tmp/routerd2-site-intent`（96KB、directory0700/files0600）にのみ保持し、native設定の照合後に削除する。公開設定へprivate値は入れない。対象実機・時計補正・whole-OS更新を含む置換ゴールは継続する。一時stage/process/namespaceは終了時に撤去済み。詳細logと重複native出力・専用Docker cacheはcommit/push後に撤去する。
+
+
 ## 保存homertと同じLAN共有/32とLAN同期
 
 基準main `bdc7a72`、通常build `c90405d38157`の既存実行物を再利用。保存両110-resourceを再読し、VRRPのLAN共有IPv4が/32、通常/機器用LANが各/16、conntrackdが既存LANを使うことを確認した。旧routerdの指定CIDRをそのままip addrへ渡す経路、常時conntrackdを所有する経路も照合した。二台例のVIPを/32へ合わせ、DHCP lease/PDの相互TLSとconntrackdを各nodeのlan0 addressへ移した。不要なsync0/address、input許可、fixtureのveth2本/bridgeを撤去し、例は各52 resourcesとなった。証明書SANも同じLAN addressへ更新し、相互認証を維持する。
