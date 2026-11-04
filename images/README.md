@@ -54,6 +54,27 @@ x86_64 using virtio networking. Native amd64 and arm64 routerd binaries and OCI
 images are built separately; the arm64 appliance boot path and physical NIC
 drivers are not yet validated.
 
+## Select the target boot configuration
+
+`make image IMAGE_BOOT=images/boot-target.json` selects a boot document from the
+Docker build context. Start with `images/boot.json` and set `kernel_modules`
+and `state_volume` for the target machine, following the
+[boot configuration](../internal/runtimeconfig/README.md). The default input is
+`images/boot.json`.
+
+The normal APK image path copies the selected document as a Docker input, so
+content changes invalidate the build cache. The same document supplies the
+module dependency closure, the installed boot configuration and its digest in
+the manifest. Selected drivers still need load and communication checks on the
+target hardware, including any required firmware.
+
+`make disk-image` retains the image's `state_volume`, including its wait timeout.
+An explicit `DISK_STATE_DEVICE` overrides only the device. For a source image
+without a state volume, the disk builder selects `/dev/vda4` with a ten-second
+wait. Use the fourth partition's actual name for the target storage bus, such
+as `/dev/sda4` or `/dev/nvme0n1p4`, and include its storage driver in the boot
+module list.
+
 ## BIOS and UEFI x86 disk
 
 `make disk-image` places the standard APK-derived kernel and initramfs on one

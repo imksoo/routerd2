@@ -116,7 +116,7 @@ def main():
     parser.add_argument("--image-dir", type=Path, default=Path("dist/image"))
     parser.add_argument("--output", type=Path, default=Path("dist/disk"))
     parser.add_argument("--size-gib", type=int, default=32)
-    parser.add_argument("--state-device", default="/dev/vda4")
+    parser.add_argument("--state-device", help="Override the image's persistent state device")
     parser.add_argument("--config", type=Path)
     parser.add_argument("--authorized-key", type=Path)
     parser.add_argument("--etc-dir", type=Path, help="Provision configuration and trust files below /etc")
@@ -127,9 +127,6 @@ def main():
         parser.error("run as root in a private mount namespace (sudo unshare --mount --propagation private)")
     if args.size_gib < 2:
         parser.error("disk must leave room for the 1 GiB boot partition and state")
-    device = Path(args.state_device)
-    if not device.is_relative_to("/dev") or device == Path("/dev") or ".." in device.parts:
-        parser.error("state-device must be an absolute device path below /dev")
     image = args.image_dir.resolve()
     output = args.output.resolve()
     source_manifest = json.loads((image / "manifest.json").read_text())
@@ -147,9 +144,18 @@ def main():
             input=archive.read(), capture_output=True, check=True,
         )
     boot = json.loads(extracted.stdout)
+    state_volume = boot.get("state_volume")
+    if state_volume is None:
+        state_volume = {"device": "/dev/vda4", "wait_timeout_seconds": 10}
+    if args.state_device is not None:
+        state_volume["device"] = args.state_device
+    device = Path(state_volume["device"])
+    if not device.is_relative_to("/dev") or device == Path("/dev") or ".." in device.parts:
+        parser.error("state-device must be an absolute device path below /dev")
     if device.name.startswith("sd") and "sd_mod" not in boot["kernel_modules"]:
-        parser.error("SCSI state requires an image built with sd_mod in images/boot.json")
-    boot["state_volume"] = {"device": str(device), "wait_timeout_seconds": 10}
+        parser.error("SCSI state requires an image built with sd_mod in kernel_modules")
+    state_volume["device"] = str(device)
+    boot["state_volume"] = state_volume
     if args.authorized_key:
         boot["ssh"]["authorized_keys"] = args.authorized_key.read_text().strip().splitlines()
     spec = importlib.util.spec_from_file_location(

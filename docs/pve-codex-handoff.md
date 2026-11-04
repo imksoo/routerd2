@@ -1,5 +1,14 @@
 # routerd2 開発引き継ぎ
 
+## 対象機boot文書の選択とstate指定保持
+
+基準main `de95e2e` + 本変更、通常image build `de95e2e8d053` / kernel `6.18.60-0-lts`。通常APK経路の`make image IMAGE_BOOT=<context内のboot文書>`へ接続し、同じ入力をmodule closure・initramfs・manifestへ渡す。修正前のdisk builderは元imageのstate指定を`/dev/vda4`・10秒へ固定上書きしていた。現在は元のstate_volumeと待ち時間を保持し、明示したDISK_STATE_DEVICEだけを変更する。state未指定imageの既定は従来の`/dev/vda4`・10秒である。
+
+通常Make入口で三つのimage/disk生成が終了0。igc/NVMeの選択と元の`/dev/nvme0n1p4`・10秒を実disk initramfsで確認。同じ入力pathをe1000e/AHCI・`/dev/sdb4`・30秒へ変更した再buildで、実modinfo/modprobe --show-dependsによる宣言全moduleの依存file・選択driverのvermagic、選外igc/NVMeの非収録、boot文書/manifest digestの一致を確認した。DISK_STATE_DEVICE=`/dev/sda4`の明示変更後も実disk initramfsの待ち時間は30秒だった。既定profileもstate未指定imageから`/dev/vda4`・10秒のdiskとなり、選外の追加driverを収録しないことを確認した。各diskをread-only loop/mountで読み、実initramfsの文書全体とdigestを照合した。
+
+`make check`（Race/vet/Python）・fmt-check、既存disk builderのPython3検査、通常APKのGo checkと3 static ELF確認が通過。保存homert02/03も再読し、各110 resources/Interface10/IPsec0を確認した。選択した4 driverのmodinfo firmware宣言は0件だったが、対象機でのmodule load・NIC/storage通信・必要firmware、実BIOS/UEFI起動・state二回保持とwhole-OS署名/A-Bは受入待ちである。再実行は[起動設定](../images/README.md#select-the-target-boot-configuration)と[試験計画](test-plan.md#対象機の起動設定とドライバー収録)。一時profile・image/disk・抽出tree・APT download・logとtask出力は結果集約・commit/push後に撤去する。
+
+
 ## 通常ディスクの初回インストール
 
 基準main `0d2b132` + 本変更、通常image build `0d2b132813a6` / kernel `6.18.60-0-lts`から、通常`make disk-image DISK_SIZE_GIB=2`で実選択SSH key付きGPTを作成した。`make install-disk`を追加し、明示されたwhole block deviceをLinuxの排他openで保持して書込み・flush・全byteのSHA256読み戻しを行う。大容量先では既存util-linuxでbackup GPTを実末尾へ移動し、GPT検証・kernelの区画再読込みを終えて成功を返す。初回導入は別のLinux保守環境から実行する。通常bootへformat/自動検出は追加していない。

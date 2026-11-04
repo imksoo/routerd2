@@ -6,9 +6,10 @@ RELEASE_ID ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || printf 'dev')
 GO_VERSION ?= 1.27.3
 ALPINE_VERSION ?= 3.24.3
 IMAGE_CONFIG ?= empty
+IMAGE_BOOT ?= images/boot.json
 IMAGE_DIR ?= dist/image
 DISK_DIR ?= dist/disk
-DISK_STATE_DEVICE ?= /dev/vda4
+DISK_STATE_DEVICE ?=
 DISK_CONFIG ?=
 DISK_AUTHORIZED_KEY ?=
 DISK_ETC_DIR ?=
@@ -386,12 +387,12 @@ apk: ndpi-modules pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine 
 
 image: ndpi-modules pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine chrony-engine
 	mkdir -p $(IMAGE_DIR)
-	$(DOCKER) build $(BUILD_ARGS) --build-arg IMAGE_CONFIG=$(IMAGE_CONFIG) --build-arg SSH_AUTHORIZED_KEY -f packaging/alpine/Dockerfile --target appliance-output --output type=local,dest=$(IMAGE_DIR) .
+	$(DOCKER) build $(BUILD_ARGS) --build-arg IMAGE_CONFIG=$(IMAGE_CONFIG) --build-arg IMAGE_BOOT='$(IMAGE_BOOT)' --build-arg SSH_AUTHORIZED_KEY -f packaging/alpine/Dockerfile --target appliance-output --output type=local,dest=$(IMAGE_DIR) .
 
 .PHONY: disk-image
 disk-image:
 	@test -n '$(DISK_GRUB_SOURCE_DIR)' || { printf '%s\n' 'Set DISK_GRUB_SOURCE_DIR to authenticated downloaded GRUB source packages'; exit 1; }
-	$(PYTHON) scripts/build-disk-image.py --image-dir $(IMAGE_DIR) --output $(DISK_DIR) --size-gib '$(DISK_SIZE_GIB)' --state-device $(DISK_STATE_DEVICE) --grub-source-dir '$(DISK_GRUB_SOURCE_DIR)' $(if $(DISK_CONFIG),--config $(DISK_CONFIG),) $(if $(DISK_AUTHORIZED_KEY),--authorized-key $(DISK_AUTHORIZED_KEY),) $(if $(DISK_ETC_DIR),--etc-dir $(DISK_ETC_DIR),) $(if $(DISK_STATE_DIR),--state-dir "$(DISK_STATE_DIR)",)
+	$(PYTHON) scripts/build-disk-image.py --image-dir $(IMAGE_DIR) --output $(DISK_DIR) --size-gib '$(DISK_SIZE_GIB)' $(if $(DISK_STATE_DEVICE),--state-device '$(DISK_STATE_DEVICE)',) --grub-source-dir '$(DISK_GRUB_SOURCE_DIR)' $(if $(DISK_CONFIG),--config $(DISK_CONFIG),) $(if $(DISK_AUTHORIZED_KEY),--authorized-key $(DISK_AUTHORIZED_KEY),) $(if $(DISK_ETC_DIR),--etc-dir $(DISK_ETC_DIR),) $(if $(DISK_STATE_DIR),--state-dir "$(DISK_STATE_DIR)",)
 
 .PHONY: install-disk
 install-disk:

@@ -299,3 +299,9 @@ DNSの待受は明示IPv4とIPv6 `::`を併記する。割当観測は元のreso
 導入先のboot/EFI/stateをread-onlyでmountし、kernel/initramfs digest、EFI executable、GRUB構文、実SSH key bytes/0600とstate root0700を確認する。別のprivate mount namespaceでこの3 mountを外した上で同じdeviceへの導入を試み、親namespaceのmountが残る間はkernelのEBUSYで書込み前に失敗し、元のkeyが維持されることを確認する。全mount解除後もpartition自体をtargetにすると書込み前に拒否されることを確認する。容量不足および4 KiB論理sectorのloop先でも、書込み前の拒否と元marker/割当blockの保持を確認する。unmount/loop解除後に一時disk/key/logを撤去する。
 
 これは実Linux block/filesystem経路の確認である。物理BIOS/UEFI起動、二回のbootでのstate保持、停電、whole-OS署名/更新・A/Bは対象機で別に受け入れる。追加容量は未割当のまま保持する。PVE/QEMUは実行しない。
+
+## 対象機の起動設定とドライバー収録
+
+通常`make image IMAGE_BOOT=images/boot-target.json`で、既定boot文書を基に対象機の`kernel_modules`と`state_volume`を選ぶ。Docker build context内の入力ファイルを使う。build-timeのmodprobeと既存のdependency closure抽出、initramfs内のboot文書、manifestのboot digest/module一覧が同じ入力へ接続することを確認する。
+
+build検査では、同じ入力pathでまずigc/NVMe、次にe1000e/AHCIへ書き換えて通常Make入口を再実行する。出力initramfsからboot文書とmodule treeだけを抽出し、実modinfo/modprobeで宣言した全moduleと依存fileの存在・vermagic・firmware宣言を確認する。入替前の選外driverが残らず、選択したstate参照とmodule一覧・boot digestがmanifestへ一致することを確認する。disk生成では元のNVMe state参照/待ち時間の保持と、別の30秒profileへの明示device overrideを実initramfsから確認する。既定profileでもstate未指定のimageが従来の`/dev/vda4`・10秒のdiskになることを確認する。これはmodule選択/cache反映の確認であり、対象NIC/storageでのload・通信・bootやfirmware全体の資格は別の実機受入である。一時profile・抽出tree・image・logは終了後に撤去する。

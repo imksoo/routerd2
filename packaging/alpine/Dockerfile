@@ -54,6 +54,8 @@ FROM kernel-inputs AS image-build
 COPY --from=package-build /out/ /packages/
 COPY images/ /src/images/
 COPY scripts/build-image.sh /src/scripts/build-image.sh
+ARG IMAGE_BOOT=images/boot.json
+COPY ${IMAGE_BOOT} /src/boot.json
 ARG RELEASE_ID=dev
 ARG SOURCE_DATE_EPOCH=0
 ARG IMAGE_CONFIG=empty
@@ -61,7 +63,7 @@ ARG SSH_AUTHORIZED_KEY=""
 ENV ROUTERD_RELEASE_ID=$RELEASE_ID SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH SSH_AUTHORIZED_KEY=$SSH_AUTHORIZED_KEY
 RUN case "$IMAGE_CONFIG" in empty|qemu) ;; *) exit 2 ;; esac \
  && sh /src/scripts/build-image.sh --package-dir /packages --output /out --kernel-sources /kernel-sources.tar \
-      --config "/src/images/config-$IMAGE_CONFIG.json" --boot /src/images/boot.json
+      --config "/src/images/config-$IMAGE_CONFIG.json" --boot /src/boot.json
 
 FROM scratch AS appliance-output
 COPY --from=image-build /out/ /
