@@ -1,5 +1,12 @@
 # routerd2 開発引き継ぎ
 
+## 開発終了（2026-11-07）
+
+ユーザー指示により開発を終了する。直前のmainは`94e2529`。実HGW・Linux namespace・独立端末での部分的な通信確認はあるが、保存homert02/03の全設定を用いた置換、対象実機での利用・起動・更新の全体受入は完了していない。完成品・置換可能とは扱わない。
+
+この終了記録を最後にcommit/pushし、ホーム直下の`routerd2*`フォルダとファイルを全て削除する。旧worktreeに残る未受入の試験スクリプト・Tailscale診断変更も削除対象とし、mainへ取り込まない。以下は終了前の履歴であり、作業継続の指示ではない。
+
+
 ## 保存homertのHealth設定と旧workerの監視周期
 
 基準main `5d94df7` + Health変更、通常Makefile build `5d94df720549`。旧routerdの`cmd/routerd-healthcheck/main.go`を照合し、既定30秒間隔/3秒timeout・成功1回/失敗3回へ合わせた。probe完了後に毎回intervalを追加していたloopを、旧workerと同じ初回probe＋単一tickerへ変更した。三つのnative例の4 DS-Liteは保存設定の3秒/2秒/各1回、静的gatewayは旧既定を明示する。新しいengineやtest frameworkは追加していない。
